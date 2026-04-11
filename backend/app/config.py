@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
     orthanc_url: str = "http://localhost:48923"
     orthanc_username: str = "orthanc"
-    orthanc_password: str = "orthanc"
+    orthanc_password: str = "CHANGE-ME-IN-PRODUCTION"
     database_url: str = "sqlite+aiosqlite:///./minipacs.db"
     cors_origins: list[str] = ["http://localhost:48920"]
     auto_logout_minutes: int = 15
