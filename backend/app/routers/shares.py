@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 import aiosqlite
 
@@ -230,13 +231,8 @@ async def patient_portal_download(
         patient_token=token, ip_address=request.client.host,
     )
 
-    try:
-        archive = await orthanc.download_study(study_id)
-    except Exception:
-        raise HTTPException(502, "Unable to download study")
-
-    return Response(
-        content=archive,
+    return StreamingResponse(
+        orthanc.download_study_stream(study_id),
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=study-{study_id}.zip"},
     )

@@ -1,0 +1,63 @@
+from fastapi import APIRouter, Depends, HTTPException, Request
+import aiosqlite
+
+from app.database import get_db
+from app.routers.auth import get_current_user
+from app.services.auth import hash_password
+from app.models.auth import LoginRequest
+from app.middleware.audit import log_audit
+
+router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+@router.get("")
+async def list_users(db: aiosqlite.Connection = Depends(get_db), user: dict = Depends(get_current_user)):
+    cursor = await db.execute("SELECT id, username, created_at, last_login FROM users")
+    return [dict(row) for row in await cursor.fetchall()]
+
+
+@router.post("", status_code=201)
+async def create_user(
+    body: LoginRequest,
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    try:
+        cursor = await db.execute(
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            (body.username, hash_password(body.password)),
+        )
+        await db.commit()
+        await log_audit("create_user", "user", str(cursor.lastrowid), user_id=user["id"], ip_address=request.client.host)
+        return {"id": cursor.lastrowid}
+    except Exception:
+        raise HTTPException(409, "Username already exists")
+
+
+@router.delete("/{target_id}")
+async def delete_user(
+    target_id: int,
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    if target_id == user["id"]:
+        raise HTTPException(400, "Cannot delete yourself")
+    await db.execute("DELETE FROM users WHERE id = ?", (target_id,))
+    await db.commit()
+    await log_audit("delete_user", "user", str(target_id), user_id=user["id"], ip_address=request.client.host)
+    return {"status": "ok"}
+
+
+@router.post("/{target_id}/revoke-tokens")
+async def revoke_tokens(
+    target_id: int,
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    await db.execute("UPDATE users SET token_version = token_version + 1 WHERE id = ?", (target_id,))
+    await db.commit()
+    await log_audit("revoke_tokens", "user", str(target_id), user_id=user["id"], ip_address=request.client.host)
+    return {"status": "ok"}

@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     orthanc_username: str = "orthanc"
     orthanc_password: str = "orthanc"
     database_url: str = "sqlite+aiosqlite:///./minipacs.db"
+    cors_origins: list[str] = ["http://localhost:48920"]
     auto_logout_minutes: int = 15
     default_share_expiry_days: int = 30
 

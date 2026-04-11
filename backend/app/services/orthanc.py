@@ -1,136 +1,142 @@
+from typing import AsyncIterator
+
 import httpx
 from app.config import settings
 
-
-def _auth():
-    return (settings.orthanc_username, settings.orthanc_password)
+_client: httpx.AsyncClient | None = None
 
 
-def _url(path: str) -> str:
-    return f"{settings.orthanc_url}{path}"
+async def init_client():
+    global _client
+    _client = httpx.AsyncClient(
+        base_url=settings.orthanc_url,
+        auth=(settings.orthanc_username, settings.orthanc_password),
+        timeout=30,
+    )
 
 
-async def get_patients():
-    async with httpx.AsyncClient() as http:
-        resp = await http.get(_url("/patients?expand"), auth=_auth(), timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+async def close_client():
+    global _client
+    if _client:
+        await _client.aclose()
+        _client = None
+
+
+def _http() -> httpx.AsyncClient:
+    assert _client is not None, "Orthanc client not initialized — call init_client() in lifespan"
+    return _client
+
+
+async def get_patients(limit: int | None = None, since: int | None = None):
+    params = {"expand": ""}
+    if limit is not None:
+        params["limit"] = str(limit)
+    if since is not None:
+        params["since"] = str(since)
+    resp = await _http().get("/patients", params=params)
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def get_patient(patient_id: str):
-    async with httpx.AsyncClient() as http:
-        resp = await http.get(_url(f"/patients/{patient_id}"), auth=_auth(), timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+    resp = await _http().get(f"/patients/{patient_id}")
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def get_patient_studies(patient_id: str):
-    async with httpx.AsyncClient() as http:
-        patient = await get_patient(patient_id)
-        study_ids = patient.get("Studies", [])
-        studies = []
-        for sid in study_ids:
-            r = await http.get(_url(f"/studies/{sid}"), auth=_auth(), timeout=30)
-            r.raise_for_status()
-            studies.append(r.json())
-        return studies
+    patient = await get_patient(patient_id)
+    study_ids = patient.get("Studies", [])
+    studies = []
+    for sid in study_ids:
+        r = await _http().get(f"/studies/{sid}")
+        r.raise_for_status()
+        studies.append(r.json())
+    return studies
 
 
-async def get_studies():
-    async with httpx.AsyncClient() as http:
-        resp = await http.get(_url("/studies?expand"), auth=_auth(), timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+async def get_studies(limit: int | None = None, since: int | None = None):
+    params = {"expand": ""}
+    if limit is not None:
+        params["limit"] = str(limit)
+    if since is not None:
+        params["since"] = str(since)
+    resp = await _http().get("/studies", params=params)
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def get_study(study_id: str):
-    async with httpx.AsyncClient() as http:
-        resp = await http.get(_url(f"/studies/{study_id}"), auth=_auth(), timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+    resp = await _http().get(f"/studies/{study_id}")
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def get_study_series(study_id: str):
-    async with httpx.AsyncClient() as http:
-        study = await get_study(study_id)
-        series_ids = study.get("Series", [])
-        series_list = []
-        for sid in series_ids:
-            r = await http.get(_url(f"/series/{sid}"), auth=_auth(), timeout=30)
-            r.raise_for_status()
-            series_list.append(r.json())
-        return series_list
+    study = await get_study(study_id)
+    series_ids = study.get("Series", [])
+    series_list = []
+    for sid in series_ids:
+        r = await _http().get(f"/series/{sid}")
+        r.raise_for_status()
+        series_list.append(r.json())
+    return series_list
 
 
 async def get_series(series_id: str):
-    async with httpx.AsyncClient() as http:
-        resp = await http.get(_url(f"/series/{series_id}"), auth=_auth(), timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+    resp = await _http().get(f"/series/{series_id}")
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def get_series_instances(series_id: str):
-    async with httpx.AsyncClient() as http:
-        series = await get_series(series_id)
-        instance_ids = series.get("Instances", [])
-        instances = []
-        for iid in instance_ids:
-            r = await http.get(_url(f"/instances/{iid}"), auth=_auth(), timeout=30)
-            r.raise_for_status()
-            instances.append(r.json())
-        return instances
+    series = await get_series(series_id)
+    instance_ids = series.get("Instances", [])
+    instances = []
+    for iid in instance_ids:
+        r = await _http().get(f"/instances/{iid}")
+        r.raise_for_status()
+        instances.append(r.json())
+    return instances
 
 
-async def download_study(study_id: str) -> bytes:
-    async with httpx.AsyncClient() as http:
-        resp = await http.get(
-            _url(f"/studies/{study_id}/archive"),
-            auth=_auth(),
-            timeout=300,
-        )
-        resp.raise_for_status()
-        return resp.content
+async def download_study_stream(study_id: str) -> AsyncIterator[bytes]:
+    req = _http().build_request("GET", f"/studies/{study_id}/archive")
+    resp = await _http().send(req, stream=True)
+    resp.raise_for_status()
+    try:
+        async for chunk in resp.aiter_bytes(chunk_size=65536):
+            yield chunk
+    finally:
+        await resp.aclose()
 
 
 async def send_to_modality(modality_id: str, resource_ids: list[str], synchronous: bool = True):
-    async with httpx.AsyncClient() as http:
-        resp = await http.post(
-            _url(f"/modalities/{modality_id}/store"),
-            json={"Resources": resource_ids, "Synchronous": synchronous},
-            auth=_auth(),
-            timeout=300,
-        )
-        resp.raise_for_status()
-        return resp.json()
+    resp = await _http().post(
+        f"/modalities/{modality_id}/store",
+        json={"Resources": resource_ids, "Synchronous": synchronous},
+        timeout=300,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def echo_modality(modality_id: str) -> bool:
-    async with httpx.AsyncClient() as http:
-        try:
-            resp = await http.post(
-                _url(f"/modalities/{modality_id}/echo"),
-                auth=_auth(),
-                timeout=10,
-            )
-            return resp.status_code == 200
-        except Exception:
-            return False
+    try:
+        resp = await _http().post(f"/modalities/{modality_id}/echo", timeout=10)
+        return resp.status_code == 200
+    except Exception:
+        return False
 
 
 async def register_modality(modality_id: str, aet: str, host: str, port: int):
-    async with httpx.AsyncClient() as http:
-        resp = await http.put(
-            _url(f"/modalities/{modality_id}"),
-            json={"AET": aet, "Host": host, "Port": port},
-            auth=_auth(),
-        )
-        resp.raise_for_status()
+    resp = await _http().put(
+        f"/modalities/{modality_id}",
+        json={"AET": aet, "Host": host, "Port": port},
+    )
+    resp.raise_for_status()
 
 
 async def delete_modality(modality_id: str):
-    async with httpx.AsyncClient() as http:
-        resp = await http.delete(
-            _url(f"/modalities/{modality_id}"),
-            auth=_auth(),
-        )
-        resp.raise_for_status()
+    resp = await _http().delete(f"/modalities/{modality_id}")
+    resp.raise_for_status()
