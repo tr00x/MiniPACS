@@ -95,7 +95,16 @@ async def refresh(body: RefreshRequest, db: aiosqlite.Connection = Depends(get_d
 
 
 @router.post("/logout")
-async def logout(request: Request, user: dict = Depends(get_current_user)):
+async def logout(
+    request: Request,
+    user: dict = Depends(get_current_user),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    await db.execute(
+        "UPDATE users SET token_version = token_version + 1 WHERE id = ?",
+        (user["id"],),
+    )
+    await db.commit()
     await log_audit("logout", user_id=user["id"], ip_address=request.client.host)
     return {"status": "ok"}
 

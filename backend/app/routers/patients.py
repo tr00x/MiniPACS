@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.routers.auth import get_current_user
 from app.services import orthanc
@@ -11,10 +11,12 @@ router = APIRouter(prefix="/api/patients", tags=["patients"])
 async def list_patients(
     request: Request,
     search: str = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user),
 ):
     await log_audit("list_patients", user_id=user["id"], ip_address=request.client.host)
-    patients = await orthanc.get_patients()
+    patients = await orthanc.get_patients(limit=limit, since=offset)
     if search:
         search_lower = search.lower()
         patients = [
