@@ -1,0 +1,88 @@
+import aiosqlite
+from pathlib import Path
+
+DB_PATH = Path(__file__).parent.parent / "minipacs.db"
+
+
+async def get_db():
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    try:
+        yield db
+    finally:
+        await db.close()
+
+
+async def init_db():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                token_version INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                last_login TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS patient_shares (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                orthanc_patient_id TEXT NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                expires_at TEXT,
+                created_by INTEGER REFERENCES users(id),
+                created_at TEXT DEFAULT (datetime('now')),
+                is_active INTEGER DEFAULT 1,
+                view_count INTEGER DEFAULT 0,
+                first_viewed_at TEXT,
+                last_viewed_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS pacs_nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                ae_title TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                port INTEGER NOT NULL,
+                description TEXT,
+                is_active INTEGER DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS transfer_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                orthanc_study_id TEXT NOT NULL,
+                pacs_node_id INTEGER REFERENCES pacs_nodes(id),
+                initiated_by INTEGER REFERENCES users(id),
+                status TEXT DEFAULT 'pending',
+                error_message TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                completed_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                patient_token TEXT,
+                action TEXT NOT NULL,
+                resource_type TEXT,
+                resource_id TEXT,
+                ip_address TEXT,
+                timestamp TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS external_viewers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                icon TEXT,
+                url_scheme TEXT NOT NULL,
+                is_enabled INTEGER DEFAULT 1,
+                sort_order INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT DEFAULT (datetime('now'))
+            );
+        """)
+        await db.commit()
