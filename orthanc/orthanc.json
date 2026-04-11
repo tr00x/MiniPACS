@@ -1,0 +1,71 @@
+{
+  "Name": "MiniPACS",
+
+  "StorageDirectory": "/var/lib/orthanc/db",
+  "IndexDirectory": "/var/lib/orthanc/db",
+  "StorageCompression": true,
+  "MaximumStorageSize": 0,
+  "MaximumPatientCount": 0,
+
+  "DicomServerEnabled": true,
+  "DicomAet": "MINIPACS",
+  "DicomPort": 48924,
+  "DefaultEncoding": "Latin1",
+  "DicomAssociationCloseDelay": 5,
+  "DicomScuTimeout": 30,
+
+  "DicomTlsEnabled": true,
+  "DicomTlsCertificate": "/etc/orthanc/tls/cert.pem",
+  "DicomTlsPrivateKey": "/etc/orthanc/tls/key.pem",
+  "DicomTlsTrustedCertificates": "/etc/orthanc/tls/trusted.pem",
+  "DicomTlsRemoteCertificateRequired": false,
+  "_comment_tls": "Mutual TLS disabled: clinic modalities may not support client certs. Enable when all equipment supports it.",
+
+  "HttpServerEnabled": true,
+  "HttpPort": 48923,
+  "RemoteAccessAllowed": false,
+  "AuthenticationEnabled": true,
+  "RegisteredUsers": {
+    "orthanc": "CHANGE-ME-IN-PRODUCTION"
+  },
+
+  "DicomModalitiesInDatabase": true,
+  "DicomModalities": {},
+
+  "StableAge": 60,
+  "LimitFindResults": 100,
+  "LimitFindInstances": 100,
+  "KeepAlive": true,
+  "HttpTimeout": 60,
+
+  "Plugins": [
+    "/usr/share/orthanc/plugins/libOrthancDicomWeb.so",
+    "/usr/share/orthanc/plugins/libOrthancAuthorization.so",
+    "/usr/share/orthanc/plugins/libOrthancTransfers.so"
+  ],
+
+  "DicomWeb": {
+    "Enable": true,
+    "Root": "/dicom-web/",
+    "EnableWado": true,
+    "WadoRoot": "/wado",
+    "Host": "localhost",
+    "Ssl": false,
+    "StudiesMetadata": "MainDicomTags",
+    "SeriesMetadata": "Full"
+  },
+
+  "Authorization": {
+    "WebServiceRootUrl": "http://localhost:48922",
+    "WebServiceTokenValidation": "http://localhost:48922/api/orthanc/validate",
+    "StandardConfigurations": [
+      "ohif"
+    ],
+    "CheckedLevel": "studies"
+  },
+
+  "Transfers": {
+    "PeerConnectivityTimeout": 15,
+    "MaxHttpRetries": 3
+  }
+}
