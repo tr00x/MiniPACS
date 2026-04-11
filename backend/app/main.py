@@ -7,6 +7,9 @@ from app.database import init_db
 from app.routers.auth import router as auth_router
 from app.routers.patients import router as patients_router
 from app.routers.studies import router as studies_router
+from app.routers.pacs_nodes import router as pacs_nodes_router
+from app.routers.transfers import router as transfers_router
+from app.routers.shares import router as shares_router
 
 
 @asynccontextmanager
@@ -29,6 +32,9 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(patients_router)
 app.include_router(studies_router)
+app.include_router(pacs_nodes_router)
+app.include_router(transfers_router)
+app.include_router(shares_router)
 
 
 @app.get("/api/health")
