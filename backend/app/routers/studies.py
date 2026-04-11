@@ -1,5 +1,4 @@
-import io
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.routers.auth import get_current_user
@@ -12,10 +11,12 @@ router = APIRouter(prefix="/api/studies", tags=["studies"])
 @router.get("")
 async def list_studies(
     request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user),
 ):
     await log_audit("list_studies", user_id=user["id"], ip_address=request.client.host)
-    return await orthanc.get_studies()
+    return await orthanc.get_studies(limit=limit, since=offset)
 
 
 @router.get("/{study_id}")
@@ -50,9 +51,8 @@ async def download_study(
     user: dict = Depends(get_current_user),
 ):
     await log_audit("download_study", "study", study_id, user_id=user["id"], ip_address=request.client.host)
-    data = await orthanc.download_study(study_id)
     return StreamingResponse(
-        io.BytesIO(data),
+        orthanc.download_study_stream(study_id),
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=study-{study_id}.zip"},
     )
