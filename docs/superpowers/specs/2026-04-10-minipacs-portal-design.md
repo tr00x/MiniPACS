@@ -6,6 +6,10 @@ Web portal for a solo clinic that has imaging equipment (MRI, CT, X-ray) but no 
 
 The portal provides a single point of control: store, view, send, and share medical images.
 
+## Development Approach
+
+This is a production-first project. No mock data, no placeholder content, no MVP shortcuts. The project scope is manageable — we build it right from the start. All features work with real DICOM data from Orthanc. All UI states are real states driven by actual data.
+
 ## Architecture
 
 ```
@@ -112,8 +116,11 @@ Minimal — only what Orthanc doesn't store.
 | id            | INTEGER PK |
 | username      | TEXT UNIQUE |
 | password_hash | TEXT     |
+| token_version | INTEGER DEFAULT 0 |
 | created_at    | DATETIME |
 | last_login    | DATETIME |
+
+Incrementing `token_version` invalidates all existing refresh tokens for that user (account compromise, employee termination).
 
 ### patient_shares
 | Column            | Type     |
@@ -128,6 +135,8 @@ Minimal — only what Orthanc doesn't store.
 | view_count        | INTEGER DEFAULT 0 |
 | first_viewed_at   | DATETIME NULL |
 | last_viewed_at    | DATETIME NULL |
+
+Default expiry: 30 days (configurable in settings). Expired tokens return a clear "Link expired, contact the clinic" page — no information leakage. Clinic staff can extend or regenerate links.
 
 ### pacs_nodes
 | Column      | Type     |
@@ -150,6 +159,7 @@ Minimal — only what Orthanc doesn't store.
 | status           | TEXT (pending/success/failed) |
 | error_message    | TEXT NULL |
 | created_at       | DATETIME |
+| completed_at     | DATETIME NULL |
 
 ### audit_log (immutable, 6-year retention)
 | Column        | Type     |
@@ -211,8 +221,10 @@ Minimal — only what Orthanc doesn't store.
 ### Patient Sharing
 - `POST /api/shares` — generate patient link
 - `GET /api/shares` — list active links
+- `PUT /api/shares/{id}` — extend/regenerate link
 - `DELETE /api/shares/{id}` — deactivate link
 - `GET /api/patient-portal/{token}` — public endpoint, patient data by token
+- `GET /api/patient-portal/{token}/studies/{id}/download` — public download for patient
 
 ### Settings
 - `GET /api/settings`
@@ -318,13 +330,16 @@ Every endpoint: auth check + audit_log entry. Patient-portal endpoints: token va
 1. HTTPS everywhere (no HTTP)
 2. AES-256 encrypted storage for Orthanc
 3. Audit log module in FastAPI — every action logged
-4. Automatic logout on inactivity
-5. Patient links — expiring, cryptographically random tokens, logged
-6. bcrypt password hashing
-7. Rate limiting on login (brute force protection)
-8. CORS — portal domain only
-9. JWT tokens with short TTL + refresh
-10. BAA with any external vendor
+4. Audit log integrity: append-only file permissions + periodic export to off-system storage
+5. Automatic logout on inactivity
+6. Patient links — expiring (30 days default), cryptographically random tokens, logged
+7. bcrypt password hashing
+8. Rate limiting on login (brute force protection)
+9. CORS — portal hostname/IP only
+10. JWT tokens with short TTL + refresh, revocable via token_version
+11. BAA with any external vendor
+12. Orthanc HTTP API (:48923) firewalled — accessible only from FastAPI (localhost), not LAN
+13. Backup strategy: daily SQLite + Orthanc storage backups, 30-day retention, offsite copy, quarterly restoration test
 
 ## Deployment (No Docker)
 
