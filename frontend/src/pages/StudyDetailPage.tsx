@@ -87,7 +87,7 @@ export function StudyDetailPage() {
   // Share dialog
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareStep, setShareStep] = useState<"config" | "existing" | "result">("config");
-  const [existingShares, setExistingShares] = useState<Array<{ id: number; token: string; expires_at: string | null; is_active: number; view_count: number; created_at: string }>>([]);
+  const [existingShares, setExistingShares] = useState<Array<{ id: number; token: string; expires_at: string | null; is_active: number; view_count: number; created_at: string; pin?: string }>>([]);
   const [shareLink, setShareLink] = useState("");
   const [shareLinkCopied, setShareLinkCopied] = useState(false);
   const [shareExpiry, setShareExpiry] = useState(30); // days
@@ -624,9 +624,14 @@ export function StudyDetailPage() {
                           {s.view_count > 0 ? `${s.view_count} view${s.view_count > 1 ? "s" : ""}` : "Not viewed"}
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        Created {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                      </p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>Created {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                        {s.pin && (
+                          <span className="flex items-center gap-0.5">
+                            <Lock className="h-3 w-3" /> PIN: {s.pin}
+                          </span>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
