@@ -9,7 +9,9 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Layers } from "lucide-react";
+import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Layers, Lock } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { EXPIRY_PRESETS } from "@/lib/dicom";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import api, { getErrorMessage } from "@/lib/api";
@@ -81,8 +83,11 @@ export function StudyDetailPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Share dialog
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareStep, setShareStep] = useState<"config" | "result">("config");
   const [shareLink, setShareLink] = useState("");
   const [shareLinkCopied, setShareLinkCopied] = useState(false);
+  const [shareExpiry, setShareExpiry] = useState(30); // days
+  const [sharePin, setSharePin] = useState("");
   // Download dialog
   const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
 
@@ -169,19 +174,30 @@ export function StudyDetailPage() {
 
   // handleDownload removed — replaced by handleDownloadConfirm with dialog
 
-  const handleShare = async () => {
+  const openShareDialog = () => {
+    setShareStep("config");
+    setShareLink("");
+    setShareLinkCopied(false);
+    setShareExpiry(30);
+    setSharePin("");
+    setShareDialogOpen(true);
+  };
+
+  const handleShareCreate = async () => {
     if (!study?.ParentPatient) return;
     setSharing(true);
     try {
-      const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const expiresAt = shareExpiry > 0
+        ? new Date(Date.now() + shareExpiry * 24 * 60 * 60 * 1000).toISOString()
+        : null;
       const res = await api.post("/shares", {
         orthanc_patient_id: study.ParentPatient,
-        expires_at: thirtyDaysFromNow,
+        expires_at: expiresAt,
       });
       const token = res.data?.token ?? res.data?.share_token ?? res.data?.id ?? "";
       const portalLink = token ? `${window.location.origin}/patient-portal/${token}` : "";
       setShareLink(portalLink);
-      setShareDialogOpen(true);
+      setShareStep("result");
     } catch (err: unknown) {
       toast.error(getErrorMessage(err, "Failed to create share"));
     } finally {
@@ -282,9 +298,9 @@ export function StudyDetailPage() {
             Send to PACS
           </Button>
           {study?.ParentPatient && (
-            <Button variant="outline" onClick={handleShare} disabled={sharing} className="gap-2">
+            <Button variant="outline" onClick={openShareDialog} className="gap-2">
               <Share2 className="h-4 w-4" />
-              {sharing ? "Creating..." : "Share"}
+              Share
             </Button>
           )}
           <Button variant="outline" onClick={() => setDownloadDialogOpen(true)} disabled={downloading} className="gap-2">
@@ -518,35 +534,105 @@ export function StudyDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Share Dialog — shows link + copy button after share creation */}
+      {/* Share Dialog — config step then result with QR */}
       <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Share with Patient</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              A patient portal link has been created. The patient can view and download their imaging studies using this link.
-            </p>
-            <div className="rounded-md bg-muted p-3 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">Portal Link</p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 text-xs break-all rounded bg-background p-2 border">
-                  {shareLink}
-                </code>
-                <Button variant="outline" size="sm" onClick={copyShareLink} className="shrink-0 gap-1.5">
-                  {shareLinkCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                  {shareLinkCopied ? "Copied" : "Copy"}
-                </Button>
+
+          {shareStep === "config" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Create a patient portal link for viewing and downloading imaging studies.
+              </p>
+
+              {/* Expiry selection */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Link Expiry</label>
+                <div className="flex flex-wrap gap-2">
+                  {EXPIRY_PRESETS.map((p) => (
+                    <Button
+                      key={p.days}
+                      variant={shareExpiry === p.days ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setShareExpiry(p.days)}
+                    >
+                      {p.label}
+                    </Button>
+                  ))}
+                </div>
               </div>
+
+              {/* Optional PIN */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-1.5">
+                  <Lock className="h-3.5 w-3.5" />
+                  PIN Protection (optional)
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="4-6 digit PIN"
+                  value={sharePin}
+                  onChange={(e) => setSharePin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  If set, the patient must enter this PIN to access their records.
+                </p>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setShareDialogOpen(false)}>Cancel</Button>
+                <Button onClick={handleShareCreate} disabled={sharing} className="gap-2">
+                  <Share2 className="h-4 w-4" />
+                  {sharing ? "Creating..." : "Create Link"}
+                </Button>
+              </DialogFooter>
             </div>
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-              This link expires in 30 days. The patient can view studies online and download DICOM files.
+          )}
+
+          {shareStep === "result" && (
+            <div className="space-y-4">
+              {/* QR Code */}
+              {shareLink && (
+                <div className="flex justify-center py-2">
+                  <div className="rounded-lg border bg-white p-3">
+                    <QRCodeSVG value={shareLink} size={180} />
+                  </div>
+                </div>
+              )}
+
+              {/* Link with copy */}
+              <div className="rounded-md bg-muted p-3 space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Portal Link</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs break-all rounded bg-background p-2 border">
+                    {shareLink}
+                  </code>
+                  <Button variant="outline" size="sm" onClick={copyShareLink} className="shrink-0 gap-1.5">
+                    {shareLinkCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    {shareLinkCopied ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Info */}
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200 space-y-1">
+                <p>
+                  {shareExpiry > 0 ? `Expires in ${shareExpiry} days.` : "No expiration set."}
+                  {sharePin ? ` PIN: ${sharePin}` : " No PIN protection."}
+                </p>
+                <p>Patient can view studies online and download DICOM files.</p>
+              </div>
+
+              <DialogFooter>
+                <Button onClick={() => setShareDialogOpen(false)}>Done</Button>
+              </DialogFooter>
             </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setShareDialogOpen(false)}>Done</Button>
-          </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
 
