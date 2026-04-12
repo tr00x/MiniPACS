@@ -596,23 +596,52 @@ export function StudyDetailPage() {
 
           {shareStep === "result" && (
             <div className="space-y-4">
-              {/* QR Code */}
+              {/* QR Code + download */}
               {shareLink && (
-                <div className="flex justify-center py-2">
-                  <div className="rounded-lg border bg-white p-3">
+                <div className="flex flex-col items-center gap-3 py-2">
+                  <div id="share-qr" className="rounded-lg border bg-white p-4">
                     <QRCodeSVG value={shareLink} size={180} />
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => {
+                      const svg = document.querySelector("#share-qr svg");
+                      if (!svg) return;
+                      const canvas = document.createElement("canvas");
+                      canvas.width = 256;
+                      canvas.height = 256;
+                      const ctx = canvas.getContext("2d");
+                      if (!ctx) return;
+                      ctx.fillStyle = "white";
+                      ctx.fillRect(0, 0, 256, 256);
+                      const img = new Image();
+                      const svgData = new XMLSerializer().serializeToString(svg);
+                      img.onload = () => {
+                        ctx.drawImage(img, 28, 28, 200, 200);
+                        const a = document.createElement("a");
+                        a.download = "patient-portal-qr.png";
+                        a.href = canvas.toDataURL("image/png");
+                        a.click();
+                      };
+                      img.src = "data:image/svg+xml;base64," + btoa(svgData);
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Save QR Code
+                  </Button>
                 </div>
               )}
 
-              {/* Link with copy */}
+              {/* Link with copy — fixed width button */}
               <div className="rounded-md bg-muted p-3 space-y-2">
                 <p className="text-xs font-medium text-muted-foreground">Portal Link</p>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs break-all rounded bg-background p-2 border">
+                  <code className="flex-1 text-xs break-all rounded bg-background p-2 border min-w-0">
                     {shareLink}
                   </code>
-                  <Button variant="outline" size="sm" onClick={copyShareLink} className="shrink-0 gap-1.5">
+                  <Button variant="outline" size="sm" onClick={copyShareLink} className="shrink-0 w-[72px] gap-1.5">
                     {shareLinkCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
                     {shareLinkCopied ? "Copied" : "Copy"}
                   </Button>
