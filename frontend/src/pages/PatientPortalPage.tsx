@@ -383,7 +383,7 @@ export function PatientPortalPage() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl flex-1 px-4 sm:px-6 py-5 sm:py-8 space-y-5 sm:space-y-6">
+      <main className={`mx-auto w-full flex-1 py-5 sm:py-8 space-y-5 sm:space-y-6 transition-all ${viewingStudy ? "max-w-6xl px-2 sm:px-4" : "max-w-3xl px-4 sm:px-6"}`}>
         {/* Welcome */}
         <div className="space-y-1">
           <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
