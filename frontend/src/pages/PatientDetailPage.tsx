@@ -493,7 +493,14 @@ Clinton Medical`
         <DialogContent>
           <DialogHeader><DialogTitle>Edit Share Link</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="rounded-lg bg-muted/50 p-3 text-sm space-y-1">
+            {/* Current status */}
+            <div className="rounded-lg bg-muted/50 p-3 text-sm space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Status</span>
+                <Badge variant={editShare?.is_active ? "default" : "secondary"}>
+                  {editShare?.is_active ? "Active" : "Revoked"}
+                </Badge>
+              </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Current expiry</span>
                 <span className="font-medium">{editShare?.expires_at ? formatTimestamp(editShare.expires_at) : "No expiry"}</span>
@@ -502,30 +509,48 @@ Clinton Medical`
                 <span className="text-muted-foreground">Views</span>
                 <span className="font-medium">{editShare?.view_count || 0}</span>
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">PIN</span>
+                <span className="font-medium text-xs">
+                  {(editShare as Record<string, unknown>)?.pin_hash ? "Set" : "Not set"}
+                </span>
+              </div>
             </div>
+
+            {/* Extend expiry */}
             <div className="space-y-2">
-              <Label>Set New Expiry</Label>
+              <Label>Extend Expiry</Label>
               <div className="flex flex-wrap gap-2">
-                {EXPIRY_PRESETS.filter(p => p.days > 0).map((preset) => (
-                  <Button
-                    key={preset.days}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const d = new Date();
-                      d.setDate(d.getDate() + preset.days);
-                      setEditExpiry(d.toISOString().slice(0, 16));
-                    }}
-                  >
-                    {preset.label}
-                  </Button>
-                ))}
-                <Button type="button" variant="outline" size="sm" onClick={() => setEditExpiry("")}>
+                {EXPIRY_PRESETS.filter(p => p.days > 0).map((preset) => {
+                  const target = new Date();
+                  target.setDate(target.getDate() + preset.days);
+                  const label = target.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                  return (
+                    <Button
+                      key={preset.days}
+                      type="button"
+                      variant={editExpiry === target.toISOString().slice(0, 16) ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setEditExpiry(target.toISOString().slice(0, 16))}
+                    >
+                      +{preset.days}d ({label})
+                    </Button>
+                  );
+                })}
+                <Button
+                  type="button"
+                  variant={editExpiry === "" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setEditExpiry("")}
+                >
                   No expiry
                 </Button>
               </div>
-              <Input type="datetime-local" value={editExpiry} onChange={(e) => setEditExpiry(e.target.value)} className="mt-2" />
+              <p className="text-[11px] text-muted-foreground">
+                {editExpiry
+                  ? `New expiry: ${new Date(editExpiry).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`
+                  : "Link will never expire"}
+              </p>
             </div>
           </div>
           {editShareError && <p className="text-sm text-destructive" role="alert">{editShareError}</p>}
@@ -616,11 +641,16 @@ Clinton Medical`
                 return (
                   <div key={s.id} className="flex items-center justify-between gap-4 rounded-lg border p-4">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <Badge variant={status.variant}>{status.label}</Badge>
                         <span className="text-xs text-muted-foreground">
                           {s.view_count > 0 ? `${s.view_count} views` : "Not viewed"}
                         </span>
+                        {(s as Record<string, unknown>).pin_hash && (
+                          <span className="text-xs text-muted-foreground flex items-center gap-0.5">
+                            <Lock className="h-3 w-3" /> PIN
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                         <span>Created {formatTimestamp(s.created_at)}</span>
