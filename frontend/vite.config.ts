@@ -4,6 +4,23 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import fs from "fs";
 
+// Load backend .env for Orthanc credentials
+function loadBackendEnv(): Record<string, string> {
+  const envPath = path.resolve(__dirname, "../backend/.env");
+  const env: Record<string, string> = {};
+  if (fs.existsSync(envPath)) {
+    for (const line of fs.readFileSync(envPath, "utf-8").split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
+        const [k, ...rest] = trimmed.split("=");
+        env[k.trim()] = rest.join("=").trim();
+      }
+    }
+  }
+  return env;
+}
+const backendEnv = loadBackendEnv();
+
 // Serve OHIF static files in dev mode
 function ohifStaticPlugin() {
   const ohifDir = path.resolve(__dirname, "../ohif-dist");
@@ -56,9 +73,9 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/dicom-web": {
-        target: "http://localhost:48923",
+        target: backendEnv.ORTHANC_URL || "http://localhost:48923",
         changeOrigin: true,
-        auth: "orthanc:orthanc",
+        auth: `${backendEnv.ORTHANC_USERNAME || "orthanc"}:${backendEnv.ORTHANC_PASSWORD || "orthanc"}`,
       },
     },
   },
