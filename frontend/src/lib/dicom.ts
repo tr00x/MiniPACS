@@ -100,6 +100,14 @@ export function getModalityColor(modality: string): string {
 }
 
 /** Determine share link status from is_active flag and expires_at timestamp. */
+export const EXPIRY_PRESETS = [
+  { label: "7 days", days: 7 },
+  { label: "14 days", days: 14 },
+  { label: "30 days", days: 30 },
+  { label: "90 days", days: 90 },
+  { label: "No expiry", days: 0 },
+];
+
 export function getShareStatus(share: {
   is_active: boolean | number;
   expires_at: string | null;

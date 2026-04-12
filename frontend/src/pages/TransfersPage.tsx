@@ -231,7 +231,7 @@ export function TransfersPage() {
       </div>
 
       {pendingCount > 0 && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+        <div className="flex items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-sm text-amber-600 dark:text-amber-400">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
           {pendingCount} transfer{pendingCount > 1 ? "s" : ""} in progress — auto-refreshing every 5 seconds
         </div>

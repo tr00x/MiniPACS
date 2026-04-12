@@ -15,10 +15,14 @@ export function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [clinicName, setClinicName] = useState("MiniPACS");
+  const [clinicPhone, setClinicPhone] = useState("");
+  const [clinicEmail, setClinicEmail] = useState("");
 
   useEffect(() => {
     api.get("/settings/public").then(({ data }) => {
       if (data.clinic_name) setClinicName(data.clinic_name);
+      if (data.clinic_phone) setClinicPhone(data.clinic_phone);
+      if (data.clinic_email) setClinicEmail(data.clinic_email);
     }).catch(() => {});
   }, []);
 
@@ -81,6 +85,13 @@ export function LoginPage() {
             This system contains protected health information.
             Unauthorized access is prohibited.
           </p>
+          {(clinicPhone || clinicEmail) && (
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              Need help? {clinicPhone && <span>Call {clinicPhone}</span>}
+              {clinicPhone && clinicEmail && " · "}
+              {clinicEmail && <a href={`mailto:${clinicEmail}`} className="underline">{clinicEmail}</a>}
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

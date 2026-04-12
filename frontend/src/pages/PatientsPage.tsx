@@ -5,10 +5,13 @@ import { Badge } from "@/components/ui/badge";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Search } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
 import { TableSkeleton } from "@/components/TableSkeleton";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
+
+const PAGE_SIZE = 25;
 
 interface Patient {
   ID: string;
@@ -25,6 +28,7 @@ export function PatientsPage() {
   const navigate = useNavigate();
   const [patients, setPatients] = useState<Patient[]>([]);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
@@ -35,6 +39,7 @@ export function PatientsPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     debounceRef.current = setTimeout(() => {
+      setPage(1);
       setLoading(true);
       setError(null);
       api
@@ -60,6 +65,9 @@ export function PatientsPage() {
   const tag = (p: Patient, key: keyof Patient["MainDicomTags"]) =>
     p.MainDicomTags?.[key] || "";
 
+  const totalPages = Math.max(1, Math.ceil(patients.length / PAGE_SIZE));
+  const paginated = patients.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   if (error) {
     return (
       <div className="space-y-4">
@@ -75,7 +83,7 @@ export function PatientsPage() {
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Patients</h2>
           <p className="text-sm text-muted-foreground">
-            {patients.length} patients
+            {patients.length} patient{patients.length !== 1 ? "s" : ""}
           </p>
         </div>
       </div>
@@ -105,7 +113,7 @@ export function PatientsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {patients.map((p) => {
+              {paginated.map((p) => {
                 const rawName = tag(p, "PatientName");
                 const studyCount = p.Studies?.length || 0;
                 return (
@@ -144,6 +152,21 @@ export function PatientsPage() {
             </TableBody>
           </Table>
         </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>
+              Showing {Math.min((page - 1) * PAGE_SIZE + 1, patients.length)}–{Math.min(page * PAGE_SIZE, patients.length)} of {patients.length}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+                <ChevronLeft className="h-4 w-4" /> Prev
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                Next <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
       )}
     </div>
   );

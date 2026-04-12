@@ -159,10 +159,12 @@ export function DashboardPage() {
         )}
       </div>
 
-      <div className="flex gap-3">
-        <Button onClick={() => navigate("/shares")}>Manage Shares</Button>
-        <Button variant="outline" onClick={() => navigate("/transfers")}>View Transfers</Button>
-      </div>
+      {apiStats && (apiStats.patients_total > 0) && (
+        <div className="flex gap-3">
+          <Button onClick={() => navigate("/shares")}>Manage Shares</Button>
+          <Button variant="outline" onClick={() => navigate("/transfers")}>View Transfers</Button>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
