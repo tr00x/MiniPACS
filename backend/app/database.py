@@ -36,7 +36,8 @@ async def init_db():
                 view_count INTEGER DEFAULT 0,
                 first_viewed_at TEXT,
                 last_viewed_at TEXT,
-                pin_hash TEXT
+                pin_hash TEXT,
+                pin TEXT
             );
 
             CREATE TABLE IF NOT EXISTS pacs_nodes (
@@ -98,6 +99,7 @@ async def init_db():
 
         try:
             await db.execute("ALTER TABLE patient_shares ADD COLUMN pin_hash TEXT")
+            await db.execute("ALTER TABLE patient_shares ADD COLUMN pin TEXT")
             await db.commit()
         except Exception:
             pass  # Column already exists

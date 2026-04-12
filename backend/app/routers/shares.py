@@ -63,9 +63,9 @@ async def create_share(
         pin_hash = hash_password(body.pin)
 
     cursor = await db.execute(
-        """INSERT INTO patient_shares (orthanc_patient_id, token, expires_at, created_by, pin_hash)
-           VALUES (?, ?, ?, ?, ?)""",
-        (body.orthanc_patient_id, token, expires_at, user["id"], pin_hash),
+        """INSERT INTO patient_shares (orthanc_patient_id, token, expires_at, created_by, pin_hash, pin)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (body.orthanc_patient_id, token, expires_at, user["id"], pin_hash, body.pin),
     )
     await db.commit()
     share_id = cursor.lastrowid
