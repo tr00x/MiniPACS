@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Download, Eye, EyeOff, Shield, Phone, Mail, Calendar, User, Lock, FileImage, Clock } from "lucide-react";
+import { Download, Eye, EyeOff, Shield, Phone, Mail, Calendar, User, Lock, FileImage, Clock, Maximize, Minimize, ClipboardPaste } from "lucide-react";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import axios from "axios";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
@@ -52,6 +52,8 @@ export function PatientPortalPage() {
   const [clinicSettings, setClinicSettings] = useState<ClinicSettings>({});
   const [viewingStudy, setViewingStudy] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const viewerRef = useRef<HTMLDivElement>(null);
 
   // PIN gate
   const [needsPin, setNeedsPin] = useState<boolean | null>(null);
@@ -153,6 +155,30 @@ export function PatientPortalPage() {
     }
   };
 
+  useEffect(() => {
+    const h = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", h);
+    return () => document.removeEventListener("fullscreenchange", h);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else if (viewerRef.current) {
+      await viewerRef.current.requestFullscreen();
+    }
+  };
+
+  const handlePastePin = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const digits = text.replace(/\D/g, "").slice(0, 6);
+      if (digits) setPinValue(digits);
+    } catch {
+      // clipboard access denied
+    }
+  };
+
   const clinicName = clinicSettings.clinic_name || "Medical Imaging Portal";
 
   if (!token) {
@@ -191,17 +217,33 @@ export function PatientPortalPage() {
                 </div>
 
                 <div className="space-y-3">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={6}
-                    placeholder="- - - -"
-                    value={pinValue}
-                    onChange={(e) => { setPinValue(e.target.value.replace(/\D/g, "")); setPinError(""); }}
-                    onKeyDown={(e) => e.key === "Enter" && handlePinSubmit()}
-                    autoFocus
-                    className="w-full text-center text-3xl tracking-[0.75em] h-16 rounded-xl border-2 border-gray-200 bg-white font-mono focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all placeholder:text-gray-300"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      placeholder="- - - -"
+                      value={pinValue}
+                      onChange={(e) => { setPinValue(e.target.value.replace(/\D/g, "")); setPinError(""); }}
+                      onPaste={(e) => {
+                        e.preventDefault();
+                        const text = e.clipboardData.getData("text");
+                        const digits = text.replace(/\D/g, "").slice(0, 6);
+                        if (digits) { setPinValue(digits); setPinError(""); }
+                      }}
+                      onKeyDown={(e) => e.key === "Enter" && handlePinSubmit()}
+                      autoFocus
+                      className="w-full text-center text-3xl tracking-[0.75em] h-16 rounded-xl border-2 border-gray-200 bg-white font-mono focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all placeholder:text-gray-300"
+                    />
+                    <button
+                      type="button"
+                      onClick={handlePastePin}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-gray-100 transition-colors"
+                      title="Paste from clipboard"
+                    >
+                      <ClipboardPaste className="h-4 w-4" />
+                    </button>
+                  </div>
                   {pinError && (
                     <p className="text-sm text-center text-red-500 font-medium">{pinError}</p>
                   )}
@@ -394,8 +436,8 @@ export function PatientPortalPage() {
                       </div>
                     </div>
 
-                    {/* Buttons — full width on mobile */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
+                    {/* Buttons */}
+                    <div className={`grid gap-2 mt-4 ${isViewing ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
                       {studyInstanceUID && (
                         <Button
                           className="h-12 text-sm rounded-lg"
@@ -407,6 +449,17 @@ export function PatientPortalPage() {
                           ) : (
                             <><Eye className="mr-2 h-4 w-4" /> View Images</>
                           )}
+                        </Button>
+                      )}
+                      {isViewing && (
+                        <Button
+                          className="h-12 text-sm rounded-lg"
+                          variant="outline"
+                          onClick={toggleFullscreen}
+                        >
+                          {isFullscreen
+                            ? <><Minimize className="mr-2 h-4 w-4" /> Exit Fullscreen</>
+                            : <><Maximize className="mr-2 h-4 w-4" /> Fullscreen</>}
                         </Button>
                       )}
                       <Button
@@ -422,8 +475,8 @@ export function PatientPortalPage() {
                   </div>
 
                   {isViewing && studyInstanceUID && (
-                    <div className="border-t bg-black">
-                      <OhifViewer studyInstanceUID={studyInstanceUID} className="h-[300px] sm:h-[450px] lg:h-[600px] w-full" />
+                    <div ref={viewerRef} className="border-t bg-black rounded-b-xl overflow-hidden">
+                      <OhifViewer studyInstanceUID={studyInstanceUID} className={isFullscreen ? "h-screen w-full" : "h-[350px] sm:h-[500px] lg:h-[650px] w-full"} />
                     </div>
                   )}
                 </div>
