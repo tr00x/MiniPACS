@@ -3,7 +3,6 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -13,8 +12,9 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Download, Send, ExternalLink, ArrowLeft, Layers, Info, Copy, Check, Share2 } from "lucide-react";
+import { Download, Send, ExternalLink, ArrowLeft, Layers, Info, Copy, Check, Share2, Eye, EyeOff } from "lucide-react";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
+import { ModalityBadge } from "@/components/ui/modality-badge";
 import api, { getErrorMessage } from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
@@ -78,6 +78,8 @@ export function StudyDetailPage() {
   const [sharing, setSharing] = useState(false);
   const [uidCopied, setUidCopied] = useState(false);
   const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
+  const [showViewer, setShowViewer] = useState(false);
+  const [showMetadata, setShowMetadata] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -209,29 +211,46 @@ export function StudyDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-semibold tracking-tight">
-                {stag("StudyDescription") || "Untitled Study"}
-              </h2>
-              {modality && (
-                <Badge variant="outline" className="font-mono text-xs">
-                  {modality}
-                </Badge>
-              )}
+      {/* Header Row */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="shrink-0" onClick={() => navigate(-1)}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-2xl font-semibold tracking-tight truncate">
+                  {stag("StudyDescription") || "Untitled Study"}
+                </h2>
+                {modality && modality.split("\\").map((m) => (
+                  <ModalityBadge key={m} modality={m} />
+                ))}
+                <span className="text-sm text-muted-foreground">
+                  {formatDicomDate(stag("StudyDate"))}
+                </span>
+              </div>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                {study?.ParentPatient ? (
+                  <Link to={`/patients/${study.ParentPatient}`} className="text-primary hover:underline">
+                    {formatDicomName(ptag("PatientName"))}
+                  </Link>
+                ) : formatDicomName(ptag("PatientName"))}
+                {ptag("PatientID") && (
+                  <> · MRN: <span className="font-medical-id">{ptag("PatientID")}</span></>
+                )}
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              {formatDicomName(ptag("PatientName"))} · MRN: {ptag("PatientID")} · {formatDicomDate(stag("StudyDate"))}
-            </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+          <Button
+            onClick={() => window.open(`/ohif/viewer?StudyInstanceUIDs=${studyUid}`, '_blank')}
+            className="gap-2"
+          >
+            <ExternalLink className="h-4 w-4" />
+            Open Viewer
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setSendDialogOpen(true)}>
             <Send className="mr-2 h-4 w-4" />
             Send to PACS
@@ -239,7 +258,7 @@ export function StudyDetailPage() {
           {study?.ParentPatient && (
             <Button variant="outline" size="sm" onClick={handleShare} disabled={sharing}>
               <Share2 className="mr-2 h-4 w-4" />
-              {sharing ? "Sharing..." : "Share with Patient"}
+              {sharing ? "Sharing..." : "Share"}
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={handleDownload} disabled={downloading}>
@@ -265,107 +284,14 @@ export function StudyDetailPage() {
         </div>
       </div>
 
-      {/* Study Info */}
+      {/* Series Table (always visible, compact) */}
       <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Info className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-sm font-medium">Study Information</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm md:grid-cols-4">
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Patient</dt>
-              <dd className="mt-1 font-medium">
-                {study?.ParentPatient ? (
-                  <Link to={`/patients/${study.ParentPatient}`} className="text-primary hover:underline">
-                    {formatDicomName(ptag("PatientName"))}
-                  </Link>
-                ) : formatDicomName(ptag("PatientName"))}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Medical Record #</dt>
-              <dd className="mt-1">
-                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{ptag("PatientID") || "—"}</code>
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study Date</dt>
-              <dd className="mt-1">{formatDicomDate(stag("StudyDate"))}</dd>
-            </div>
-            {stag("InstitutionName") && (
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Institution</dt>
-                <dd className="mt-1">{stag("InstitutionName")}</dd>
-              </div>
-            )}
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Modality</dt>
-              <dd className="mt-1">
-                {modality ? (
-                  <Badge variant="outline" className="font-mono">{modality}</Badge>
-                ) : "—"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Accession #</dt>
-              <dd className="mt-1">
-                {stag("AccessionNumber") ? (
-                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{stag("AccessionNumber")}</code>
-                ) : "—"}
-              </dd>
-            </div>
-            {stag("ReferringPhysicianName") && (
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Referring Physician</dt>
-                <dd className="mt-1">{formatDicomName(stag("ReferringPhysicianName"))}</dd>
-              </div>
-            )}
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study UID</dt>
-              <dd className="mt-1 flex items-center gap-1">
-                <code className="max-w-[200px] truncate rounded bg-muted px-1.5 py-0.5 text-xs" title={studyUid}>
-                  {studyUid || "—"}
-                </code>
-                {studyUid && (
-                  <Button variant="ghost" size="icon" className="h-5 w-5" onClick={copyUid}>
-                    {uidCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-                  </Button>
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Series</dt>
-              <dd className="mt-1 font-medium">{series.length}</dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Images</dt>
-              <dd className="mt-1 font-medium">{totalInstances}</dd>
-            </div>
-          </dl>
-        </CardContent>
-      </Card>
-
-      {/* OHIF Viewer */}
-      {studyUid && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">DICOM Viewer</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <OhifViewer studyInstanceUID={studyUid} className="h-[600px] w-full rounded-b-lg border-0" />
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Series Table */}
-      <Card>
-        <CardHeader>
+        <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-sm font-medium">Series ({series.length})</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Series ({series.length}) · {totalInstances} images
+            </CardTitle>
           </div>
         </CardHeader>
         <CardContent>
@@ -388,9 +314,7 @@ export function StudyDetailPage() {
                     </TableCell>
                     <TableCell>{s.MainDicomTags?.SeriesDescription || "—"}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="font-mono text-xs">
-                        {s.MainDicomTags?.Modality || "—"}
-                      </Badge>
+                      <ModalityBadge modality={s.MainDicomTags?.Modality || "OT"} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {s.MainDicomTags?.Manufacturer || "—"}
@@ -412,6 +336,129 @@ export function StudyDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Study Metadata (collapsed by default) */}
+      <Card>
+        <CardHeader
+          className="cursor-pointer select-none pb-3"
+          onClick={() => setShowMetadata(!showMetadata)}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Info className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Study Information</CardTitle>
+            </div>
+            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground">
+              {showMetadata ? "Hide" : "Show details"}
+            </Button>
+          </div>
+        </CardHeader>
+        {showMetadata && (
+          <CardContent>
+            <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm md:grid-cols-4">
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Patient</dt>
+                <dd className="mt-1 font-medium">
+                  {study?.ParentPatient ? (
+                    <Link to={`/patients/${study.ParentPatient}`} className="text-primary hover:underline">
+                      {formatDicomName(ptag("PatientName"))}
+                    </Link>
+                  ) : formatDicomName(ptag("PatientName"))}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Medical Record #</dt>
+                <dd className="mt-1">
+                  <code className="font-medical-id rounded bg-muted px-1.5 py-0.5 text-xs">{ptag("PatientID") || "—"}</code>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study Date</dt>
+                <dd className="mt-1">{formatDicomDate(stag("StudyDate"))}</dd>
+              </div>
+              {stag("InstitutionName") && (
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Institution</dt>
+                  <dd className="mt-1">{stag("InstitutionName")}</dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Modality</dt>
+                <dd className="mt-1">
+                  {modality ? (
+                    <div className="flex gap-1 flex-wrap">
+                      {modality.split("\\").map((m) => (
+                        <ModalityBadge key={m} modality={m} />
+                      ))}
+                    </div>
+                  ) : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Accession #</dt>
+                <dd className="mt-1">
+                  {stag("AccessionNumber") ? (
+                    <code className="font-medical-id rounded bg-muted px-1.5 py-0.5 text-xs">{stag("AccessionNumber")}</code>
+                  ) : "—"}
+                </dd>
+              </div>
+              {stag("ReferringPhysicianName") && (
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Referring Physician</dt>
+                  <dd className="mt-1">{formatDicomName(stag("ReferringPhysicianName"))}</dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study UID</dt>
+                <dd className="mt-1 flex items-center gap-1">
+                  <code className="font-medical-id max-w-[200px] truncate rounded bg-muted px-1.5 py-0.5 text-xs" title={studyUid}>
+                    {studyUid || "—"}
+                  </code>
+                  {studyUid && (
+                    <Button variant="ghost" size="icon" className="h-5 w-5" onClick={copyUid}>
+                      {uidCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                    </Button>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Series</dt>
+                <dd className="mt-1 font-medium">{series.length}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Images</dt>
+                <dd className="mt-1 font-medium">{totalInstances}</dd>
+              </div>
+            </dl>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Inline DICOM Viewer (collapsed by default, only loads when expanded) */}
+      {studyUid && (
+        <Card>
+          <CardHeader
+            className="cursor-pointer select-none pb-3"
+            onClick={() => setShowViewer(!showViewer)}
+          >
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium">Inline DICOM Viewer</CardTitle>
+              <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground">
+                {showViewer ? (
+                  <><EyeOff className="h-3.5 w-3.5" /> Hide Viewer</>
+                ) : (
+                  <><Eye className="h-3.5 w-3.5" /> Show Inline Viewer</>
+                )}
+              </Button>
+            </div>
+          </CardHeader>
+          {showViewer && (
+            <CardContent className="p-0">
+              <OhifViewer studyInstanceUID={studyUid} className="h-[600px] w-full rounded-b-lg border-0" />
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {/* Send Dialog */}
       <Dialog open={sendDialogOpen} onOpenChange={(open) => { if (!open) closeSendDialog(); else setSendDialogOpen(true); }}>
@@ -445,7 +492,7 @@ export function StudyDetailPage() {
                   </SelectContent>
                 </Select>
                 {pacsNodes.length === 0 && (
-                  <p className="text-xs text-muted-foreground">No PACS nodes configured. Add one in Settings → PACS Nodes.</p>
+                  <p className="text-xs text-muted-foreground">No PACS nodes configured. Add one in Settings &rarr; PACS Nodes.</p>
                 )}
               </div>
               <DialogFooter>
