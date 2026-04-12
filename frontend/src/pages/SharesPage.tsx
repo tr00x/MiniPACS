@@ -4,9 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import {
@@ -14,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TableSkeleton } from "@/components/TableSkeleton";
-import { Copy, Check, Ban, Share2, Plus, Pencil, CalendarClock, ChevronLeft, ChevronRight, Search, ExternalLink, Printer } from "lucide-react";
+import { Copy, Check, Ban, Share2, Plus, Pencil, CalendarClock, ChevronLeft, ChevronRight, Search, ExternalLink, Printer, Lock, Eye, EyeOff } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -32,6 +29,7 @@ interface Share {
   created_at: string;
   expires_at: string | null;
   created_by_username: string | null;
+  pin: string | null;
 }
 
 interface Patient {
@@ -74,6 +72,9 @@ export function SharesPage() {
   // Success dialog — shows link after creation
   const [createdLink, setCreatedLink] = useState<string | null>(null);
   const [createdLinkCopied, setCreatedLinkCopied] = useState(false);
+
+  // PIN reveal
+  const [revealedPin, setRevealedPin] = useState<number | null>(null);
 
   // Edit dialog
   const [editShare, setEditShare] = useState<Share | null>(null);
@@ -178,7 +179,7 @@ export function SharesPage() {
 
   const openEdit = (s: Share) => {
     setEditShare(s);
-    setEditExpiry(s.expires_at ? s.expires_at.slice(0, 16) : "");
+    setEditExpiry(s.expires_at ? s.expires_at.slice(0, 10) : "");
     setEditError(null);
   };
 
@@ -188,7 +189,7 @@ export function SharesPage() {
     setEditError(null);
     try {
       await api.put(`/shares/${editShare.id}`, {
-        expires_at: editExpiry ? new Date(editExpiry).toISOString() : null,
+        expires_at: editExpiry ? new Date(editExpiry + "T23:59:59").toISOString() : null,
       });
       setEditShare(null);
       toast.success("Share link updated");
@@ -252,103 +253,84 @@ export function SharesPage() {
         <div className="rounded-lg border"><TableSkeleton columns={6} /></div>
       ) : (
         <>
-          <div className="rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50">
-                  <TableHead>Patient</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Views</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-[200px]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginated.map((s) => {
-                  const status = getShareStatus(s);
-                  const patientName = getPatientName(s.orthanc_patient_id) ?? ((s.orthanc_patient_id ?? "").slice(0, 12) + "…");
-                  return (
-                    <TableRow key={s.id}>
-                      <TableCell>
-                        <Link to={`/patients/${s.orthanc_patient_id}`} className="text-primary hover:underline text-sm font-medium">
-                          {patientName}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={status.variant}>{status.label}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className={`font-medium ${s.view_count > 0 ? "" : "text-muted-foreground"}`}>
-                          {s.view_count}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {s.expires_at ? formatTimestamp(s.expires_at) : (
-                          <span className="text-muted-foreground">Never</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatTimestamp(s.created_at)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-1"
-                            onClick={() => copyLink(s)}
-                          >
-                            {copiedId === s.id ? (
-                              <Check className="h-3.5 w-3.5 text-emerald-500" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" />
-                            )}
-                            {copiedId === s.id ? "Copied!" : "Copy Link"}
-                          </Button>
-                          {s.is_active ? (
+          <div className="space-y-2">
+            {paginated.map((s) => {
+              const status = getShareStatus(s);
+              const patientName = getPatientName(s.orthanc_patient_id) ?? ((s.orthanc_patient_id ?? "").slice(0, 12) + "\u2026");
+              return (
+                <div key={s.id} className="flex items-center justify-between gap-4 rounded-lg border p-4 hover:bg-accent/30 transition-colors">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Link to={`/patients/${s.orthanc_patient_id}`} className="font-medium text-primary hover:underline">
+                        {patientName}
+                      </Link>
+                      <Badge variant={status.variant}>{status.label}</Badge>
+                      {s.pin && (
+                        <button
+                          type="button"
+                          onClick={() => setRevealedPin(revealedPin === s.id ? null : s.id)}
+                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                          title={revealedPin === s.id ? "Hide PIN" : "Show PIN"}
+                        >
+                          <Lock className="h-3 w-3" />
+                          {revealedPin === s.id ? (
                             <>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => openEdit(s)}
-                                title="Edit expiry"
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                onClick={() => setRevokeTarget(s.id)}
-                                title="Revoke link"
-                              >
-                                <Ban className="h-3.5 w-3.5" />
-                              </Button>
+                              <span className="font-mono">{s.pin}</span>
+                              <EyeOff className="h-3 w-3 ml-0.5" />
                             </>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {filtered.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                      <Share2 className="mx-auto mb-2 h-8 w-8 opacity-30" />
-                      {search ? "No matching shares found" : "No patient portal links created yet"}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                          ) : (
+                            <>
+                              <span className="font-mono">{"*".repeat(s.pin.length)}</span>
+                              <Eye className="h-3 w-3 ml-0.5" />
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                      <span>{s.view_count > 0 ? `${s.view_count} view${s.view_count === 1 ? "" : "s"}` : "Not viewed"}</span>
+                      <span className="text-muted-foreground/40">&middot;</span>
+                      <span>Created {formatTimestamp(s.created_at)}</span>
+                      <span className="text-muted-foreground/40">&middot;</span>
+                      <span>{s.expires_at ? `Expires ${formatTimestamp(s.expires_at)}` : "No expiry"}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyLink(s)} title="Copy portal link">
+                      {copiedId === s.id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
+                    {s.is_active ? (
+                      <>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(s)} title="Edit expiry">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          onClick={() => setRevokeTarget(s.id)}
+                          title="Revoke link"
+                        >
+                          <Ban className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+            {filtered.length === 0 && (
+              <div className="flex flex-col items-center justify-center rounded-lg border py-12 text-muted-foreground">
+                <Share2 className="mb-2 h-8 w-8 opacity-30" />
+                <p>{search ? "No matching shares found" : "No patient portal links created yet"}</p>
+              </div>
+            )}
           </div>
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between text-sm text-muted-foreground">
               <span>
-                Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+                Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}&ndash;{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
               </span>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
@@ -532,15 +514,24 @@ export function SharesPage() {
               </div>
             )}
             <div className="grid gap-2">
-              <Label>Expiry Date & Time</Label>
-              <Input
-                type="datetime-local"
-                value={editExpiry}
-                onChange={(e) => setEditExpiry(e.target.value)}
-              />
+              <Label>Expiry Date</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="date"
+                  value={editExpiry}
+                  onChange={(e) => setEditExpiry(e.target.value)}
+                  className="flex-1"
+                />
+                {editExpiry && (
+                  <Button variant="outline" size="sm" type="button" onClick={() => setEditExpiry("")}>
+                    Remove expiry
+                  </Button>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
-                Leave empty for no expiry.
-                {editShare?.expires_at ? ` Currently expires: ${formatTimestamp(editShare.expires_at)}` : " Currently: no expiry."}
+                {editExpiry
+                  ? `Link will expire on ${new Date(editExpiry + "T23:59:59").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`
+                  : "No expiry \u2014 link will remain active indefinitely"}
               </p>
             </div>
             <div className="flex items-center gap-2">
