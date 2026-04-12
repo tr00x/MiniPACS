@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Users, FileImage, ArrowRightLeft, Eye, AlertCircle, CheckCircle, XCircle, Clock, Plus } from "lucide-react";
+import { Users, FileImage, ArrowRightLeft, Eye, AlertCircle, CheckCircle, XCircle, Clock, HardDrive, Activity } from "lucide-react";
 import { CardSkeleton } from "@/components/CardSkeleton";
-import { useAuth } from "@/lib/auth";
+import { StatusDot } from "@/components/ui/status-dot";
 import api from "@/lib/api";
 import { formatDicomName, formatTimestamp } from "@/lib/dicom";
 
@@ -16,6 +15,16 @@ interface ApiStats {
   transfers_week: number;
   failed_transfers: number;
   unviewed_shares: number;
+}
+
+interface SystemHealth {
+  orthanc: {
+    status: "online" | "offline";
+    version?: string;
+    storage_size?: string;
+    uptime?: number;
+  };
+  last_received: string | null;
 }
 
 interface Transfer {
@@ -42,10 +51,34 @@ interface Patient {
   MainDicomTags: { PatientName?: string };
 }
 
+function formatUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function formatRelativeTime(dateStr: string): string {
+  // Orthanc dates come as "20260411T220000" — parse manually
+  const clean = dateStr.replace(/T/, " ").replace(/(\d{4})(\d{2})(\d{2}) (\d{2})(\d{2})(\d{2})/, "$1-$2-$3T$4:$5:$6");
+  const date = new Date(clean);
+  if (isNaN(date.getTime())) return dateStr;
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
 export function DashboardPage() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
   const [stats, setStats] = useState<ApiStats | null>(null);
+  const [health, setHealth] = useState<SystemHealth | null>(null);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -53,16 +86,21 @@ export function DashboardPage() {
   const [listsLoading, setListsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const today = new Date().toLocaleDateString("en-US", {
-    weekday: "long", year: "numeric", month: "long", day: "numeric",
-  });
-
   useEffect(() => {
     const ctrl = new AbortController();
     const { signal } = ctrl;
 
-    api.get<ApiStats>("/stats", { signal })
-      .then(({ data }) => setStats(data))
+    // Fetch stats and system health in parallel
+    Promise.all([
+      api.get<ApiStats>("/stats", { signal }),
+      api.get<SystemHealth>("/stats/system-health", { signal }).catch(() => ({
+        data: { orthanc: { status: "offline" as const }, last_received: null },
+      })),
+    ])
+      .then(([statsRes, healthRes]) => {
+        setStats(statsRes.data);
+        setHealth(healthRes.data);
+      })
       .catch((err) => {
         if (err.name !== "CanceledError") setError(err?.response?.data?.detail ?? err.message);
       })
@@ -94,23 +132,43 @@ export function DashboardPage() {
   }
 
   const failedCount = stats?.failed_transfers ?? 0;
+  const orthancStatus = health?.orthanc?.status ?? "offline";
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex items-end justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">
-            Welcome back, {user?.username}
-          </h2>
-          <p className="text-sm text-muted-foreground">{today}</p>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={() => navigate("/shares")} size="sm">
-            <Plus className="mr-1.5 h-3.5 w-3.5" /> New Share
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      {/* System Health Strip */}
+      <Card className="bg-muted/30">
+        <CardContent className="flex items-center gap-6 py-3 px-4">
+          <div className="flex items-center gap-2">
+            <StatusDot status={orthancStatus === "online" ? "online" : "offline"} />
+            <span className="text-sm font-medium">Orthanc PACS</span>
+          </div>
+          {orthancStatus === "online" && health?.orthanc && (
+            <>
+              <div className="h-4 w-px bg-border" />
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <HardDrive className="h-3 w-3" />
+                Storage: {health.orthanc.storage_size}
+              </div>
+              <div className="h-4 w-px bg-border" />
+              <div className="text-xs text-muted-foreground">
+                Last received: {health.last_received ? formatRelativeTime(health.last_received) : "never"}
+              </div>
+              <div className="h-4 w-px bg-border" />
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Activity className="h-3 w-3" />
+                Uptime: {formatUptime(health.orthanc.uptime ?? 0)}
+              </div>
+            </>
+          )}
+          {orthancStatus === "offline" && (
+            <>
+              <div className="h-4 w-px bg-border" />
+              <span className="text-xs text-destructive">PACS server unreachable</span>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Stat Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
