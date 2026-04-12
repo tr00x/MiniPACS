@@ -503,8 +503,8 @@ export function PatientPortalPage() {
                   </div>
 
                   {isViewing && studyInstanceUID && (
-                    <div ref={viewerRef} className="border-t bg-black overflow-hidden -mx-4 sm:-mx-5 rounded-b-xl">
-                      <OhifViewer studyInstanceUID={studyInstanceUID} className={isFullscreen ? "h-screen w-full" : "h-[60vh] sm:h-[70vh] lg:h-[75vh] w-full"} />
+                    <div ref={viewerRef} className="border-t bg-black overflow-hidden -mx-4 sm:-mx-5 rounded-b-xl max-w-[100vw]">
+                      <OhifViewer studyInstanceUID={studyInstanceUID} className={isFullscreen ? "h-screen w-full" : "h-[55vh] sm:h-[65vh] lg:h-[70vh] w-full max-w-full"} />
                     </div>
                   )}
                 </div>

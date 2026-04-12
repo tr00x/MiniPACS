@@ -517,40 +517,26 @@ Clinton Medical`
               </div>
             </div>
 
-            {/* Extend expiry */}
+            {/* New expiry */}
             <div className="space-y-2">
-              <Label>Extend Expiry</Label>
-              <div className="flex flex-wrap gap-2">
-                {EXPIRY_PRESETS.filter(p => p.days > 0).map((preset) => {
-                  const target = new Date();
-                  target.setDate(target.getDate() + preset.days);
-                  const label = target.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                  return (
-                    <Button
-                      key={preset.days}
-                      type="button"
-                      variant={editExpiry === target.toISOString().slice(0, 16) ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setEditExpiry(target.toISOString().slice(0, 16))}
-                    >
-                      +{preset.days}d ({label})
-                    </Button>
-                  );
-                })}
-                <Button
-                  type="button"
-                  variant={editExpiry === "" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setEditExpiry("")}
-                >
-                  No expiry
-                </Button>
+              <Label>New Expiry Date</Label>
+              <Input
+                type="date"
+                value={editExpiry ? editExpiry.slice(0, 10) : ""}
+                onChange={(e) => setEditExpiry(e.target.value ? `${e.target.value}T23:59` : "")}
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-muted-foreground">
+                  {editExpiry
+                    ? `Expires: ${new Date(editExpiry).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}`
+                    : "No expiry — link will remain active indefinitely"}
+                </p>
+                {editExpiry && (
+                  <Button type="button" variant="ghost" size="sm" className="text-xs h-6" onClick={() => setEditExpiry("")}>
+                    Remove expiry
+                  </Button>
+                )}
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                {editExpiry
-                  ? `New expiry: ${new Date(editExpiry).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`
-                  : "Link will never expire"}
-              </p>
             </div>
           </div>
           {editShareError && <p className="text-sm text-destructive" role="alert">{editShareError}</p>}
