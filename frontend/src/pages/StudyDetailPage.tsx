@@ -303,7 +303,7 @@ export function StudyDetailPage() {
             {stag("ReferringPhysicianName") && (
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Referring Physician</dt>
-                <dd className="mt-1">{stag("ReferringPhysicianName")}</dd>
+                <dd className="mt-1">{formatDicomName(stag("ReferringPhysicianName"))}</dd>
               </div>
             )}
             <div>
