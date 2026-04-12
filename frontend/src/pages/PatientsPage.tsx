@@ -101,6 +101,7 @@ export function PatientsPage() {
       {loading ? (
         <div className="rounded-lg border"><TableSkeleton columns={5} /></div>
       ) : (
+        <>
         <div className="rounded-lg border">
           <Table>
             <TableHeader>
@@ -167,7 +168,7 @@ export function PatientsPage() {
             </div>
           </div>
         )}
-      )}
+      </>)}
     </div>
   );
 }
