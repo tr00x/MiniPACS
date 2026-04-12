@@ -16,6 +16,7 @@ import { Plus, Trash2, ShieldOff, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
+import { formatTimestamp } from "@/lib/dicom";
 
 interface User {
   id: number;
@@ -83,12 +84,12 @@ export function SettingsPage() {
     setSaving(true);
     try {
       const payload: Record<string, string | number> = {};
-      if (settings.clinic_name) payload.clinic_name = settings.clinic_name;
-      if (settings.clinic_phone) payload.clinic_phone = settings.clinic_phone;
-      if (settings.clinic_email) payload.clinic_email = settings.clinic_email;
+      if (settings.clinic_name !== undefined) payload.clinic_name = settings.clinic_name;
+      if (settings.clinic_phone !== undefined) payload.clinic_phone = settings.clinic_phone;
+      if (settings.clinic_email !== undefined) payload.clinic_email = settings.clinic_email;
       if (settings.auto_logout_minutes) payload.auto_logout_minutes = Number(settings.auto_logout_minutes);
       if (settings.default_share_expiry_days) payload.default_share_expiry_days = Number(settings.default_share_expiry_days);
-      if (settings.viewer_default) payload.viewer_default = settings.viewer_default;
+      if (settings.viewer_default !== undefined) payload.viewer_default = settings.viewer_default;
       await api.put("/settings", payload);
       toast.success("Settings saved");
     } catch (err: unknown) {
@@ -296,7 +297,7 @@ export function SettingsPage() {
                   {users.map((u) => (
                     <TableRow key={u.id}>
                       <TableCell className="font-medium">{u.username}</TableCell>
-                      <TableCell className="text-xs">{u.created_at}</TableCell>
+                      <TableCell className="text-xs">{formatTimestamp(u.created_at)}</TableCell>
                       <TableCell>{u.token_version}</TableCell>
                       <TableCell>
                         <div className="flex gap-1">

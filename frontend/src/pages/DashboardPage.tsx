@@ -160,7 +160,7 @@ export function DashboardPage() {
       </div>
 
       <div className="flex gap-3">
-        <Button onClick={() => navigate("/shares")}>Create Share Link</Button>
+        <Button onClick={() => navigate("/shares")}>Manage Shares</Button>
         <Button variant="outline" onClick={() => navigate("/transfers")}>View Transfers</Button>
       </div>
 

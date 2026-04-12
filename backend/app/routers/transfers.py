@@ -17,16 +17,27 @@ router = APIRouter(prefix="/api/transfers", tags=["transfers"])
 @router.get("")
 async def list_transfers(
     request: Request,
+    study_id: str = None,
     user: dict = Depends(get_current_user),
     db: aiosqlite.Connection = Depends(get_db),
 ):
     await log_audit("list_transfers", user_id=user["id"], ip_address=request.client.host)
-    cursor = await db.execute(
-        """SELECT t.*, p.name as pacs_node_name, p.ae_title as pacs_node_ae_title
-           FROM transfer_log t
-           LEFT JOIN pacs_nodes p ON t.pacs_node_id = p.id
-           ORDER BY t.created_at DESC""",
-    )
+    if study_id:
+        cursor = await db.execute(
+            """SELECT t.*, p.name as pacs_node_name, p.ae_title as pacs_node_ae_title
+               FROM transfer_log t
+               LEFT JOIN pacs_nodes p ON t.pacs_node_id = p.id
+               WHERE t.orthanc_study_id = ?
+               ORDER BY t.created_at DESC""",
+            (study_id,),
+        )
+    else:
+        cursor = await db.execute(
+            """SELECT t.*, p.name as pacs_node_name, p.ae_title as pacs_node_ae_title
+               FROM transfer_log t
+               LEFT JOIN pacs_nodes p ON t.pacs_node_id = p.id
+               ORDER BY t.created_at DESC""",
+        )
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
 

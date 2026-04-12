@@ -172,6 +172,7 @@ export function PacsNodesPage() {
           <TableSkeleton columns={8} />
         </div>
       ) : (
+        <div className="rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -240,6 +241,7 @@ export function PacsNodesPage() {
             )}
           </TableBody>
         </Table>
+        </div>
       )}
 
       <ConfirmDialog

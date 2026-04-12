@@ -31,6 +31,12 @@ export function Sidebar() {
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (clinicName !== "MiniPACS") {
+      document.title = `${clinicName} Portal`;
+    }
+  }, [clinicName]);
+
   return (
     <aside className="flex h-screen w-64 flex-col border-r bg-background">
       <div className="flex h-14 items-center border-b px-4">
