@@ -11,8 +11,11 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, ShieldOff } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Plus, Trash2, ShieldOff, Pencil } from "lucide-react";
+import { toast } from "sonner";
 import api from "@/lib/api";
+import { PageLoader } from "@/components/PageLoader";
 
 interface User {
   id: number;
@@ -25,6 +28,8 @@ interface Viewer {
   id: number;
   name: string;
   url_scheme: string;
+  icon: string | null;
+  sort_order: number;
   is_enabled: number;
 }
 
@@ -44,8 +49,13 @@ export function SettingsPage() {
 
   // Viewer dialog
   const [viewerDialogOpen, setViewerDialogOpen] = useState(false);
-  const [viewerForm, setViewerForm] = useState({ name: "", url_scheme: "" });
+  const [viewerEditingId, setViewerEditingId] = useState<number | null>(null);
+  const [viewerForm, setViewerForm] = useState({ name: "", url_scheme: "", icon: "", sort_order: "0" });
   const [viewerDialogError, setViewerDialogError] = useState<string | null>(null);
+
+  // Confirm dialogs
+  const [deleteUserId, setDeleteUserId] = useState<number | null>(null);
+  const [deleteViewerId, setDeleteViewerId] = useState<number | null>(null);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -72,7 +82,15 @@ export function SettingsPage() {
   const handleSaveSettings = async () => {
     setSaving(true);
     try {
-      await api.put("/settings", { settings });
+      const payload: Record<string, string | number> = {};
+      if (settings.clinic_name) payload.clinic_name = settings.clinic_name;
+      if (settings.clinic_phone) payload.clinic_phone = settings.clinic_phone;
+      if (settings.clinic_email) payload.clinic_email = settings.clinic_email;
+      if (settings.auto_logout_minutes) payload.auto_logout_minutes = Number(settings.auto_logout_minutes);
+      if (settings.default_share_expiry_days) payload.default_share_expiry_days = Number(settings.default_share_expiry_days);
+      if (settings.viewer_default) payload.viewer_default = settings.viewer_default;
+      await api.put("/settings", payload);
+      toast.success("Settings saved");
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       setError(e?.response?.data?.detail ?? e?.message ?? "Failed to save settings");
@@ -96,13 +114,14 @@ export function SettingsPage() {
   };
 
   const handleDeleteUser = async (id: number) => {
-    if (!confirm("Delete this user?")) return;
     try {
       await api.delete(`/users/${id}`);
       setUsers(users.filter((u) => u.id !== id));
+      setDeleteUserId(null);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       setError(e?.response?.data?.detail ?? e?.message ?? "Failed to delete user");
+      setDeleteUserId(null);
     }
   };
 
@@ -116,26 +135,54 @@ export function SettingsPage() {
     }
   };
 
-  const handleAddViewer = async () => {
+  const handleSaveViewer = async () => {
     setViewerDialogError(null);
+    const payload = {
+      name: viewerForm.name,
+      url_scheme: viewerForm.url_scheme,
+      icon: viewerForm.icon || null,
+      sort_order: Number(viewerForm.sort_order) || 0,
+      is_enabled: true,
+    };
     try {
-      const { data } = await api.post("/viewers", { ...viewerForm, is_enabled: true });
-      setViewers([...viewers, data]);
+      if (viewerEditingId) {
+        await api.put(`/viewers/${viewerEditingId}`, payload);
+        setViewers(viewers.map((v) => v.id === viewerEditingId ? { ...v, ...payload } : v));
+      } else {
+        const { data } = await api.post("/viewers", payload);
+        setViewers([...viewers, data]);
+      }
+      toast.success(viewerEditingId ? "Viewer updated" : "Viewer added");
       setViewerDialogOpen(false);
-      setViewerForm({ name: "", url_scheme: "" });
+      setViewerForm({ name: "", url_scheme: "", icon: "", sort_order: "0" });
+      setViewerEditingId(null);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setViewerDialogError(e?.response?.data?.detail ?? e?.message ?? "Failed to add viewer");
+      setViewerDialogError(e?.response?.data?.detail ?? e?.message ?? "Failed to save viewer");
     }
+  };
+
+  const openEditViewer = (v: Viewer) => {
+    setViewerEditingId(v.id);
+    setViewerForm({
+      name: v.name,
+      url_scheme: v.url_scheme,
+      icon: v.icon || "",
+      sort_order: String(v.sort_order || 0),
+    });
+    setViewerDialogError(null);
+    setViewerDialogOpen(true);
   };
 
   const handleDeleteViewer = async (id: number) => {
     try {
       await api.delete(`/viewers/${id}`);
       setViewers(viewers.filter((v) => v.id !== id));
+      setDeleteViewerId(null);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       setError(e?.response?.data?.detail ?? e?.message ?? "Failed to delete viewer");
+      setDeleteViewerId(null);
     }
   };
 
@@ -149,7 +196,7 @@ export function SettingsPage() {
     }
   };
 
-  if (loading) return <p className="text-muted-foreground">Loading...</p>;
+  if (loading) return <PageLoader />;
   if (error) {
     return (
       <div className="space-y-4">
@@ -176,11 +223,30 @@ export function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-2 max-w-sm">
-                <Label htmlFor="portal_name">Portal Name</Label>
+                <Label htmlFor="clinic_name">Clinic Name</Label>
                 <Input
-                  id="portal_name"
-                  value={settings.portal_name || ""}
-                  onChange={(e) => setSettings({ ...settings, portal_name: e.target.value })}
+                  id="clinic_name"
+                  value={settings.clinic_name || ""}
+                  onChange={(e) => setSettings({ ...settings, clinic_name: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2 max-w-sm">
+                <Label htmlFor="clinic_phone">Clinic Phone</Label>
+                <Input
+                  id="clinic_phone"
+                  value={settings.clinic_phone || ""}
+                  onChange={(e) => setSettings({ ...settings, clinic_phone: e.target.value })}
+                  placeholder="+1 (555) 000-0000"
+                />
+              </div>
+              <div className="grid gap-2 max-w-sm">
+                <Label htmlFor="clinic_email">Clinic Email</Label>
+                <Input
+                  id="clinic_email"
+                  type="email"
+                  value={settings.clinic_email || ""}
+                  onChange={(e) => setSettings({ ...settings, clinic_email: e.target.value })}
+                  placeholder="clinic@example.com"
                 />
               </div>
               <div className="grid gap-2 max-w-sm">
@@ -190,6 +256,15 @@ export function SettingsPage() {
                   type="number"
                   value={settings.auto_logout_minutes || "15"}
                   onChange={(e) => setSettings({ ...settings, auto_logout_minutes: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2 max-w-sm">
+                <Label htmlFor="default_share_expiry">Default Share Expiry (days)</Label>
+                <Input
+                  id="default_share_expiry"
+                  type="number"
+                  value={settings.default_share_expiry_days || "30"}
+                  onChange={(e) => setSettings({ ...settings, default_share_expiry_days: e.target.value })}
                 />
               </div>
               <Button onClick={handleSaveSettings} disabled={saving}>
@@ -228,7 +303,7 @@ export function SettingsPage() {
                           <Button variant="ghost" size="icon" onClick={() => handleRevokeTokens(u.id)} title="Revoke tokens">
                             <ShieldOff className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id)} title="Delete user">
+                          <Button variant="ghost" size="icon" onClick={() => setDeleteUserId(u.id)} title="Delete user">
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </div>
@@ -245,7 +320,7 @@ export function SettingsPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-medium">External Viewers</CardTitle>
-              <Button size="sm" onClick={() => { setViewerDialogOpen(true); setViewerDialogError(null); }}>
+              <Button size="sm" onClick={() => { setViewerEditingId(null); setViewerForm({ name: "", url_scheme: "", icon: "", sort_order: "0" }); setViewerDialogOpen(true); setViewerDialogError(null); }}>
                 <Plus className="mr-1 h-4 w-4" /> Add Viewer
               </Button>
             </CardHeader>
@@ -274,9 +349,14 @@ export function SettingsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="icon" onClick={() => handleDeleteViewer(v.id)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" onClick={() => openEditViewer(v)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => setDeleteViewerId(v.id)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -298,6 +378,7 @@ export function SettingsPage() {
             <div className="grid gap-2">
               <Label htmlFor="new_password">Password</Label>
               <Input id="new_password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" />
+              <p className="text-xs text-muted-foreground">Minimum 8 characters</p>
             </div>
           </div>
           {userDialogError && <p className="text-sm text-destructive" role="alert">{userDialogError}</p>}
@@ -308,9 +389,9 @@ export function SettingsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={viewerDialogOpen} onOpenChange={(open) => { setViewerDialogOpen(open); if (!open) setViewerDialogError(null); }}>
+      <Dialog open={viewerDialogOpen} onOpenChange={(open) => { setViewerDialogOpen(open); if (!open) { setViewerDialogError(null); setViewerEditingId(null); } }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Add External Viewer</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{viewerEditingId ? "Edit External Viewer" : "Add External Viewer"}</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="viewer_name">Name</Label>
@@ -320,14 +401,44 @@ export function SettingsPage() {
               <Label htmlFor="viewer_url">URL Scheme</Label>
               <Input id="viewer_url" value={viewerForm.url_scheme} onChange={(e) => setViewerForm({ ...viewerForm, url_scheme: e.target.value })} placeholder="radiant://..." />
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="viewer_icon">Icon</Label>
+                <Input id="viewer_icon" value={viewerForm.icon} onChange={(e) => setViewerForm({ ...viewerForm, icon: e.target.value })} placeholder="e.g. radiant" />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="viewer_sort">Sort Order</Label>
+                <Input id="viewer_sort" type="number" value={viewerForm.sort_order} onChange={(e) => setViewerForm({ ...viewerForm, sort_order: e.target.value })} />
+              </div>
+            </div>
           </div>
           {viewerDialogError && <p className="text-sm text-destructive" role="alert">{viewerDialogError}</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setViewerDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleAddViewer}>Add</Button>
+            <Button onClick={handleSaveViewer}>{viewerEditingId ? "Update" : "Add"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteUserId !== null}
+        onOpenChange={(open) => { if (!open) setDeleteUserId(null); }}
+        title="Delete User"
+        description="Are you sure you want to delete this user? This action cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={() => { if (deleteUserId !== null) handleDeleteUser(deleteUserId); }}
+      />
+
+      <ConfirmDialog
+        open={deleteViewerId !== null}
+        onOpenChange={(open) => { if (!open) setDeleteViewerId(null); }}
+        title="Delete Viewer"
+        description="Are you sure you want to delete this viewer? This action cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={() => { if (deleteViewerId !== null) handleDeleteViewer(deleteViewerId); }}
+      />
     </div>
   );
 }

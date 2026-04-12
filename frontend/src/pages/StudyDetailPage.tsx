@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,9 +13,12 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Download, Send, ExternalLink, ArrowLeft, Layers, Info, Copy, Check } from "lucide-react";
+import { Download, Send, ExternalLink, ArrowLeft, Layers, Info, Copy, Check, Share2 } from "lucide-react";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
 import api from "@/lib/api";
+import { PageLoader } from "@/components/PageLoader";
+import { formatDicomName, formatDicomDate } from "@/lib/dicom";
+import { toast } from "sonner";
 
 interface StudyData {
   MainDicomTags: {
@@ -23,6 +27,8 @@ interface StudyData {
     ModalitiesInStudy?: string;
     AccessionNumber?: string;
     StudyInstanceUID?: string;
+    InstitutionName?: string;
+    ReferringPhysicianName?: string;
   };
   PatientMainDicomTags?: {
     PatientName?: string;
@@ -38,6 +44,7 @@ interface Series {
     Modality?: string;
     SeriesNumber?: string;
     NumberOfSeriesRelatedInstances?: string;
+    Manufacturer?: string;
   };
 }
 
@@ -54,28 +61,9 @@ interface Viewer {
   is_enabled: boolean;
 }
 
-function formatDicomName(raw: string): string {
-  if (!raw) return "Unknown";
-  const parts = raw.split("^");
-  const last = parts[0] || "";
-  const first = parts[1] || "";
-  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-  if (first && last) return `${cap(first)} ${cap(last)}`;
-  return cap(last || first);
-}
-
-function formatDicomDate(raw: string): string {
-  if (!raw || raw.length !== 8) return raw || "—";
-  const y = raw.slice(0, 4);
-  const m = parseInt(raw.slice(4, 6), 10) - 1;
-  const d = parseInt(raw.slice(6, 8), 10);
-  return new Date(parseInt(y), m, d).toLocaleDateString("en-US", {
-    year: "numeric", month: "short", day: "numeric",
-  });
-}
-
 export function StudyDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [study, setStudy] = useState<StudyData | null>(null);
   const [series, setSeries] = useState<Series[]>([]);
   const [pacsNodes, setPacsNodes] = useState<PacsNode[]>([]);
@@ -87,6 +75,7 @@ export function StudyDetailPage() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [uidCopied, setUidCopied] = useState(false);
 
   useEffect(() => {
@@ -127,6 +116,8 @@ export function StudyDetailPage() {
     setSendError(null);
     try {
       await api.post("/transfers", { orthanc_study_id: id, pacs_node_id: Number(selectedNode) });
+      const nodeName = pacsNodes.find((n) => String(n.id) === selectedNode)?.name || "PACS";
+      toast.success(`Study sent to ${nodeName}`);
       setSendDialogOpen(false);
       setSelectedNode("");
     } catch (err: unknown) {
@@ -147,11 +138,41 @@ export function StudyDetailPage() {
       a.download = `study-${id}.zip`;
       a.click();
       URL.revokeObjectURL(url);
+      toast.success("Download started");
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       setError(e?.response?.data?.detail ?? e?.message ?? "Failed to download study");
     } finally {
       setDownloading(false);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!study?.ParentPatient) return;
+    setSharing(true);
+    try {
+      const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const res = await api.post("/shares", {
+        orthanc_patient_id: study.ParentPatient,
+        expires_at: thirtyDaysFromNow,
+      });
+      const token = res.data?.token ?? res.data?.share_token ?? res.data?.id ?? "";
+      const portalLink = token
+        ? `${window.location.origin}/patient-portal/${token}`
+        : "";
+      if (portalLink) {
+        await navigator.clipboard.writeText(portalLink);
+        toast.success("Portal link copied to clipboard", {
+          description: portalLink,
+        });
+      } else {
+        toast.success("Share created successfully");
+      }
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to create share");
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -163,7 +184,7 @@ export function StudyDetailPage() {
 
   const studyUid = stag("StudyInstanceUID");
 
-  if (loading) return <p className="text-muted-foreground">Loading...</p>;
+  if (loading) return <PageLoader />;
   if (error) return <p className="text-destructive" role="alert">Error: {error}</p>;
   if (!study) return <p className="text-muted-foreground">Study not found</p>;
 
@@ -177,10 +198,8 @@ export function StudyDetailPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild>
-            <Link to="/studies">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+            <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
             <div className="flex items-center gap-3">
@@ -203,6 +222,12 @@ export function StudyDetailPage() {
             <Send className="mr-2 h-4 w-4" />
             Send to PACS
           </Button>
+          {study?.ParentPatient && (
+            <Button variant="outline" size="sm" onClick={handleShare} disabled={sharing}>
+              <Share2 className="mr-2 h-4 w-4" />
+              {sharing ? "Sharing..." : "Share with Patient"}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={handleDownload} disabled={downloading}>
             <Download className="mr-2 h-4 w-4" />
             {downloading ? "Downloading..." : "Download"}
@@ -238,7 +263,13 @@ export function StudyDetailPage() {
           <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm md:grid-cols-4">
             <div>
               <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Patient</dt>
-              <dd className="mt-1 font-medium">{formatDicomName(ptag("PatientName"))}</dd>
+              <dd className="mt-1 font-medium">
+                {study?.ParentPatient ? (
+                  <Link to={`/patients/${study.ParentPatient}`} className="text-primary hover:underline">
+                    {formatDicomName(ptag("PatientName"))}
+                  </Link>
+                ) : formatDicomName(ptag("PatientName"))}
+              </dd>
             </div>
             <div>
               <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Medical Record #</dt>
@@ -250,6 +281,12 @@ export function StudyDetailPage() {
               <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study Date</dt>
               <dd className="mt-1">{formatDicomDate(stag("StudyDate"))}</dd>
             </div>
+            {stag("InstitutionName") && (
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Institution</dt>
+                <dd className="mt-1">{stag("InstitutionName")}</dd>
+              </div>
+            )}
             <div>
               <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Modality</dt>
               <dd className="mt-1">
@@ -266,6 +303,12 @@ export function StudyDetailPage() {
                 ) : "—"}
               </dd>
             </div>
+            {stag("ReferringPhysicianName") && (
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Referring Physician</dt>
+                <dd className="mt-1">{stag("ReferringPhysicianName")}</dd>
+              </div>
+            )}
             <div>
               <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study UID</dt>
               <dd className="mt-1 flex items-center gap-1">
@@ -319,6 +362,7 @@ export function StudyDetailPage() {
                   <TableHead className="w-[60px]">#</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Modality</TableHead>
+                  <TableHead>Manufacturer</TableHead>
                   <TableHead className="text-right">Images</TableHead>
                 </TableRow>
               </TableHeader>
@@ -334,6 +378,9 @@ export function StudyDetailPage() {
                         {s.MainDicomTags?.Modality || "—"}
                       </Badge>
                     </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {s.MainDicomTags?.Manufacturer || "—"}
+                    </TableCell>
                     <TableCell className="text-right font-medium">
                       {s.MainDicomTags?.NumberOfSeriesRelatedInstances || "0"}
                     </TableCell>
@@ -341,7 +388,7 @@ export function StudyDetailPage() {
                 ))}
                 {series.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={4} className="h-16 text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="h-16 text-center text-muted-foreground">
                       No series in this study
                     </TableCell>
                   </TableRow>

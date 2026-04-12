@@ -1,12 +1,19 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { FileImage, Layers } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileImage, Layers } from "lucide-react";
 import api from "@/lib/api";
+import { formatDicomName, formatDicomDate, getModalityColor } from "@/lib/dicom";
+import { TableSkeleton } from "@/components/TableSkeleton";
 
 interface Study {
   ID: string;
@@ -16,6 +23,8 @@ interface Study {
     StudyDescription?: string;
     ModalitiesInStudy?: string;
     AccessionNumber?: string;
+    InstitutionName?: string;
+    ReferringPhysicianName?: string;
   };
   PatientMainDicomTags?: {
     PatientName?: string;
@@ -24,41 +33,23 @@ interface Study {
   Series?: string[];
 }
 
-function formatDicomName(raw: string): string {
-  if (!raw) return "—";
-  const parts = raw.split("^");
-  const last = parts[0] || "";
-  const first = parts[1] || "";
-  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-  if (first && last) return `${cap(first)} ${cap(last)}`;
-  return cap(last || first);
-}
-
-function formatDicomDate(raw: string): string {
-  if (!raw || raw.length !== 8) return raw || "—";
-  const y = raw.slice(0, 4);
-  const m = parseInt(raw.slice(4, 6), 10) - 1;
-  const d = parseInt(raw.slice(6, 8), 10);
-  return new Date(parseInt(y), m, d).toLocaleDateString("en-US", {
-    year: "numeric", month: "short", day: "numeric",
-  });
-}
-
-const modalityColors: Record<string, string> = {
-  CT: "bg-blue-500/10 text-blue-700 border-blue-200",
-  MR: "bg-violet-500/10 text-violet-700 border-violet-200",
-  CR: "bg-amber-500/10 text-amber-700 border-amber-200",
-  DX: "bg-amber-500/10 text-amber-700 border-amber-200",
-  US: "bg-emerald-500/10 text-emerald-700 border-emerald-200",
-  NM: "bg-rose-500/10 text-rose-700 border-rose-200",
-  PT: "bg-pink-500/10 text-pink-700 border-pink-200",
-  XA: "bg-cyan-500/10 text-cyan-700 border-cyan-200",
-};
+const PAGE_SIZE = 25;
 
 export function StudiesPage() {
+  const navigate = useNavigate();
   const [studies, setStudies] = useState<Study[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [selectedModality, setSelectedModality] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
+
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -73,6 +64,30 @@ export function StudiesPage() {
       .finally(() => setLoading(false));
     return () => ctrl.abort();
   }, []);
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      setDebouncedQuery(value);
+      setPage(1);
+    }, 300);
+  };
+
+  const handleModalityChange = (value: string) => {
+    setSelectedModality(value);
+    setPage(1);
+  };
+
+  const handleDateFromChange = (value: string) => {
+    setDateFrom(value);
+    setPage(1);
+  };
+
+  const handleDateToChange = (value: string) => {
+    setDateTo(value);
+    setPage(1);
+  };
 
   const tag = (s: Study, key: keyof Study["MainDicomTags"]) =>
     s.MainDicomTags?.[key] || "";
@@ -90,6 +105,45 @@ export function StudiesPage() {
   }
 
   const totalSeries = studies.reduce((sum, s) => sum + (s.Series?.length || 0), 0);
+
+  // Derive unique modalities
+  const modalities = Array.from(
+    new Set(studies.map((s) => tag(s, "ModalitiesInStudy")).filter(Boolean))
+  ).sort();
+
+  // Client-side filtering
+  const filtered = studies.filter((s) => {
+    if (debouncedQuery) {
+      const q = debouncedQuery.toLowerCase();
+      const name = formatDicomName(ptag(s, "PatientName")).toLowerCase();
+      const desc = tag(s, "StudyDescription").toLowerCase();
+      const pid = ptag(s, "PatientID").toLowerCase();
+      const institution = tag(s, "InstitutionName").toLowerCase();
+      if (!name.includes(q) && !desc.includes(q) && !pid.includes(q) && !institution.includes(q)) return false;
+    }
+    if (selectedModality !== "all") {
+      if (tag(s, "ModalitiesInStudy") !== selectedModality) return false;
+    }
+    if (dateFrom) {
+      const studyDate = tag(s, "StudyDate");
+      // DICOM date is YYYYMMDD, input date is YYYY-MM-DD
+      const studyDateNorm = studyDate.replace(/-/g, "");
+      const fromNorm = dateFrom.replace(/-/g, "");
+      if (studyDateNorm && studyDateNorm < fromNorm) return false;
+    }
+    if (dateTo) {
+      const studyDate = tag(s, "StudyDate");
+      const studyDateNorm = studyDate.replace(/-/g, "");
+      const toNorm = dateTo.replace(/-/g, "");
+      if (studyDateNorm && studyDateNorm > toNorm) return false;
+    }
+    return true;
+  });
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <div className="space-y-6">
@@ -125,8 +179,45 @@ export function StudiesPage() {
         </Card>
       </div>
 
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3">
+        <Input
+          placeholder="Search by patient name, description..."
+          value={searchQuery}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          className="max-w-xs"
+        />
+        <Select value={selectedModality} onValueChange={handleModalityChange}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="All Modalities" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Modalities</SelectItem>
+            {modalities.map((m) => (
+              <SelectItem key={m} value={m}>{m}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => handleDateFromChange(e.target.value)}
+          className="w-[160px]"
+          title="Date from"
+        />
+        <Input
+          type="date"
+          value={dateTo}
+          onChange={(e) => handleDateToChange(e.target.value)}
+          className="w-[160px]"
+          title="Date to"
+        />
+      </div>
+
       {loading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <div className="rounded-lg border">
+          <TableSkeleton columns={6} />
+        </div>
       ) : (
         <div className="rounded-lg border">
           <Table>
@@ -141,66 +232,88 @@ export function StudiesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {studies.map((s) => {
+              {paginated.map((s) => {
                 const mod = tag(s, "ModalitiesInStudy");
-                const modClass = modalityColors[mod] || "";
+                const modClass = getModalityColor(mod);
                 return (
-                  <TableRow key={s.ID} className="cursor-pointer hover:bg-accent/50">
-                    <TableCell>
-                      <Link to={`/studies/${s.ID}`} className="block w-full font-medium">
-                        {formatDicomDate(tag(s, "StudyDate"))}
-                      </Link>
+                  <TableRow key={s.ID} className="cursor-pointer hover:bg-accent/50" onClick={() => navigate(`/studies/${s.ID}`)}>
+                    <TableCell className="font-medium">
+                      {formatDicomDate(tag(s, "StudyDate"))}
                     </TableCell>
                     <TableCell>
-                      <Link to={`/studies/${s.ID}`} className="block w-full">
-                        <div>
-                          <span className="font-medium">{formatDicomName(ptag(s, "PatientName"))}</span>
-                          <span className="ml-2 text-xs text-muted-foreground">{ptag(s, "PatientID")}</span>
-                        </div>
-                      </Link>
+                      <div>
+                        <span
+                          className="font-medium text-primary hover:underline cursor-pointer"
+                          onClick={(e) => { e.stopPropagation(); navigate(`/patients/${s.ParentPatient}`); }}
+                        >
+                          {formatDicomName(ptag(s, "PatientName"))}
+                        </span>
+                        <span className="ml-2 text-xs text-muted-foreground">{ptag(s, "PatientID")}</span>
+                      </div>
                     </TableCell>
                     <TableCell>
-                      <Link to={`/studies/${s.ID}`} className="block w-full">
-                        {tag(s, "StudyDescription") || "—"}
-                      </Link>
+                      {tag(s, "StudyDescription") || "—"}
                     </TableCell>
                     <TableCell>
-                      <Link to={`/studies/${s.ID}`} className="block w-full">
-                        {mod ? (
-                          <Badge variant="outline" className={`font-mono text-xs ${modClass}`}>
-                            {mod}
-                          </Badge>
-                        ) : "—"}
-                      </Link>
+                      {mod ? (
+                        <Badge variant="outline" className={`font-mono text-xs ${modClass}`}>
+                          {mod}
+                        </Badge>
+                      ) : "—"}
                     </TableCell>
                     <TableCell>
-                      <Link to={`/studies/${s.ID}`} className="block w-full">
-                        {tag(s, "AccessionNumber") ? (
-                          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                            {tag(s, "AccessionNumber")}
-                          </code>
-                        ) : "—"}
-                      </Link>
+                      {tag(s, "AccessionNumber") ? (
+                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                          {tag(s, "AccessionNumber")}
+                        </code>
+                      ) : "—"}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Link to={`/studies/${s.ID}`} className="block w-full">
-                        <Badge variant="secondary" className="text-xs">
+                      <Badge variant="secondary" className="text-xs">
                           {s.Series?.length || 0}
                         </Badge>
-                      </Link>
                     </TableCell>
                   </TableRow>
                 );
               })}
-              {studies.length === 0 && (
+              {filtered.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                    No imaging studies in the system
+                    {studies.length === 0 ? "No imaging studies in the system" : "No studies match the current filters"}
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
+
+          {/* Pagination */}
+          {filtered.length > 0 && (
+            <div className="flex items-center justify-between border-t px-4 py-3">
+              <p className="text-sm text-muted-foreground">
+                Page {currentPage} of {totalPages} ({filtered.length} studies)
+              </p>
+              <div className="flex gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

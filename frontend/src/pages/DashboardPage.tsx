@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { FileImage, Users, AlertCircle, Eye } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { FileImage, Users, ArrowLeftRight, Eye } from "lucide-react";
+import { CardSkeleton } from "@/components/CardSkeleton";
+import { useAuth } from "@/lib/auth";
 import api from "@/lib/api";
+
+interface ApiStats {
+  patients_total: number;
+  studies_today: number;
+  transfers_week: number;
+  unviewed_shares: number;
+}
 
 interface Transfer {
   id: number;
@@ -16,38 +27,52 @@ interface Share {
   view_count: number;
 }
 
-interface Stats {
-  totalPatients: number;
-  totalStudies: number;
-  recentTransfers: Transfer[];
-  activeShares: Share[];
-}
-
 export function DashboardPage() {
-  const [stats, setStats] = useState<Stats | null>(null);
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [apiStats, setApiStats] = useState<ApiStats | null>(null);
+  const [recentTransfers, setRecentTransfers] = useState<Transfer[]>([]);
+  const [activeShares, setActiveShares] = useState<Share[]>([]);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [listsLoading, setListsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
 
-    Promise.all([
-      api.get("/patients", { signal }),
-      api.get("/studies", { signal }),
-      api.get("/transfers", { signal }),
-      api.get("/shares", { signal }),
-    ])
-      .then(([patients, studies, transfers, shares]) => {
-        setStats({
-          totalPatients: patients.data.length,
-          totalStudies: studies.data.length,
-          recentTransfers: transfers.data.slice(0, 5),
-          activeShares: shares.data.filter((s: Share) => s.is_active),
-        });
+    api
+      .get<ApiStats>("/stats", { signal })
+      .then(({ data }) => {
+        setApiStats(data);
+        setStatsLoading(false);
       })
       .catch((err) => {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
-          setError(err?.response?.data?.detail ?? err.message ?? "Failed to load dashboard data");
+          setError(err?.response?.data?.detail ?? err.message ?? "Failed to load stats");
+          setStatsLoading(false);
+        }
+      });
+
+    Promise.all([
+      api.get<Transfer[]>("/transfers", { signal }),
+      api.get<Share[]>("/shares", { signal }),
+    ])
+      .then(([transfersRes, sharesRes]) => {
+        setRecentTransfers(transfersRes.data.slice(0, 5));
+        setActiveShares(sharesRes.data.filter((s) => s.is_active));
+        setListsLoading(false);
+      })
+      .catch((err) => {
+        if (err.name !== "CanceledError" && err.name !== "AbortError") {
+          setListsLoading(false);
         }
       });
 
@@ -64,74 +89,109 @@ export function DashboardPage() {
     );
   }
 
-  if (!stats) return <div className="text-muted-foreground">Loading...</div>;
-
-  const failedTransfers = stats.recentTransfers.filter((t) => t.status === "failed");
-  const unviewedShares = stats.activeShares.filter((s) => s.view_count === 0);
-
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight">Dashboard</h2>
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">
+          Welcome back, {user?.username}
+        </h2>
+        <p className="text-sm text-muted-foreground">{today}</p>
+      </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Patients</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalPatients}</div>
-          </CardContent>
-        </Card>
+        {statsLoading ? (
+          <>
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+          </>
+        ) : (
+          <>
+            <Link to="/patients" className="block">
+              <Card className="cursor-pointer transition-colors hover:bg-accent/50">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Patients</CardTitle>
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{apiStats?.patients_total ?? 0}</div>
+                </CardContent>
+              </Card>
+            </Link>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Studies</CardTitle>
-            <FileImage className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalStudies}</div>
-          </CardContent>
-        </Card>
+            <Link to="/studies" className="block">
+              <Card className="cursor-pointer transition-colors hover:bg-accent/50">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Studies Today</CardTitle>
+                  <FileImage className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{apiStats?.studies_today ?? 0}</div>
+                </CardContent>
+              </Card>
+            </Link>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Failed Transfers</CardTitle>
-            <AlertCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{failedTransfers.length}</div>
-          </CardContent>
-        </Card>
+            <Link to="/transfers" className="block">
+              <Card className="cursor-pointer transition-colors hover:bg-accent/50">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Transfers This Week</CardTitle>
+                  <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{apiStats?.transfers_week ?? 0}</div>
+                </CardContent>
+              </Card>
+            </Link>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Unviewed Shares</CardTitle>
-            <Eye className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{unviewedShares.length}</div>
-          </CardContent>
-        </Card>
+            <Link to="/shares" className="block">
+              <Card className="cursor-pointer transition-colors hover:bg-accent/50">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Unviewed Shares</CardTitle>
+                  <Eye className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{apiStats?.unviewed_shares ?? 0}</div>
+                </CardContent>
+              </Card>
+            </Link>
+          </>
+        )}
+      </div>
+
+      <div className="flex gap-3">
+        <Button onClick={() => navigate("/shares")}>Create Share Link</Button>
+        <Button variant="outline" onClick={() => navigate("/transfers")}>View Transfers</Button>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium">Recent Transfers</CardTitle>
+            <Link to="/transfers" className="text-xs text-muted-foreground hover:text-foreground">View all</Link>
           </CardHeader>
           <CardContent>
-            {stats.recentTransfers.length === 0 ? (
+            {listsLoading ? (
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-7 rounded bg-muted animate-pulse" />
+                ))}
+              </div>
+            ) : recentTransfers.length === 0 ? (
               <p className="text-sm text-muted-foreground">No transfers yet</p>
             ) : (
               <div className="space-y-2">
-                {stats.recentTransfers.map((t) => (
-                  <div key={t.id} className="flex items-center justify-between text-sm">
+                {recentTransfers.map((t) => (
+                  <Link
+                    key={t.id}
+                    to="/transfers"
+                    className="flex items-center justify-between text-sm rounded-md px-2 py-1 -mx-2 hover:bg-accent/50"
+                  >
                     <span>{t.pacs_name}</span>
                     <span className={t.status === "failed" ? "text-destructive" : "text-muted-foreground"}>
                       {t.status}
                     </span>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}
@@ -139,21 +199,30 @@ export function DashboardPage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium">Active Patient Shares</CardTitle>
+            <Link to="/shares" className="text-xs text-muted-foreground hover:text-foreground">View all</Link>
           </CardHeader>
           <CardContent>
-            {stats.activeShares.length === 0 ? (
+            {listsLoading ? (
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-7 rounded bg-muted animate-pulse" />
+                ))}
+              </div>
+            ) : activeShares.length === 0 ? (
               <p className="text-sm text-muted-foreground">No active shares</p>
             ) : (
               <div className="space-y-2">
-                {stats.activeShares.slice(0, 5).map((s) => (
-                  <div key={s.id} className="flex items-center justify-between text-sm">
+                {activeShares.slice(0, 5).map((s) => (
+                  <Link
+                    key={s.id}
+                    to="/shares"
+                    className="flex items-center justify-between text-sm rounded-md px-2 py-1 -mx-2 hover:bg-accent/50"
+                  >
                     <span className="font-mono text-xs">{(s.token ?? "").slice(0, 12)}...</span>
-                    <span className="text-muted-foreground">
-                      {s.view_count} views
-                    </span>
-                  </div>
+                    <span className="text-muted-foreground">{s.view_count} views</span>
+                  </Link>
                 ))}
               </div>
             )}

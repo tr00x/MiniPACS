@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { AuthContext, type User } from "@/lib/auth";
 import api from "@/lib/api";
 
-const INACTIVITY_TIMEOUT = 15 * 60 * 1000; // 15 minutes
+const DEFAULT_INACTIVITY_TIMEOUT = 15 * 60 * 1000; // 15 minutes
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [inactivityTimeout, setInactivityTimeout] = useState(DEFAULT_INACTIVITY_TIMEOUT);
 
   const logout = useCallback(() => {
     const token = localStorage.getItem("access_token");
@@ -26,7 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let timer: ReturnType<typeof setTimeout>;
     const reset = () => {
       clearTimeout(timer);
-      timer = setTimeout(logout, INACTIVITY_TIMEOUT);
+      timer = setTimeout(logout, inactivityTimeout);
     };
     const events = ["mousedown", "keydown", "scroll", "touchstart"];
     events.forEach((e) => window.addEventListener(e, reset));
@@ -35,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(timer);
       events.forEach((e) => window.removeEventListener(e, reset));
     };
-  }, [user, logout]);
+  }, [user, logout, inactivityTimeout]);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,7 +44,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (token) {
       api
         .get("/auth/me")
-        .then(({ data }) => { if (!cancelled) setUser(data); })
+        .then(async ({ data }) => {
+          if (!cancelled) {
+            setUser(data);
+            try {
+              const { data: settings } = await api.get("/settings");
+              const minutes = parseInt(settings.auto_logout_minutes, 10);
+              if (!cancelled && !isNaN(minutes) && minutes > 0) {
+                setInactivityTimeout(minutes * 60 * 1000);
+              }
+            } catch {
+              // fallback to default
+            }
+          }
+        })
         .catch(() => {
           if (!cancelled) {
             localStorage.removeItem("access_token");
@@ -63,6 +77,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("refresh_token", data.refresh_token);
     const { data: me } = await api.get("/auth/me");
     setUser(me);
+    try {
+      const { data: settings } = await api.get("/settings");
+      const minutes = parseInt(settings.auto_logout_minutes, 10);
+      if (!isNaN(minutes) && minutes > 0) {
+        setInactivityTimeout(minutes * 60 * 1000);
+      }
+    } catch {
+      // fallback to default
+    }
   };
 
   if (loading) return null;

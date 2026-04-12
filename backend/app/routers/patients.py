@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.routers.auth import get_current_user
 from app.services import orthanc
@@ -33,7 +33,9 @@ async def get_patient(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    await log_audit("view_patient", "patient", patient_id, user_id=user["id"], ip_address=request.client.host)
     patient = await orthanc.get_patient(patient_id)
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    await log_audit("view_patient", "patient", patient_id, user_id=user["id"], ip_address=request.client.host)
     studies = await orthanc.get_patient_studies(patient_id)
     return {"patient": patient, "studies": studies}

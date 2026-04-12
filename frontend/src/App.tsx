@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Toaster } from "sonner";
 import { AuthProvider } from "@/providers/AuthProvider";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -13,28 +15,33 @@ import { PacsNodesPage } from "@/pages/PacsNodesPage";
 import { AuditPage } from "@/pages/AuditPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { PatientPortalPage } from "@/pages/PatientPortalPage";
+import { NotFoundPage } from "@/pages/NotFoundPage";
 
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/patient-portal/:token" element={<PatientPortalPage />} />
-          <Route element={<AppLayout />}>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/patients" element={<PatientsPage />} />
-            <Route path="/patients/:id" element={<PatientDetailPage />} />
-            <Route path="/studies" element={<StudiesPage />} />
-            <Route path="/studies/:id" element={<StudyDetailPage />} />
-            <Route path="/transfers" element={<TransfersPage />} />
-            <Route path="/shares" element={<SharesPage />} />
-            <Route path="/pacs-nodes" element={<PacsNodesPage />} />
-            <Route path="/audit" element={<AuditPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Route>
-        </Routes>
-      </AuthProvider>
+      <ErrorBoundary>
+        <AuthProvider>
+          <Toaster position="top-right" richColors />
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/patient-portal/:token" element={<PatientPortalPage />} />
+            <Route element={<AppLayout />}>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/patients" element={<PatientsPage />} />
+              <Route path="/patients/:id" element={<PatientDetailPage />} />
+              <Route path="/studies" element={<StudiesPage />} />
+              <Route path="/studies/:id" element={<StudyDetailPage />} />
+              <Route path="/transfers" element={<TransfersPage />} />
+              <Route path="/shares" element={<SharesPage />} />
+              <Route path="/pacs-nodes" element={<PacsNodesPage />} />
+              <Route path="/audit" element={<AuditPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Route>
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </AuthProvider>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

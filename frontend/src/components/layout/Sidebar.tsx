@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, FileImage, Send, Share2,
@@ -6,6 +7,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import api from "@/lib/api";
 
 const nav = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
@@ -21,11 +23,18 @@ const nav = [
 export function Sidebar() {
   const location = useLocation();
   const { logout, user } = useAuth();
+  const [clinicName, setClinicName] = useState("MiniPACS");
+
+  useEffect(() => {
+    api.get("/settings/public").then(({ data }) => {
+      if (data.clinic_name) setClinicName(data.clinic_name);
+    }).catch(() => {});
+  }, []);
 
   return (
     <aside className="flex h-screen w-64 flex-col border-r bg-background">
       <div className="flex h-14 items-center border-b px-4">
-        <h1 className="text-lg font-semibold tracking-tight">MiniPACS</h1>
+        <h1 className="text-lg font-semibold tracking-tight">{clinicName}</h1>
       </div>
       <nav className="flex-1 space-y-1 p-2">
         {nav.map(({ to, icon: Icon, label }) => (
@@ -35,7 +44,7 @@ export function Sidebar() {
             asChild
             className={cn(
               "w-full justify-start gap-2",
-              location.pathname === to && "bg-accent"
+              (to === "/" ? location.pathname === "/" : location.pathname.startsWith(to)) && "bg-accent"
             )}
           >
             <Link to={to}>
