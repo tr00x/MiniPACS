@@ -12,7 +12,9 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Layers, Lock, Shuffle, Mail } from "lucide-react";
+import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Layers, Lock, Shuffle, Mail, FileText, Plus, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { QRCodeSVG } from "qrcode.react";
 import { EXPIRY_PRESETS } from "@/lib/dicom";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
@@ -95,6 +97,18 @@ export function StudyDetailPage() {
   const [sharePin, setSharePin] = useState("");
   // Download dialog
   const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  // Reports
+  const [reports, setReports] = useState<Array<{
+    id: number; title: string; report_type: string; content: string;
+    filename: string | null; created_by_username: string | null; created_at: string;
+  }>>([]);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [reportType, setReportType] = useState<"text" | "pdf">("text");
+  const [reportTitle, setReportTitle] = useState("");
+  const [reportContent, setReportContent] = useState("");
+  const [reportFile, setReportFile] = useState<File | null>(null);
+  const [savingReport, setSavingReport] = useState(false);
+  const [viewingReport, setViewingReport] = useState<number | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -112,6 +126,8 @@ export function StudyDetailPage() {
         setSeries(studyRes.data.series);
         setPacsNodes(nodesRes.data);
         setViewers(viewersRes.data.filter((v: Viewer) => v.is_enabled));
+        // Fetch reports for this study
+        api.get("/reports", { params: { study_id: id } }).then(({ data }) => setReports(data)).catch(() => {});
       })
       .catch((err) => {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
@@ -276,6 +292,40 @@ export function StudyDetailPage() {
     }
   };
 
+  const handleCreateReport = async () => {
+    setSavingReport(true);
+    try {
+      let content = reportContent;
+      let filename: string | null = null;
+      if (reportType === "pdf" && reportFile) {
+        const reader = new FileReader();
+        content = await new Promise<string>((resolve) => {
+          reader.onload = () => resolve((reader.result as string).split(",")[1]);
+          reader.readAsDataURL(reportFile);
+        });
+        filename = reportFile.name;
+      }
+      await api.post("/reports", {
+        orthanc_study_id: id,
+        title: reportTitle,
+        report_type: reportType,
+        content,
+        filename,
+      });
+      const { data } = await api.get("/reports", { params: { study_id: id } });
+      setReports(data);
+      setReportDialogOpen(false);
+      setReportTitle("");
+      setReportContent("");
+      setReportFile(null);
+      toast.success("Report added");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to save report"));
+    } finally {
+      setSavingReport(false);
+    }
+  };
+
   const studyUid = stag("StudyInstanceUID");
 
   if (loading) return <PageLoader />;
@@ -424,6 +474,71 @@ export function StudyDetailPage() {
               );
             })}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Reports */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">
+              Reports ({reports.length})
+            </CardTitle>
+          </div>
+          <Button size="sm" onClick={() => { setReportDialogOpen(true); setReportType("text"); setReportTitle(""); setReportContent(""); setReportFile(null); }}>
+            <Plus className="mr-1 h-4 w-4" /> Add Report
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {reports.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">No reports yet</p>
+          ) : (
+            <div className="space-y-2">
+              {reports.map((r) => (
+                <div key={r.id} className="rounded-lg border p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {r.report_type === "pdf" ? <FileText className="h-4 w-4 text-red-500" /> : <FileText className="h-4 w-4 text-blue-500" />}
+                      <span className="font-medium text-sm">{r.title}</span>
+                      <Badge variant="outline" className="text-[10px]">{r.report_type.toUpperCase()}</Badge>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {r.created_by_username || "System"} · {new Date(r.created_at + "Z").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </span>
+                      <Button variant="ghost" size="sm" onClick={() => setViewingReport(viewingReport === r.id ? null : r.id)}>
+                        {viewingReport === r.id ? "Hide" : "View"}
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={async () => {
+                        try { await api.delete(`/reports/${r.id}`); setReports(reports.filter(rr => rr.id !== r.id)); toast.success("Report deleted"); } catch { toast.error("Failed to delete"); }
+                      }}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  {viewingReport === r.id && (
+                    <div className="mt-3 pt-3 border-t">
+                      {r.report_type === "text" ? (
+                        <div className="prose prose-sm max-w-none text-sm whitespace-pre-wrap">{r.content}</div>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">File: {r.filename}</p>
+                          <Button variant="outline" size="sm" onClick={() => {
+                            const blob = new Blob([Uint8Array.from(atob(r.content), c => c.charCodeAt(0))], { type: "application/pdf" });
+                            const url = URL.createObjectURL(blob);
+                            window.open(url, "_blank");
+                          }}>
+                            Open PDF
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -854,6 +969,49 @@ Clinton Medical`
             <Button onClick={handleDownloadConfirm} className="gap-2">
               <Download className="h-4 w-4" />
               Download ZIP
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Add Report Dialog */}
+      <Dialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Add Report</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Button variant={reportType === "text" ? "default" : "outline"} size="sm" onClick={() => setReportType("text")}>Text Report</Button>
+              <Button variant={reportType === "pdf" ? "default" : "outline"} size="sm" onClick={() => setReportType("pdf")}>Upload PDF</Button>
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Title</label>
+              <Input value={reportTitle} onChange={(e) => setReportTitle(e.target.value)} placeholder="e.g. Radiology Report, Second Opinion" />
+            </div>
+            {reportType === "text" ? (
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Report Content</label>
+                <textarea
+                  value={reportContent}
+                  onChange={(e) => setReportContent(e.target.value)}
+                  placeholder="Enter or paste the radiology report text..."
+                  className="w-full min-h-[200px] rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
+                />
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label className="text-sm font-medium">PDF File</label>
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={(e) => setReportFile(e.target.files?.[0] || null)}
+                  className="w-full text-sm file:mr-4 file:rounded-md file:border-0 file:bg-primary file:px-4 file:py-2 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90"
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReportDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreateReport} disabled={savingReport || !reportTitle || (reportType === "text" ? !reportContent : !reportFile)}>
+              {savingReport ? "Saving..." : "Save Report"}
             </Button>
           </DialogFooter>
         </DialogContent>
