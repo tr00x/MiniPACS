@@ -26,7 +26,7 @@
   "RemoteAccessAllowed": false,
   "AuthenticationEnabled": true,
   "RegisteredUsers": {
-    "orthanc": "CHANGE-ME-IN-PRODUCTION"
+    "$ORTHANC_USERNAME": "$ORTHANC_PASSWORD"
   },
 
   "DicomModalitiesInDatabase": true,

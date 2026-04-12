@@ -18,3 +18,5 @@ Thumbs.db
 .worktrees/
 ohif-source/
 ohif-dist/
+orthanc/orthanc-runtime.json
+nginx/nginx-runtime.conf
