@@ -136,7 +136,7 @@ Incrementing `token_version` invalidates all existing refresh tokens for that us
 | first_viewed_at   | DATETIME NULL |
 | last_viewed_at    | DATETIME NULL |
 
-Default expiry: 30 days (configurable in settings). Expired tokens return a clear "Link expired, contact the clinic" page — no information leakage. Clinic staff can extend or regenerate links.
+Expiry is set by the operator at creation time (1 day, 7 days, 30 days, custom date, or no expiry). Expired tokens return a clear "Link expired, contact the clinic" page — no information leakage. Clinic staff can extend, shorten, revoke, or regenerate links from the Shares management page. The Shares page shows all links (active/expired/revoked) with filters, view_count, last_viewed_at, and quick actions.
 
 ### pacs_nodes
 | Column      | Type     |

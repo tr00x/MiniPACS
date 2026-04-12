@@ -1,3 +1,4 @@
+import asyncio
 from typing import AsyncIterator
 
 import httpx
@@ -43,19 +44,51 @@ async def get_patients(limit: int | None = None, since: int | None = None):
 
 async def get_patient(patient_id: str):
     resp = await _http().get(f"/patients/{patient_id}")
+    if resp.status_code == 404:
+        return None
     resp.raise_for_status()
     return resp.json()
 
 
 async def get_patient_studies(patient_id: str):
     patient = await get_patient(patient_id)
+    if patient is None:
+        return []
     study_ids = patient.get("Studies", [])
-    studies = []
-    for sid in study_ids:
+
+    async def fetch_study(sid: str):
         r = await _http().get(f"/studies/{sid}")
         r.raise_for_status()
-        studies.append(r.json())
-    return studies
+        return r.json()
+
+    studies = list(await asyncio.gather(*[fetch_study(sid) for sid in study_ids]))
+    return await _enrich_study_modalities(studies)
+
+
+async def _enrich_study_modalities(studies: list) -> list:
+    """Add ModalitiesInStudy from series-level Modality if not present at study level."""
+    async def enrich(study: dict) -> dict:
+        tags = study.get("MainDicomTags", {})
+        if tags.get("ModalitiesInStudy"):
+            return study
+        series_ids = study.get("Series", [])
+        if not series_ids:
+            return study
+        modalities = set()
+        for sid in series_ids:
+            try:
+                r = await _http().get(f"/series/{sid}")
+                if r.status_code == 200:
+                    mod = r.json().get("MainDicomTags", {}).get("Modality")
+                    if mod:
+                        modalities.add(mod)
+            except Exception:
+                pass
+        if modalities:
+            tags["ModalitiesInStudy"] = "\\".join(sorted(modalities))
+        return study
+
+    return list(await asyncio.gather(*[enrich(s) for s in studies]))
 
 
 async def get_studies(limit: int | None = None, since: int | None = None):
@@ -67,26 +100,32 @@ async def get_studies(limit: int | None = None, since: int | None = None):
     try:
         resp = await _http().get("/studies", params=params)
         resp.raise_for_status()
-        return resp.json()
+        studies = resp.json()
+        return await _enrich_study_modalities(studies)
     except (httpx.ConnectError, httpx.ConnectTimeout):
         return []
 
 
 async def get_study(study_id: str):
     resp = await _http().get(f"/studies/{study_id}")
+    if resp.status_code == 404:
+        return None
     resp.raise_for_status()
     return resp.json()
 
 
 async def get_study_series(study_id: str):
     study = await get_study(study_id)
+    if study is None:
+        return []
     series_ids = study.get("Series", [])
-    series_list = []
-    for sid in series_ids:
+
+    async def fetch_series(sid: str):
         r = await _http().get(f"/series/{sid}")
         r.raise_for_status()
-        series_list.append(r.json())
-    return series_list
+        return r.json()
+
+    return await asyncio.gather(*[fetch_series(sid) for sid in series_ids])
 
 
 async def get_series(series_id: str):

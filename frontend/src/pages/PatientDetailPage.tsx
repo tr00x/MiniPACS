@@ -6,8 +6,23 @@ import { Badge } from "@/components/ui/badge";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Eye, FileImage, Share2, ArrowLeft, Copy, Check } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Eye, FileImage, Share2, ArrowLeft, Copy, Check, Plus, Pencil, Ban, CalendarClock, ArrowRightLeft } from "lucide-react";
 import api from "@/lib/api";
+import { PageLoader } from "@/components/PageLoader";
+import { formatDicomName, formatDicomDate, formatTimestamp, calculateAge, getShareStatus } from "@/lib/dicom";
+
+const EXPIRY_PRESETS = [
+  { label: "7 days", days: 7 },
+  { label: "14 days", days: 14 },
+  { label: "30 days", days: 30 },
+  { label: "90 days", days: 90 },
+  { label: "No expiry", days: 0 },
+];
 
 interface PatientData {
   MainDicomTags: {
@@ -26,6 +41,7 @@ interface Study {
     ModalitiesInStudy?: string;
     AccessionNumber?: string;
     StudyInstanceUID?: string;
+    InstitutionName?: string;
   };
 }
 
@@ -41,55 +57,12 @@ interface Share {
   expires_at: string | null;
 }
 
-function formatDicomName(raw: string): string {
-  if (!raw) return "Unknown Patient";
-  const parts = raw.split("^");
-  const last = parts[0] || "";
-  const first = parts[1] || "";
-  const capitalize = (s: string) =>
-    s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-  if (first && last) return `${capitalize(first)} ${capitalize(last)}`;
-  return capitalize(last || first);
-}
-
-function formatDicomDate(raw: string): string {
-  if (!raw || raw.length !== 8) return raw || "—";
-  const y = raw.slice(0, 4);
-  const m = parseInt(raw.slice(4, 6), 10) - 1;
-  const d = parseInt(raw.slice(6, 8), 10);
-  return new Date(parseInt(y), m, d).toLocaleDateString("en-US", {
-    year: "numeric", month: "short", day: "numeric",
-  });
-}
-
-function formatTimestamp(raw: string | null): string {
-  if (!raw) return "—";
-  const d = new Date(raw);
-  return d.toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-    hour: "numeric", minute: "2-digit",
-  });
-}
-
-function calculateAge(birthDate: string): string {
-  if (!birthDate || birthDate.length !== 8) return "";
-  const y = parseInt(birthDate.slice(0, 4));
-  const m = parseInt(birthDate.slice(4, 6)) - 1;
-  const d = parseInt(birthDate.slice(6, 8));
-  const birth = new Date(y, m, d);
-  const now = new Date();
-  let age = now.getFullYear() - birth.getFullYear();
-  if (now.getMonth() < birth.getMonth() ||
-    (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate())) {
-    age--;
-  }
-  return `${age} yrs`;
-}
-
-function getShareStatus(s: Share): { label: string; variant: "default" | "secondary" | "destructive" } {
-  if (!s.is_active) return { label: "Revoked", variant: "secondary" };
-  if (s.expires_at && new Date(s.expires_at) < new Date()) return { label: "Expired", variant: "destructive" };
-  return { label: "Active", variant: "default" };
+interface Transfer {
+  id: number;
+  orthanc_study_id: string;
+  pacs_node_name: string | null;
+  status: string;
+  created_at: string;
 }
 
 export function PatientDetailPage() {
@@ -97,9 +70,22 @@ export function PatientDetailPage() {
   const [patient, setPatient] = useState<PatientData | null>(null);
   const [studies, setStudies] = useState<Study[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
+  const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<number | null>(null);
+
+  // Share management
+  const [createShareOpen, setCreateShareOpen] = useState(false);
+  const [expiryPreset, setExpiryPreset] = useState("30");
+  const [customExpiry, setCustomExpiry] = useState("");
+  const [creatingShare, setCreatingShare] = useState(false);
+  const [createShareError, setCreateShareError] = useState<string | null>(null);
+  const [editShare, setEditShare] = useState<Share | null>(null);
+  const [editExpiry, setEditExpiry] = useState("");
+  const [savingShare, setSavingShare] = useState(false);
+  const [editShareError, setEditShareError] = useState<string | null>(null);
+  const [revokingShare, setRevokingShare] = useState<number | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -110,11 +96,15 @@ export function PatientDetailPage() {
     Promise.all([
       api.get(`/patients/${id}`, { signal: ctrl.signal }),
       api.get("/shares", { params: { patient_id: id }, signal: ctrl.signal }),
+      api.get("/transfers", { signal: ctrl.signal }),
     ])
-      .then(([patientRes, sharesRes]) => {
+      .then(([patientRes, sharesRes, transfersRes]) => {
         setPatient(patientRes.data.patient);
-        setStudies(patientRes.data.studies);
+        const patientStudies: Study[] = patientRes.data.studies;
+        setStudies(patientStudies);
         setShares(sharesRes.data);
+        const studyIds = new Set(patientStudies.map((s: Study) => s.ID));
+        setTransfers(transfersRes.data.filter((t: Transfer) => studyIds.has(t.orthanc_study_id)));
       })
       .catch((err) => {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
@@ -137,13 +127,72 @@ export function PatientDetailPage() {
     s.MainDicomTags?.[key] || "";
 
   const copyToken = (shareId: number, token: string) => {
-    navigator.clipboard.writeText(token);
+    const url = `${window.location.origin}/patient-portal/${token}`;
+    navigator.clipboard.writeText(url);
     setCopiedToken(shareId);
     setTimeout(() => setCopiedToken(null), 2000);
   };
 
+  const handleCreateShare = async () => {
+    if (!id) return;
+    setCreatingShare(true);
+    setCreateShareError(null);
+    let expires_at: string | null = null;
+    const days = parseInt(expiryPreset);
+    if (days > 0) {
+      const d = new Date();
+      d.setDate(d.getDate() + days);
+      expires_at = d.toISOString();
+    } else if (expiryPreset === "custom" && customExpiry) {
+      expires_at = new Date(customExpiry).toISOString();
+    }
+    try {
+      const { data } = await api.post("/shares", { orthanc_patient_id: id, expires_at });
+      setShares([data, ...shares]);
+      setCreateShareOpen(false);
+      setExpiryPreset("30");
+      setCustomExpiry("");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setCreateShareError(e?.response?.data?.detail ?? e?.message ?? "Failed to create share");
+    } finally {
+      setCreatingShare(false);
+    }
+  };
+
+  const handleEditShare = async () => {
+    if (!editShare) return;
+    setSavingShare(true);
+    setEditShareError(null);
+    try {
+      await api.put(`/shares/${editShare.id}`, {
+        expires_at: editExpiry ? new Date(editExpiry).toISOString() : null,
+      });
+      setShares(shares.map((s) => s.id === editShare.id ? { ...s, expires_at: editExpiry ? new Date(editExpiry).toISOString() : null } : s));
+      setEditShare(null);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setEditShareError(e?.response?.data?.detail ?? e?.message ?? "Failed to update share");
+    } finally {
+      setSavingShare(false);
+    }
+  };
+
+  const handleRevokeShare = async (shareId: number) => {
+    setRevokingShare(shareId);
+    try {
+      await api.delete(`/shares/${shareId}`);
+      setShares(shares.map((s) => s.id === shareId ? { ...s, is_active: false } : s));
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to revoke share");
+    } finally {
+      setRevokingShare(null);
+    }
+  };
+
   if (loading) {
-    return <p className="text-muted-foreground">Loading...</p>;
+    return <PageLoader />;
   }
 
   if (error) {
@@ -226,6 +275,7 @@ export function PatientDetailPage() {
                 <TableRow className="bg-muted/50">
                   <TableHead>Date</TableHead>
                   <TableHead>Description</TableHead>
+                  <TableHead>Institution</TableHead>
                   <TableHead>Modality</TableHead>
                   <TableHead>Accession #</TableHead>
                   <TableHead className="w-[80px]">View</TableHead>
@@ -238,6 +288,9 @@ export function PatientDetailPage() {
                       {formatDicomDate(stag(s, "StudyDate"))}
                     </TableCell>
                     <TableCell>{stag(s, "StudyDescription") || "—"}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {stag(s, "InstitutionName") || "—"}
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="font-mono text-xs">
                         {stag(s, "ModalitiesInStudy") || "—"}
@@ -261,7 +314,7 @@ export function PatientDetailPage() {
                 ))}
                 {studies.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-16 text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="h-16 text-center text-muted-foreground">
                       No imaging studies on file
                     </TableCell>
                   </TableRow>
@@ -272,6 +325,120 @@ export function PatientDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Create Share Dialog */}
+      <Dialog open={createShareOpen} onOpenChange={(open) => { setCreateShareOpen(open); if (!open) setCreateShareError(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Create Patient Portal Link</DialogTitle></DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Link Expiry</Label>
+              <div className="flex flex-wrap gap-2">
+                {EXPIRY_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.days}
+                    type="button"
+                    variant={expiryPreset === String(preset.days) ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => { setExpiryPreset(String(preset.days)); setCustomExpiry(""); }}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+                <Button
+                  type="button"
+                  variant={expiryPreset === "custom" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setExpiryPreset("custom")}
+                >
+                  <CalendarClock className="mr-1 h-3 w-3" />
+                  Custom
+                </Button>
+              </div>
+              {expiryPreset === "custom" && (
+                <Input type="datetime-local" value={customExpiry} onChange={(e) => setCustomExpiry(e.target.value)} className="mt-2" />
+              )}
+            </div>
+          </div>
+          {createShareError && <p className="text-sm text-destructive" role="alert">{createShareError}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateShareOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreateShare} disabled={creatingShare}>
+              {creatingShare ? "Creating..." : "Create Link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Share Dialog */}
+      <Dialog open={!!editShare} onOpenChange={(open) => { if (!open) { setEditShare(null); setEditShareError(null); } }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Share Link</DialogTitle></DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Expiry Date & Time</Label>
+              <Input type="datetime-local" value={editExpiry} onChange={(e) => setEditExpiry(e.target.value)} />
+              <p className="text-xs text-muted-foreground">
+                Leave empty for no expiry. Current: {editShare?.expires_at ? formatTimestamp(editShare.expires_at) : "No expiry"}
+              </p>
+            </div>
+          </div>
+          {editShareError && <p className="text-sm text-destructive" role="alert">{editShareError}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditShare(null)}>Cancel</Button>
+            <Button onClick={handleEditShare} disabled={savingShare}>
+              {savingShare ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer History */}
+      {transfers.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">
+                Transfer History ({transfers.length})
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead>Study</TableHead>
+                    <TableHead>Destination</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {transfers.map((t) => {
+                    const study = studies.find((s) => s.ID === t.orthanc_study_id);
+                    return (
+                      <TableRow key={t.id}>
+                        <TableCell className="text-sm">
+                          {study ? (study.MainDicomTags?.StudyDescription || "Untitled") : t.orthanc_study_id.slice(0, 12)}
+                        </TableCell>
+                        <TableCell className="text-sm">{t.pacs_node_name || "—"}</TableCell>
+                        <TableCell>
+                          <Badge variant={t.status === "success" ? "default" : t.status === "failed" ? "destructive" : "secondary"}>
+                            {t.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs">{formatTimestamp(t.created_at)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Shares */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
@@ -281,6 +448,9 @@ export function PatientDetailPage() {
               Patient Portal Links ({shares.length})
             </CardTitle>
           </div>
+          <Button size="sm" onClick={() => { setCreateShareOpen(true); setCreateShareError(null); }}>
+            <Plus className="mr-1 h-4 w-4" /> Create Link
+          </Button>
         </CardHeader>
         <CardContent>
           {shares.length === 0 ? (
@@ -299,6 +469,7 @@ export function PatientDetailPage() {
                     <TableHead>Last Viewed</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Expires</TableHead>
+                    <TableHead className="w-[100px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -342,6 +513,33 @@ export function PatientDetailPage() {
                         </TableCell>
                         <TableCell className="text-xs">
                           {s.expires_at ? formatTimestamp(s.expires_at) : "No expiry"}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {s.is_active && (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  onClick={() => { setEditShare(s); setEditExpiry(s.expires_at ? s.expires_at.slice(0, 16) : ""); setEditShareError(null); }}
+                                  title="Edit expiry"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-destructive hover:text-destructive"
+                                  onClick={() => handleRevokeShare(s.id)}
+                                  disabled={revokingShare === s.id}
+                                  title="Revoke link"
+                                >
+                                  <Ban className="h-3 w-3" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

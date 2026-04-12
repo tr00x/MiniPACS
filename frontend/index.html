@@ -7,7 +7,18 @@
     <title>MiniPACS Portal</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <style>
+        #app-loader{display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:12px;font-family:system-ui,-apple-system,sans-serif}
+        #app-loader .spinner{width:32px;height:32px;border:2.5px solid #e5e7eb;border-top-color:#18181b;border-radius:50%;animation:spin .6s linear infinite}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        #app-loader p{color:#71717a;font-size:14px}
+      </style>
+      <div id="app-loader">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

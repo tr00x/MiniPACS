@@ -23,6 +23,15 @@ class SettingsUpdate(BaseModel):
 ALLOWED_KEYS = set(SettingsUpdate.model_fields.keys())
 
 
+@router.get("/public")
+async def get_public_settings(db: aiosqlite.Connection = Depends(get_db)):
+    cursor = await db.execute(
+        "SELECT key, value FROM settings WHERE key IN ('clinic_name', 'clinic_phone', 'clinic_email')"
+    )
+    rows = await cursor.fetchall()
+    return {row["key"]: row["value"] for row in rows}
+
+
 @router.get("")
 async def get_settings(
     user: dict = Depends(get_current_user),

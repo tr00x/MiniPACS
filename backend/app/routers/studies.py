@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.routers.auth import get_current_user
@@ -25,8 +25,10 @@ async def get_study(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    await log_audit("view_study", "study", study_id, user_id=user["id"], ip_address=request.client.host)
     study = await orthanc.get_study(study_id)
+    if study is None:
+        raise HTTPException(status_code=404, detail="Study not found")
+    await log_audit("view_study", "study", study_id, user_id=user["id"], ip_address=request.client.host)
     series = await orthanc.get_study_series(study_id)
     return {"study": study, "series": series}
 

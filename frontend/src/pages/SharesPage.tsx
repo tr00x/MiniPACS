@@ -1,20 +1,24 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Copy, Check, Ban, Link2, Eye, EyeOff, Share2, Plus, Pencil, CalendarClock } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { TableSkeleton } from "@/components/TableSkeleton";
+import { Copy, Check, Ban, Share2, Plus, Pencil, CalendarClock, ChevronLeft, ChevronRight, Search, ExternalLink } from "lucide-react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import api from "@/lib/api";
+import { formatDicomName, formatTimestamp, getShareStatus } from "@/lib/dicom";
 
 interface Share {
   id: number;
@@ -37,31 +41,6 @@ interface Patient {
   };
 }
 
-function getShareStatus(s: Share): { label: string; variant: "default" | "secondary" | "destructive" } {
-  if (!s.is_active) return { label: "Revoked", variant: "secondary" };
-  if (s.expires_at && new Date(s.expires_at) < new Date()) return { label: "Expired", variant: "destructive" };
-  return { label: "Active", variant: "default" };
-}
-
-function formatTimestamp(raw: string | null): string {
-  if (!raw) return "—";
-  const d = new Date(raw);
-  return d.toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-    hour: "numeric", minute: "2-digit",
-  });
-}
-
-function formatDicomName(raw: string): string {
-  if (!raw) return "Unknown";
-  const parts = raw.split("^");
-  const last = parts[0] || "";
-  const first = parts[1] || "";
-  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-  if (first && last) return `${cap(first)} ${cap(last)}`;
-  return cap(last || first);
-}
-
 const EXPIRY_PRESETS = [
   { label: "7 days", days: 7 },
   { label: "14 days", days: 14 },
@@ -70,13 +49,26 @@ const EXPIRY_PRESETS = [
   { label: "No expiry", days: 0 },
 ];
 
+const PAGE_SIZE = 25;
+
+function buildPortalUrl(token: string) {
+  return `${window.location.origin}/patient-portal/${token}`;
+}
+
 export function SharesPage() {
   const [shares, setShares] = useState<Share[]>([]);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [revoking, setRevoking] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  // Search + pagination
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+
+  // Revoke confirm
+  const [revokeTarget, setRevokeTarget] = useState<number | null>(null);
+  const [revoking, setRevoking] = useState(false);
 
   // Create dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -85,6 +77,10 @@ export function SharesPage() {
   const [customExpiry, setCustomExpiry] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  // Success dialog — shows link after creation
+  const [createdLink, setCreatedLink] = useState<string | null>(null);
+  const [createdLinkCopied, setCreatedLinkCopied] = useState(false);
 
   // Edit dialog
   const [editShare, setEditShare] = useState<Share | null>(null);
@@ -115,16 +111,36 @@ export function SharesPage() {
     return () => ctrl.abort();
   }, []);
 
-  const handleRevoke = async (id: number) => {
-    setRevoking(id);
+  useEffect(() => { setPage(1); }, [search]);
+
+  const getPatientName = (orthanc_patient_id: string) => {
+    const p = patients.find((pt) => pt.ID === orthanc_patient_id);
+    return p ? formatDicomName(p.MainDicomTags?.PatientName || "") : null;
+  };
+
+  const filtered = shares.filter((s) => {
+    if (!search.trim()) return true;
+    const name = getPatientName(s.orthanc_patient_id) ?? s.orthanc_patient_id;
+    return name.toLowerCase().includes(search.toLowerCase());
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleRevokeConfirm = async () => {
+    if (revokeTarget === null) return;
+    setRevoking(true);
     try {
-      await api.delete(`/shares/${id}`);
+      await api.delete(`/shares/${revokeTarget}`);
+      setRevokeTarget(null);
+      toast.success("Share link revoked");
       fetchShares();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       setError(e?.response?.data?.detail ?? e?.message ?? "Failed to revoke share");
+      setRevokeTarget(null);
     } finally {
-      setRevoking(null);
+      setRevoking(false);
     }
   };
 
@@ -144,7 +160,7 @@ export function SharesPage() {
     }
 
     try {
-      await api.post("/shares", {
+      const { data } = await api.post("/shares", {
         orthanc_patient_id: selectedPatient,
         expires_at,
       });
@@ -152,6 +168,12 @@ export function SharesPage() {
       setSelectedPatient("");
       setExpiryPreset("30");
       setCustomExpiry("");
+      // Show success dialog with the link
+      const url = buildPortalUrl(data.token);
+      setCreatedLink(url);
+      setCreatedLinkCopied(false);
+      // Auto-copy to clipboard
+      navigator.clipboard.writeText(url);
       fetchShares();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -176,6 +198,7 @@ export function SharesPage() {
         expires_at: editExpiry ? new Date(editExpiry).toISOString() : null,
       });
       setEditShare(null);
+      toast.success("Share link updated");
       fetchShares();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -186,15 +209,19 @@ export function SharesPage() {
   };
 
   const copyLink = (share: Share) => {
-    const url = `${window.location.origin}/patient-portal/${share.token}`;
+    const url = buildPortalUrl(share.token);
     navigator.clipboard.writeText(url);
     setCopiedId(share.id);
+    toast.success("Link copied to clipboard");
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const activeCount = shares.filter((s) => s.is_active && !(s.expires_at && new Date(s.expires_at) < new Date())).length;
-  const viewedCount = shares.filter((s) => s.view_count > 0).length;
-  const totalViews = shares.reduce((sum, s) => sum + s.view_count, 0);
+  const copyCreatedLink = () => {
+    if (!createdLink) return;
+    navigator.clipboard.writeText(createdLink);
+    setCreatedLinkCopied(true);
+    toast.success("Link copied to clipboard");
+  };
 
   if (error) {
     return (
@@ -210,7 +237,7 @@ export function SharesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Patient Shares</h2>
-          <p className="text-sm text-muted-foreground">Patient portal access links</p>
+          <p className="text-sm text-muted-foreground">{shares.length} portal links</p>
         </div>
         <Button onClick={() => { setCreateOpen(true); setCreateError(null); }}>
           <Plus className="mr-2 h-4 w-4" />
@@ -218,156 +245,150 @@ export function SharesPage() {
         </Button>
       </div>
 
-      <div className="flex gap-4">
-        <Card className="flex-1">
-          <CardContent className="flex items-center gap-3 pt-6">
-            <div className="rounded-lg bg-blue-500/10 p-2">
-              <Link2 className="h-5 w-5 text-blue-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{activeCount}</p>
-              <p className="text-xs text-muted-foreground">Active Links</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="flex-1">
-          <CardContent className="flex items-center gap-3 pt-6">
-            <div className="rounded-lg bg-emerald-500/10 p-2">
-              <Eye className="h-5 w-5 text-emerald-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{totalViews}</p>
-              <p className="text-xs text-muted-foreground">Total Views</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="flex-1">
-          <CardContent className="flex items-center gap-3 pt-6">
-            <div className="rounded-lg bg-violet-500/10 p-2">
-              <EyeOff className="h-5 w-5 text-violet-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{shares.length - viewedCount}</p>
-              <p className="text-xs text-muted-foreground">Not Yet Viewed</p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="relative w-full max-w-sm">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Search by patient name..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+        />
       </div>
 
       {loading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <div className="rounded-lg border"><TableSkeleton columns={6} /></div>
       ) : (
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/50">
-                <TableHead>Patient</TableHead>
-                <TableHead>Portal Link</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Views</TableHead>
-                <TableHead>Last Viewed</TableHead>
-                <TableHead>Expires</TableHead>
-                <TableHead>Created By</TableHead>
-                <TableHead className="w-[140px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {shares.map((s) => {
-                const status = getShareStatus(s);
-                return (
-                  <TableRow key={s.id}>
-                    <TableCell>
-                      <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                        {(s.orthanc_patient_id ?? "").slice(0, 12)}…
-                      </code>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                          {(s.token ?? "").slice(0, 16)}…
-                        </code>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={() => copyLink(s)}
-                          title="Copy portal link"
-                        >
-                          {copiedId === s.id ? (
-                            <Check className="h-3 w-3 text-emerald-500" />
-                          ) : (
-                            <Copy className="h-3 w-3" />
-                          )}
-                        </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={status.variant}>{status.label}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className={`font-medium ${s.view_count > 0 ? "" : "text-muted-foreground"}`}>
-                        {s.view_count}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {formatTimestamp(s.last_viewed_at)}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {s.expires_at ? formatTimestamp(s.expires_at) : (
-                        <span className="text-muted-foreground">No expiry</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {s.created_by_username || "—"}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        {s.is_active ? (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => openEdit(s)}
-                              title="Edit expiry"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => handleRevoke(s.id)}
-                              disabled={revoking === s.id}
-                              title="Revoke link"
-                            >
-                              <Ban className="h-3.5 w-3.5" />
-                            </Button>
-                          </>
-                        ) : null}
-                      </div>
+        <>
+          <div className="rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead>Patient</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Views</TableHead>
+                  <TableHead>Expires</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="w-[200px]">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginated.map((s) => {
+                  const status = getShareStatus(s);
+                  const patientName = getPatientName(s.orthanc_patient_id) ?? ((s.orthanc_patient_id ?? "").slice(0, 12) + "…");
+                  return (
+                    <TableRow key={s.id}>
+                      <TableCell>
+                        <Link to={`/patients/${s.orthanc_patient_id}`} className="text-primary hover:underline text-sm font-medium">
+                          {patientName}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={status.variant}>{status.label}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className={`font-medium ${s.view_count > 0 ? "" : "text-muted-foreground"}`}>
+                          {s.view_count}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {s.expires_at ? formatTimestamp(s.expires_at) : (
+                          <span className="text-muted-foreground">Never</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatTimestamp(s.created_at)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => copyLink(s)}
+                          >
+                            {copiedId === s.id ? (
+                              <Check className="h-3.5 w-3.5 text-emerald-500" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
+                            {copiedId === s.id ? "Copied!" : "Copy Link"}
+                          </Button>
+                          {s.is_active ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => openEdit(s)}
+                                title="Edit expiry"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => setRevokeTarget(s.id)}
+                                title="Revoke link"
+                              >
+                                <Ban className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                      <Share2 className="mx-auto mb-2 h-8 w-8 opacity-30" />
+                      {search ? "No matching shares found" : "No patient portal links created yet"}
                     </TableCell>
                   </TableRow>
-                );
-              })}
-              {shares.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
-                    <Share2 className="mx-auto mb-2 h-8 w-8 opacity-30" />
-                    No patient portal links created yet
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between text-sm text-muted-foreground">
+              <span>
+                Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+                  <ChevronLeft className="h-4 w-4" /> Prev
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                  Next <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
+
+      <ConfirmDialog
+        open={revokeTarget !== null}
+        onOpenChange={(open) => { if (!open) setRevokeTarget(null); }}
+        title="Revoke Share Link"
+        description="This will permanently disable this patient portal link. The patient will no longer be able to access their records through this link."
+        confirmLabel="Revoke"
+        variant="destructive"
+        onConfirm={handleRevokeConfirm}
+        loading={revoking}
+      />
 
       {/* Create Share Dialog */}
       <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) setCreateError(null); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create Patient Portal Link</DialogTitle>
+            <DialogDescription>
+              Generate a secure link for a patient to view and download their imaging studies.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
@@ -429,13 +450,66 @@ export function SharesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Success Dialog — shows link immediately after creation */}
+      <Dialog open={!!createdLink} onOpenChange={(open) => { if (!open) setCreatedLink(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Portal Link Created</DialogTitle>
+            <DialogDescription>
+              The link has been automatically copied to your clipboard. Send it to the patient via email, text, or print it out.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex items-center gap-2">
+              <Input
+                readOnly
+                value={createdLink || ""}
+                className="font-mono text-sm"
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+              />
+              <Button variant="outline" size="icon" className="shrink-0" onClick={copyCreatedLink}>
+                {createdLinkCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={copyCreatedLink}>
+                <Copy className="mr-2 h-4 w-4" />
+                {createdLinkCopied ? "Copied!" : "Copy Link"}
+              </Button>
+              <Button variant="outline" className="flex-1" onClick={() => {
+                if (createdLink) window.open(createdLink, "_blank");
+              }}>
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Open in Browser
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreatedLink(null)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Edit Share Dialog */}
       <Dialog open={!!editShare} onOpenChange={(open) => { if (!open) { setEditShare(null); setEditError(null); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Share Link</DialogTitle>
+            <DialogDescription>
+              Change when this portal link expires. The patient will lose access after the expiry date.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
+            {editShare && (
+              <div className="rounded-md bg-muted p-3 space-y-1">
+                <p className="text-sm font-medium">
+                  {getPatientName(editShare.orthanc_patient_id) || "Patient"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Created {formatTimestamp(editShare.created_at)} · {editShare.view_count} views
+                </p>
+              </div>
+            )}
             <div className="grid gap-2">
               <Label>Expiry Date & Time</Label>
               <Input
@@ -444,8 +518,25 @@ export function SharesPage() {
                 onChange={(e) => setEditExpiry(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Leave empty for no expiry. Current: {editShare?.expires_at ? formatTimestamp(editShare.expires_at) : "No expiry"}
+                Leave empty for no expiry.
+                {editShare?.expires_at ? ` Currently expires: ${formatTimestamp(editShare.expires_at)}` : " Currently: no expiry."}
               </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                readOnly
+                value={editShare ? buildPortalUrl(editShare.token) : ""}
+                className="font-mono text-xs"
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+              />
+              <Button variant="outline" size="icon" className="shrink-0" onClick={() => {
+                if (editShare) {
+                  navigator.clipboard.writeText(buildPortalUrl(editShare.token));
+                  toast.success("Link copied to clipboard");
+                }
+              }}>
+                <Copy className="h-4 w-4" />
+              </Button>
             </div>
           </div>
           {editError && <p className="text-sm text-destructive" role="alert">{editError}</p>}

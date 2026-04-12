@@ -9,6 +9,8 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { TableSkeleton } from "@/components/TableSkeleton";
 import { Plus, Pencil, Trash2, Radio } from "lucide-react";
 import api from "@/lib/api";
 
@@ -28,9 +30,10 @@ interface NodeForm {
   ip: string;
   port: string;
   description: string;
+  is_active: boolean;
 }
 
-const emptyForm: NodeForm = { name: "", ae_title: "", ip: "", port: "4242", description: "" };
+const emptyForm: NodeForm = { name: "", ae_title: "", ip: "", port: "4242", description: "", is_active: true };
 
 export function PacsNodesPage() {
   const [nodes, setNodes] = useState<PacsNode[]>([]);
@@ -42,6 +45,9 @@ export function PacsNodesPage() {
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [echoResults, setEchoResults] = useState<Record<number, boolean | "testing">>({});
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const fetchNodes = (signal?: AbortSignal) => {
     setLoading(true);
@@ -78,6 +84,7 @@ export function PacsNodesPage() {
       ip: n.ip,
       port: String(n.port),
       description: n.description || "",
+      is_active: !!n.is_active,
     });
     setDialogError(null);
     setDialogOpen(true);
@@ -86,7 +93,7 @@ export function PacsNodesPage() {
   const handleSave = async () => {
     setSaving(true);
     setDialogError(null);
-    const payload = { ...form, port: Number(form.port) };
+    const payload = { ...form, port: Number(form.port), is_active: form.is_active };
     try {
       if (editingId) {
         await api.put(`/pacs-nodes/${editingId}`, payload);
@@ -103,14 +110,32 @@ export function PacsNodesPage() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm("Delete this PACS node?")) return;
+  const handleDeleteConfirm = async () => {
+    if (deleteTarget === null) return;
+    setDeleting(true);
     try {
-      await api.delete(`/pacs-nodes/${id}`);
+      await api.delete(`/pacs-nodes/${deleteTarget}`);
+      setDeleteTarget(null);
       fetchNodes();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       setError(e?.response?.data?.detail ?? e?.message ?? "Failed to delete node");
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleToggleActive = async (n: PacsNode) => {
+    setTogglingId(n.id);
+    try {
+      await api.put(`/pacs-nodes/${n.id}`, { is_active: !n.is_active });
+      fetchNodes();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to update node");
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -143,7 +168,9 @@ export function PacsNodesPage() {
         </Button>
       </div>
       {loading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <div className="rounded-lg border">
+          <TableSkeleton columns={8} />
+        </div>
       ) : (
         <Table>
           <TableHeader>
@@ -152,6 +179,7 @@ export function PacsNodesPage() {
               <TableHead>AE Title</TableHead>
               <TableHead>IP</TableHead>
               <TableHead>Port</TableHead>
+              <TableHead>Description</TableHead>
               <TableHead>Active</TableHead>
               <TableHead>C-ECHO</TableHead>
               <TableHead>Actions</TableHead>
@@ -164,10 +192,20 @@ export function PacsNodesPage() {
                 <TableCell className="font-mono text-sm">{n.ae_title}</TableCell>
                 <TableCell className="font-mono text-sm">{n.ip}</TableCell>
                 <TableCell>{n.port}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  {n.description || "—"}
+                </TableCell>
                 <TableCell>
-                  <Badge variant={n.is_active ? "default" : "secondary"}>
-                    {n.is_active ? "Active" : "Inactive"}
-                  </Badge>
+                  <button
+                    onClick={() => handleToggleActive(n)}
+                    disabled={togglingId === n.id}
+                    className="cursor-pointer disabled:opacity-50"
+                    title={n.is_active ? "Click to deactivate" : "Click to activate"}
+                  >
+                    <Badge variant={n.is_active ? "default" : "secondary"}>
+                      {togglingId === n.id ? "..." : (n.is_active ? "Active" : "Inactive")}
+                    </Badge>
+                  </button>
                 </TableCell>
                 <TableCell>
                   {echoResults[n.id] === "testing" ? (
@@ -186,7 +224,7 @@ export function PacsNodesPage() {
                     <Button variant="ghost" size="icon" onClick={() => openEdit(n)}>
                       <Pencil className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(n.id)}>
+                    <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(n.id)}>
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
                   </div>
@@ -195,7 +233,7 @@ export function PacsNodesPage() {
             ))}
             {nodes.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   No PACS nodes configured
                 </TableCell>
               </TableRow>
@@ -203,6 +241,17 @@ export function PacsNodesPage() {
           </TableBody>
         </Table>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title="Delete PACS Node"
+        description="This will permanently remove this node."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={handleDeleteConfirm}
+        loading={deleting}
+      />
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) setDialogError(null); }}>
         <DialogContent>
@@ -232,6 +281,18 @@ export function PacsNodesPage() {
               <Label htmlFor="description">Description</Label>
               <Input id="description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
+            {editingId && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="is_active"
+                  checked={form.is_active}
+                  onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="is_active">Active</Label>
+              </div>
+            )}
           </div>
           {dialogError && (
             <p className="text-sm text-destructive" role="alert">{dialogError}</p>

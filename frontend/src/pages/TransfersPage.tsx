@@ -1,12 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { TableSkeleton } from "@/components/TableSkeleton";
 import { RefreshCw, ArrowRightLeft, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Link } from "react-router-dom";
 import api from "@/lib/api";
+import { formatTimestamp } from "@/lib/dicom";
 
 interface Transfer {
   id: number;
@@ -25,14 +31,7 @@ const statusConfig: Record<Transfer["status"], { variant: "default" | "destructi
   pending: { variant: "secondary", icon: Clock, label: "Pending" },
 };
 
-function formatTimestamp(raw: string | null): string {
-  if (!raw) return "—";
-  const d = new Date(raw);
-  return d.toLocaleDateString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-    hour: "numeric", minute: "2-digit",
-  });
-}
+type StatusFilter = "all" | "success" | "failed" | "pending";
 
 function formatDuration(created: string, completed: string | null): string {
   if (!completed) return "—";
@@ -48,6 +47,8 @@ export function TransfersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<number | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchTransfers = (signal?: AbortSignal) => {
     setLoading(true);
@@ -63,11 +64,37 @@ export function TransfersPage() {
       .finally(() => setLoading(false));
   };
 
+  const fetchTransfersSilent = () => {
+    api
+      .get("/transfers")
+      .then(({ data }) => setTransfers(data))
+      .catch(() => {});
+  };
+
   useEffect(() => {
     const ctrl = new AbortController();
     fetchTransfers(ctrl.signal);
     return () => ctrl.abort();
   }, []);
+
+  // Auto-refresh when pending transfers exist
+  useEffect(() => {
+    const hasPending = transfers.some((t) => t.status === "pending");
+    if (hasPending) {
+      intervalRef.current = setInterval(fetchTransfersSilent, 10_000);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [transfers]);
 
   const handleRetry = async (id: number) => {
     setRetrying(id);
@@ -85,6 +112,10 @@ export function TransfersPage() {
   const successCount = transfers.filter((t) => t.status === "success").length;
   const failedCount = transfers.filter((t) => t.status === "failed").length;
   const pendingCount = transfers.filter((t) => t.status === "pending").length;
+
+  const filtered = statusFilter === "all"
+    ? transfers
+    : transfers.filter((t) => t.status === statusFilter);
 
   if (error) {
     return (
@@ -138,8 +169,30 @@ export function TransfersPage() {
         </Card>
       </div>
 
+      <div className="flex items-center justify-between">
+        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Filter by status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="success">Success</SelectItem>
+            <SelectItem value="failed">Failed</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+          </SelectContent>
+        </Select>
+        {pendingCount > 0 && (
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            Auto-refreshing every 10s
+          </p>
+        )}
+      </div>
+
       {loading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <div className="rounded-lg border">
+          <TableSkeleton columns={7} />
+        </div>
       ) : (
         <div className="rounded-lg border">
           <Table>
@@ -155,7 +208,7 @@ export function TransfersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {transfers.map((t) => {
+              {filtered.map((t) => {
                 const cfg = statusConfig[t.status];
                 const StatusIcon = cfg.icon;
                 return (
@@ -169,9 +222,11 @@ export function TransfersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                        {(t.orthanc_study_id ?? "").slice(0, 12)}…
-                      </code>
+                      <Link to={`/studies/${t.orthanc_study_id}`} className="hover:underline">
+                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs cursor-pointer">
+                          {(t.orthanc_study_id ?? "").slice(0, 12)}…
+                        </code>
+                      </Link>
                     </TableCell>
                     <TableCell>
                       <Badge variant={cfg.variant} className="gap-1">
@@ -207,11 +262,11 @@ export function TransfersPage() {
                   </TableRow>
                 );
               })}
-              {transfers.length === 0 && (
+              {filtered.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                     <ArrowRightLeft className="mx-auto mb-2 h-8 w-8 opacity-30" />
-                    No transfers yet
+                    {statusFilter === "all" ? "No transfers yet" : `No ${statusFilter} transfers`}
                   </TableCell>
                 </TableRow>
               )}
