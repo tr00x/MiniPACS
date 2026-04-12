@@ -1027,14 +1027,23 @@ Clinton Medical`
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* PDF Viewer Modal */}
-      <Dialog open={!!pdfViewUrl} onOpenChange={(open) => { if (!open) { if (pdfViewUrl) URL.revokeObjectURL(pdfViewUrl); setPdfViewUrl(null); } }}>
-        <DialogContent className="max-w-4xl h-[85vh] p-0">
-          {pdfViewUrl && (
-            <iframe src={pdfViewUrl} className="w-full h-full rounded-lg" title="PDF Report" />
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* PDF Viewer — fullscreen overlay */}
+      {pdfViewUrl && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-background">
+          <div className="flex items-center justify-between border-b px-4 py-3 shrink-0">
+            <span className="text-sm font-medium">PDF Report</span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => window.open(pdfViewUrl, "_blank")}>
+                Open in New Tab
+              </Button>
+              <Button variant="default" size="sm" onClick={() => { URL.revokeObjectURL(pdfViewUrl); setPdfViewUrl(null); }}>
+                Close
+              </Button>
+            </div>
+          </div>
+          <iframe src={pdfViewUrl} className="flex-1 w-full border-0" title="PDF Report" />
+        </div>
+      )}
     </div>
   );
 }
