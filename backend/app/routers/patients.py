@@ -20,7 +20,10 @@ async def list_patients(
     await log_audit("list_patients", user_id=user["id"], ip_address=request.client.host)
 
     # Fetch all patients expanded (manageable for a clinic-scale dataset)
-    all_patients = await orthanc.get_patients()
+    try:
+        all_patients = await orthanc.get_patients()
+    except Exception as exc:
+        raise HTTPException(502, f"PACS server unavailable: {exc}") from exc
 
     # Server-side search filter
     if search:

@@ -25,7 +25,10 @@ async def list_studies(
     await log_audit("list_studies", user_id=user["id"], ip_address=request.client.host)
 
     # Fetch all studies expanded (with modality enrichment from orthanc service)
-    all_studies = await orthanc.get_studies()
+    try:
+        all_studies = await orthanc.get_studies()
+    except Exception as exc:
+        raise HTTPException(502, f"PACS server unavailable: {exc}") from exc
 
     # Filter by search (patient name, study description, patient ID)
     if search:

@@ -38,8 +38,8 @@ async def get_patients(limit: int | None = None, since: int | None = None):
         resp = await _http().get("/patients", params=params)
         resp.raise_for_status()
         return resp.json()
-    except (httpx.ConnectError, httpx.ConnectTimeout):
-        return []
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise Exception(f"PACS server unreachable: {exc}") from exc
 
 
 async def get_patient(patient_id: str):
@@ -102,8 +102,8 @@ async def get_studies(limit: int | None = None, since: int | None = None):
         resp.raise_for_status()
         studies = resp.json()
         return await _enrich_study_modalities(studies)
-    except (httpx.ConnectError, httpx.ConnectTimeout):
-        return []
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise Exception(f"PACS server unreachable: {exc}") from exc
 
 
 async def get_study(study_id: str):
