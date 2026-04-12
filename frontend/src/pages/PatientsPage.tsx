@@ -9,7 +9,7 @@ import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
 import { TableSkeleton } from "@/components/TableSkeleton";
-import { formatDicomName, formatDicomDate } from "@/lib/dicom";
+import { formatDicomName, formatDicomDate, calculateAge } from "@/lib/dicom";
 
 const PAGE_SIZE = 25;
 
@@ -129,16 +129,15 @@ export function PatientsPage() {
                     </TableCell>
                     <TableCell className="text-sm">
                       {formatDicomDate(tag(p, "PatientBirthDate"))}
+                      {tag(p, "PatientBirthDate") && (
+                        <span className="ml-1.5 text-xs text-muted-foreground">({calculateAge(tag(p, "PatientBirthDate"))})</span>
+                      )}
                     </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {tag(p, "PatientSex") === "M" ? "Male" : tag(p, "PatientSex") === "F" ? "Female" : tag(p, "PatientSex") || "—"}
-                      </Badge>
+                    <TableCell className="text-sm">
+                      {tag(p, "PatientSex") === "M" ? "Male" : tag(p, "PatientSex") === "F" ? "Female" : tag(p, "PatientSex") || "—"}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <Badge variant={studyCount > 1 ? "default" : "secondary"} className="text-xs">
-                        {studyCount}
-                      </Badge>
+                    <TableCell className="text-right font-medium">
+                      {studyCount}
                     </TableCell>
                   </TableRow>
                 );
