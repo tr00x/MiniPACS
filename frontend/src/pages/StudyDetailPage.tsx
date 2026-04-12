@@ -120,7 +120,12 @@ export function StudyDetailPage() {
     try {
       const { data } = await api.post("/transfers", { study_id: id, pacs_node_id: Number(selectedNode) });
       if (data.status === "failed") {
-        setSendError(data.error_message || "Transfer failed — the destination PACS may be unreachable.");
+        const raw = data.error_message || "";
+        let userMsg = "The destination PACS could not be reached. Check that the IP address, port, and AE Title are correct in PACS Nodes settings.";
+        if (raw.includes("not found")) userMsg = "This PACS node is not registered in Orthanc. Try removing and re-adding it in PACS Nodes.";
+        else if (raw.includes("timeout")) userMsg = "Connection timed out. The destination PACS may be offline or the IP/port is wrong.";
+        else if (raw.includes("refused")) userMsg = "Connection refused. The destination PACS is not accepting connections on this port.";
+        setSendError(userMsg + (raw ? `\n\nTechnical details: ${raw}` : ""));
         setSendStatus("error");
       } else {
         setSendStatus("success");
@@ -476,19 +481,34 @@ export function StudyDetailPage() {
             </div>
           )}
 
-          {sendStatus === "error" && (
-            <div className="py-6 text-center space-y-3">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-                <Send className="h-6 w-6 text-destructive" />
+          {sendStatus === "error" && (() => {
+            const parts = (sendError || "").split("\n\nTechnical details: ");
+            const userMessage = parts[0];
+            const techDetails = parts[1] || null;
+            return (
+              <div className="py-4 space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+                    <Send className="h-5 w-5 text-destructive" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="font-medium">Transfer failed</p>
+                    <p className="text-sm text-muted-foreground">{userMessage}</p>
+                  </div>
+                </div>
+                {techDetails && (
+                  <details className="rounded-md border bg-muted/50 p-3">
+                    <summary className="text-xs font-medium cursor-pointer text-muted-foreground">Technical details (for IT support)</summary>
+                    <pre className="mt-2 text-xs whitespace-pre-wrap break-all text-destructive">{techDetails}</pre>
+                  </details>
+                )}
+                <DialogFooter className="gap-2">
+                  <Button variant="outline" onClick={closeSendDialog}>Close</Button>
+                  <Button onClick={() => { setSendStatus("idle"); setSendError(null); }}>Try Again</Button>
+                </DialogFooter>
               </div>
-              <p className="text-sm font-medium">Transfer failed</p>
-              <p className="text-sm text-destructive">{sendError}</p>
-              <DialogFooter className="justify-center gap-2">
-                <Button variant="outline" onClick={closeSendDialog}>Close</Button>
-                <Button onClick={() => { setSendStatus("idle"); setSendError(null); }}>Try Again</Button>
-              </DialogFooter>
-            </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>
