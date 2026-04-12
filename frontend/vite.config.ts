@@ -69,7 +69,7 @@ export default defineConfig({
     port: 48925,
     proxy: {
       "/api": {
-        target: "http://localhost:48920",
+        target: "http://localhost:48922",
         changeOrigin: true,
       },
       "/dicom-web": {
