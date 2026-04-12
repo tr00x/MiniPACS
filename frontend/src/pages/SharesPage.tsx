@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TableSkeleton } from "@/components/TableSkeleton";
-import { Copy, Check, Ban, Share2, Plus, Pencil, CalendarClock, ChevronLeft, ChevronRight, Search, ExternalLink, Printer, Lock, Eye, EyeOff } from "lucide-react";
+import { Copy, Check, Ban, Share2, Plus, Pencil, CalendarClock, ChevronLeft, ChevronRight, Search, ExternalLink, Printer, Lock } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -29,7 +29,7 @@ interface Share {
   created_at: string;
   expires_at: string | null;
   created_by_username: string | null;
-  pin: string | null;
+  pin_hash: string | null;
 }
 
 interface Patient {
@@ -72,9 +72,6 @@ export function SharesPage() {
   // Success dialog — shows link after creation
   const [createdLink, setCreatedLink] = useState<string | null>(null);
   const [createdLinkCopied, setCreatedLinkCopied] = useState(false);
-
-  // PIN reveal
-  const [revealedPin, setRevealedPin] = useState<number | null>(null);
 
   // Edit dialog
   const [editShare, setEditShare] = useState<Share | null>(null);
@@ -265,26 +262,11 @@ export function SharesPage() {
                         {patientName}
                       </Link>
                       <Badge variant={status.variant}>{status.label}</Badge>
-                      {s.pin && (
-                        <button
-                          type="button"
-                          onClick={() => setRevealedPin(revealedPin === s.id ? null : s.id)}
-                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                          title={revealedPin === s.id ? "Hide PIN" : "Show PIN"}
-                        >
+                      {s.pin_hash && (
+                        <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground">
                           <Lock className="h-3 w-3" />
-                          {revealedPin === s.id ? (
-                            <>
-                              <span className="font-mono">{s.pin}</span>
-                              <EyeOff className="h-3 w-3 ml-0.5" />
-                            </>
-                          ) : (
-                            <>
-                              <span className="font-mono">{"*".repeat(s.pin.length)}</span>
-                              <Eye className="h-3 w-3 ml-0.5" />
-                            </>
-                          )}
-                        </button>
+                          <span>PIN protected</span>
+                        </span>
                       )}
                     </div>
                     <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">

@@ -83,7 +83,6 @@ export function PatientDetailPage() {
   const [savingShare, setSavingShare] = useState(false);
   const [editShareError, setEditShareError] = useState<string | null>(null);
   const [revokingShare, setRevokingShare] = useState<number | null>(null);
-  const [revealedPin, setRevealedPin] = useState<number | null>(null);
   const [transfersOpen, setTransfersOpen] = useState(false);
 
   useEffect(() => {
@@ -513,8 +512,8 @@ Clinton Medical`
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">PIN</span>
                 <span className="font-medium text-xs">
-                  {(editShare as Record<string, unknown>)?.pin
-                    ? <span className="font-mono">{String((editShare as Record<string, unknown>).pin)}</span>
+                  {(editShare as Record<string, unknown>)?.pin_hash
+                    ? <span className="flex items-center gap-1"><Lock className="h-3 w-3" /> Protected</span>
                     : "Not set"}
                 </span>
               </div>
@@ -635,18 +634,11 @@ Clinton Medical`
                         <span className="text-xs text-muted-foreground">
                           {s.view_count > 0 ? `${s.view_count} views` : "Not viewed"}
                         </span>
-                        {(s as Record<string, unknown>).pin && (
-                          <button
-                            type="button"
-                            className="text-xs text-muted-foreground flex items-center gap-0.5 hover:text-foreground transition-colors"
-                            onClick={(e) => { e.stopPropagation(); setRevealedPin(revealedPin === s.id ? null : s.id); }}
-                            title={revealedPin === s.id ? "Hide PIN" : "Show PIN"}
-                          >
+                        {(s as Record<string, unknown>).pin_hash && (
+                          <span className="text-xs text-muted-foreground flex items-center gap-0.5" title="PIN protected">
                             <Lock className="h-3 w-3" />
-                            {revealedPin === s.id
-                              ? <span className="font-mono font-medium">{String((s as Record<string, unknown>).pin)}</span>
-                              : <span>PIN ****</span>}
-                          </button>
+                            <span>PIN protected</span>
+                          </span>
                         )}
                       </div>
                       <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
