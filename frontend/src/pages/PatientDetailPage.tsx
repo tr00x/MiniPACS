@@ -11,9 +11,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Eye, FileImage, Share2, ArrowLeft, Copy, Check, Plus, Pencil, Ban, CalendarClock, ArrowRightLeft } from "lucide-react";
+import { Eye, FileImage, Share2, ArrowLeft, Copy, Check, Plus, Pencil, Ban, CalendarClock, ArrowRightLeft, ChevronDown } from "lucide-react";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
+import { ModalityBadgeList } from "@/components/ui/modality-badge";
 import { formatDicomName, formatDicomDate, formatTimestamp, calculateAge, getShareStatus, EXPIRY_PRESETS } from "@/lib/dicom";
 
 interface PatientData {
@@ -78,6 +79,7 @@ export function PatientDetailPage() {
   const [savingShare, setSavingShare] = useState(false);
   const [editShareError, setEditShareError] = useState<string | null>(null);
   const [revokingShare, setRevokingShare] = useState<number | null>(null);
+  const [transfersOpen, setTransfersOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -212,48 +214,32 @@ export function PatientDetailPage() {
             <ArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">
-            {formatDicomName(ptag("PatientName"))}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            MRN: {ptag("PatientID")}
-            {rawBirth ? ` · ${formatDicomDate(rawBirth)} (${calculateAge(rawBirth)})` : ""}
-            {sex ? ` · ${sex === "M" ? "Male" : sex === "F" ? "Female" : sex}` : ""}
-          </p>
-        </div>
+        <h2 className="text-2xl font-semibold tracking-tight">
+          {formatDicomName(ptag("PatientName"))}
+        </h2>
       </div>
 
-      {/* Demographics card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Demographics</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm md:grid-cols-4">
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Medical Record #</dt>
-              <dd className="mt-1 font-mono">{ptag("PatientID") || "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Date of Birth</dt>
-              <dd className="mt-1">{formatDicomDate(rawBirth)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Age</dt>
-              <dd className="mt-1">{calculateAge(rawBirth) || "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Sex</dt>
-              <dd className="mt-1">
-                <Badge variant="outline">
-                  {sex === "M" ? "Male" : sex === "F" ? "Female" : sex || "—"}
-                </Badge>
-              </dd>
-            </div>
-          </dl>
-        </CardContent>
-      </Card>
+      {/* Demographics — compact inline row */}
+      <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm rounded-lg border bg-muted/30 p-4">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">MRN</span>
+          <span className="font-mono font-medium">{ptag("PatientID")}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">DOB</span>
+          <span className="font-medium">{formatDicomDate(rawBirth)}</span>
+          {rawBirth && <span className="text-xs text-muted-foreground">({calculateAge(rawBirth)})</span>}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {sex === "M" && <span className="text-blue-500">&#9794;</span>}
+          {sex === "F" && <span className="text-pink-500">&#9792;</span>}
+          <span className="font-medium">{sex === "M" ? "Male" : sex === "F" ? "Female" : sex || "\u2014"}</span>
+        </div>
+        <div className="flex items-center gap-1.5 ml-auto">
+          <FileImage className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="font-semibold">{studies.length} studies</span>
+        </div>
+      </div>
 
       {/* Studies */}
       <Card>
@@ -266,59 +252,37 @@ export function PatientDetailPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50">
-                  <TableHead>Date</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Institution</TableHead>
-                  <TableHead>Modality</TableHead>
-                  <TableHead>Accession #</TableHead>
-                  <TableHead className="w-[80px]">View</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {studies.map((s) => (
-                  <TableRow key={s.ID} className="hover:bg-accent/50">
-                    <TableCell className="font-medium">
-                      {formatDicomDate(stag(s, "StudyDate"))}
-                    </TableCell>
-                    <TableCell>{stag(s, "StudyDescription") || "—"}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {stag(s, "InstitutionName") || "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="font-mono text-xs">
-                        {stag(s, "ModalitiesInStudy") || "—"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {stag(s, "AccessionNumber") ? (
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                          {stag(s, "AccessionNumber")}
-                        </code>
-                      ) : "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="icon" asChild>
-                        <Link to={`/studies/${s.ID}`}>
-                          <Eye className="h-4 w-4" />
-                        </Link>
+          {studies.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">
+              No imaging studies on file
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {studies.map((s) => {
+                const mod = stag(s, "ModalitiesInStudy");
+                return (
+                  <div key={s.ID} className="flex items-center justify-between gap-4 rounded-lg border p-4 hover:bg-accent/30 transition-colors">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        {mod && <ModalityBadgeList modalities={mod.replace(/\\/g, "/").split("/")} />}
+                        <span className="font-medium truncate">{stag(s, "StudyDescription") || "Untitled Study"}</span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                        <span>{formatDicomDate(stag(s, "StudyDate"))}</span>
+                        {stag(s, "InstitutionName") && <span>{stag(s, "InstitutionName")}</span>}
+                        {stag(s, "AccessionNumber") && <span className="font-mono">Acc# {stag(s, "AccessionNumber")}</span>}
+                      </div>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <Button variant="ghost" size="sm" asChild className="gap-1">
+                        <Link to={`/studies/${s.ID}`}><Eye className="h-3.5 w-3.5" /> View</Link>
                       </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {studies.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="h-16 text-center text-muted-foreground">
-                      No imaging studies on file
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -389,50 +353,56 @@ export function PatientDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Transfer History */}
+      {/* Transfer History — collapsible */}
       {transfers.length > 0 && (
         <Card>
-          <CardHeader>
+          <CardHeader
+            className="cursor-pointer select-none hover:bg-accent/30 transition-colors"
+            onClick={() => setTransfersOpen((v) => !v)}
+          >
             <div className="flex items-center gap-2">
               <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
               <CardTitle className="text-sm font-medium">
                 Transfer History ({transfers.length})
               </CardTitle>
+              <ChevronDown className={`ml-auto h-4 w-4 text-muted-foreground transition-transform ${transfersOpen ? "rotate-180" : ""}`} />
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead>Study</TableHead>
-                    <TableHead>Destination</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Date</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transfers.map((t) => {
-                    const study = studies.find((s) => s.ID === t.orthanc_study_id);
-                    return (
-                      <TableRow key={t.id}>
-                        <TableCell className="text-sm">
-                          {study ? (study.MainDicomTags?.StudyDescription || "Untitled") : t.orthanc_study_id.slice(0, 12)}
-                        </TableCell>
-                        <TableCell className="text-sm">{t.pacs_node_name || "—"}</TableCell>
-                        <TableCell>
-                          <Badge variant={t.status === "success" ? "default" : t.status === "failed" ? "destructive" : "secondary"}>
-                            {t.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-xs">{formatTimestamp(t.created_at)}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
+          {transfersOpen && (
+            <CardContent>
+              <div className="rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead>Study</TableHead>
+                      <TableHead>Destination</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {transfers.map((t) => {
+                      const study = studies.find((s) => s.ID === t.orthanc_study_id);
+                      return (
+                        <TableRow key={t.id}>
+                          <TableCell className="text-sm">
+                            {study ? (study.MainDicomTags?.StudyDescription || "Untitled") : t.orthanc_study_id.slice(0, 12)}
+                          </TableCell>
+                          <TableCell className="text-sm">{t.pacs_node_name || "\u2014"}</TableCell>
+                          <TableCell>
+                            <Badge variant={t.status === "success" ? "default" : t.status === "failed" ? "destructive" : "secondary"}>
+                              {t.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs">{formatTimestamp(t.created_at)}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          )}
         </Card>
       )}
 
@@ -455,94 +425,54 @@ export function PatientDetailPage() {
               No portal links shared with this patient
             </p>
           ) : (
-            <div className="rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead>Token</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Views</TableHead>
-                    <TableHead>First Viewed</TableHead>
-                    <TableHead>Last Viewed</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Expires</TableHead>
-                    <TableHead className="w-[100px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {shares.map((s) => {
-                    const status = getShareStatus(s);
-                    return (
-                      <TableRow key={s.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                              {(s.token ?? "").slice(0, 12)}…
-                            </code>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={() => copyToken(s.id, s.token)}
-                            >
-                              {copiedToken === s.id ? (
-                                <Check className="h-3 w-3 text-emerald-500" />
-                              ) : (
-                                <Copy className="h-3 w-3" />
-                              )}
-                            </Button>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={status.variant}>{status.label}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <span className="font-medium">{s.view_count}</span>
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {formatTimestamp(s.first_viewed_at)}
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {formatTimestamp(s.last_viewed_at)}
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {formatTimestamp(s.created_at)}
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {s.expires_at ? formatTimestamp(s.expires_at) : "No expiry"}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            {s.is_active && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7"
-                                  onClick={() => { setEditShare(s); setEditExpiry(s.expires_at ? s.expires_at.slice(0, 16) : ""); setEditShareError(null); }}
-                                  title="Edit expiry"
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 text-destructive hover:text-destructive"
-                                  onClick={() => handleRevokeShare(s.id)}
-                                  disabled={revokingShare === s.id}
-                                  title="Revoke link"
-                                >
-                                  <Ban className="h-3 w-3" />
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+            <div className="space-y-2">
+              {shares.map((s) => {
+                const status = getShareStatus(s);
+                return (
+                  <div key={s.id} className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={status.variant}>{status.label}</Badge>
+                        <span className="text-xs text-muted-foreground">
+                          {s.view_count > 0 ? `${s.view_count} views` : "Not viewed"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                        <span>Created {formatTimestamp(s.created_at)}</span>
+                        <span>{s.expires_at ? `Expires ${formatTimestamp(s.expires_at)}` : "No expiry"}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyToken(s.id, s.token)} title="Copy link">
+                        {copiedToken === s.id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      </Button>
+                      {s.is_active ? (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => { setEditShare(s); setEditExpiry(s.expires_at ? s.expires_at.slice(0, 16) : ""); setEditShareError(null); }}
+                            title="Edit"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => handleRevokeShare(s.id)}
+                            disabled={revokingShare === s.id}
+                            title="Revoke"
+                          >
+                            <Ban className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>
