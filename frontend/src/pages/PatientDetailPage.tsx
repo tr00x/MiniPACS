@@ -14,15 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Eye, FileImage, Share2, ArrowLeft, Copy, Check, Plus, Pencil, Ban, CalendarClock, ArrowRightLeft } from "lucide-react";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
-import { formatDicomName, formatDicomDate, formatTimestamp, calculateAge, getShareStatus } from "@/lib/dicom";
-
-const EXPIRY_PRESETS = [
-  { label: "7 days", days: 7 },
-  { label: "14 days", days: 14 },
-  { label: "30 days", days: 30 },
-  { label: "90 days", days: 90 },
-  { label: "No expiry", days: 0 },
-];
+import { formatDicomName, formatDicomDate, formatTimestamp, calculateAge, getShareStatus, EXPIRY_PRESETS } from "@/lib/dicom";
 
 interface PatientData {
   MainDicomTags: {
@@ -49,7 +41,7 @@ interface Share {
   id: number;
   orthanc_patient_id: string;
   token: string;
-  is_active: boolean;
+  is_active: number;
   view_count: number;
   first_viewed_at: string | null;
   last_viewed_at: string | null;
@@ -187,7 +179,7 @@ export function PatientDetailPage() {
     setRevokingShare(shareId);
     try {
       await api.delete(`/shares/${shareId}`);
-      setShares(shares.map((s) => s.id === shareId ? { ...s, is_active: false } : s));
+      setShares(shares.map((s) => s.id === shareId ? { ...s, is_active: 0 } : s));
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       setError(e?.response?.data?.detail ?? e?.message ?? "Failed to revoke share");

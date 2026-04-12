@@ -18,7 +18,7 @@ import { Copy, Check, Ban, Share2, Plus, Pencil, CalendarClock, ChevronLeft, Che
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import api from "@/lib/api";
-import { formatDicomName, formatTimestamp, getShareStatus } from "@/lib/dicom";
+import { formatDicomName, formatTimestamp, getShareStatus, EXPIRY_PRESETS } from "@/lib/dicom";
 
 interface Share {
   id: number;
@@ -40,14 +40,6 @@ interface Patient {
     PatientID?: string;
   };
 }
-
-const EXPIRY_PRESETS = [
-  { label: "7 days", days: 7 },
-  { label: "14 days", days: 14 },
-  { label: "30 days", days: 30 },
-  { label: "90 days", days: 90 },
-  { label: "No expiry", days: 0 },
-];
 
 const PAGE_SIZE = 25;
 
