@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 import aiosqlite
@@ -21,16 +21,27 @@ auth_router = APIRouter(prefix="/api/shares")
 @auth_router.get("")
 async def list_shares(
     request: Request,
+    patient_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
     db: aiosqlite.Connection = Depends(get_db),
 ):
     await log_audit("list_shares", user_id=user["id"], ip_address=request.client.host)
-    cursor = await db.execute(
-        """SELECT s.*, u.username as created_by_username
-           FROM patient_shares s
-           LEFT JOIN users u ON s.created_by = u.id
-           ORDER BY s.created_at DESC""",
-    )
+    if patient_id:
+        cursor = await db.execute(
+            """SELECT s.*, u.username as created_by_username
+               FROM patient_shares s
+               LEFT JOIN users u ON s.created_by = u.id
+               WHERE s.orthanc_patient_id = ?
+               ORDER BY s.created_at DESC""",
+            (patient_id,),
+        )
+    else:
+        cursor = await db.execute(
+            """SELECT s.*, u.username as created_by_username
+               FROM patient_shares s
+               LEFT JOIN users u ON s.created_by = u.id
+               ORDER BY s.created_at DESC""",
+        )
     rows = await cursor.fetchall()
     return [dict(row) for row in rows]
 
