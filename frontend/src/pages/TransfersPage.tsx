@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -37,13 +36,32 @@ const statusConfig: Record<Transfer["status"], { variant: "default" | "destructi
 
 type StatusFilter = "all" | "success" | "failed" | "pending";
 
+function ensureUTC(ts: string): string {
+  return ts.endsWith("Z") ? ts : ts + "Z";
+}
+
 function formatDuration(created: string, completed: string | null): string {
   if (!completed) return "\u2014";
-  const ms = new Date(completed).getTime() - new Date(created).getTime();
+  const ms = new Date(ensureUTC(completed)).getTime() - new Date(ensureUTC(created)).getTime();
+  if (ms < 0 || ms > 86400000) return "\u2014";
   if (ms < 1000) return `${ms}ms`;
   const sec = Math.round(ms / 1000);
   if (sec < 60) return `${sec}s`;
   return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+}
+
+function formatRelativeTime(isoString: string): string {
+  const now = Date.now();
+  const then = new Date(ensureUTC(isoString)).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
 }
 
 function humanizeError(raw: string): string {
@@ -52,6 +70,11 @@ function humanizeError(raw: string): string {
   if (raw.includes("refused") || raw.includes("Refused")) return "Connection refused. The destination is not accepting connections.";
   if (raw.includes("network") || raw.includes("Network")) return "Network error. Check that the destination IP and port are correct.";
   return "Transfer failed. See technical details below.";
+}
+
+interface StudyInfo {
+  description: string;
+  patientName: string;
 }
 
 export function TransfersPage() {
@@ -63,18 +86,44 @@ export function TransfersPage() {
   const [retrying, setRetrying] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
+  const [studyNames, setStudyNames] = useState<Record<string, StudyInfo>>({});
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Error detail dialog
   const [errorDetail, setErrorDetail] = useState<Transfer | null>(null);
 
+  const resolveStudyNames = async (items: Transfer[]) => {
+    const uniqueIds = [...new Set(items.map((t) => t.orthanc_study_id))];
+    // Only resolve IDs we haven't seen yet
+    const newIds = uniqueIds.filter((sid) => !studyNames[sid]);
+    if (newIds.length === 0) return;
+    const names: Record<string, StudyInfo> = {};
+    await Promise.all(
+      newIds.map(async (sid) => {
+        try {
+          const { data } = await api.get(`/studies/${sid}`);
+          const study = data.study || data;
+          const tags = study.MainDicomTags || {};
+          const patTags = study.PatientMainDicomTags || {};
+          names[sid] = {
+            description: tags.StudyDescription || "Untitled Study",
+            patientName: patTags.PatientName || "",
+          };
+        } catch {
+          names[sid] = { description: sid.slice(0, 8) + "\u2026", patientName: "" };
+        }
+      })
+    );
+    setStudyNames((prev) => ({ ...prev, ...names }));
+  };
+
   const fetchAll = (signal?: AbortSignal) => {
-    // Fetch high limit for status counts
     api
       .get("/transfers", { params: { limit: 1000 }, signal })
       .then(({ data }) => {
         const items = data.items ?? data;
         setAllTransfers(items);
+        resolveStudyNames(items);
       })
       .catch(() => {});
   };
@@ -157,8 +206,8 @@ export function TransfersPage() {
     };
   }, [allTransfers]);
 
-  const handleStatusFilter = (filter: StatusFilter) => {
-    setStatusFilter(filter === statusFilter ? "all" : filter);
+  const handleStatusFilter = (f: StatusFilter) => {
+    setStatusFilter(f);
     setPage(1);
   };
 
@@ -228,65 +277,57 @@ export function TransfersPage() {
         )}
       </div>
 
-      <div className="flex gap-4">
-        <Card className={`flex-1 cursor-pointer transition-colors ${statusFilter === "success" ? "ring-2 ring-emerald-500" : ""}`} onClick={() => handleStatusFilter("success")}>
-          <CardContent className="flex items-center gap-3 pt-6">
-            <div className="rounded-lg bg-emerald-500/10 p-2">
-              <CheckCircle className="h-5 w-5 text-emerald-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{successCount}</p>
-              <p className="text-xs text-muted-foreground">Delivered</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className={`flex-1 cursor-pointer transition-colors ${statusFilter === "failed" ? "ring-2 ring-red-500" : ""}`} onClick={() => handleStatusFilter("failed")}>
-          <CardContent className="flex items-center gap-3 pt-6">
-            <div className="rounded-lg bg-red-500/10 p-2">
-              <XCircle className="h-5 w-5 text-red-500" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{failedCount}</p>
-              <p className="text-xs text-muted-foreground">Failed</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className={`flex-1 cursor-pointer transition-colors ${statusFilter === "pending" ? "ring-2 ring-amber-500" : ""}`} onClick={() => handleStatusFilter("pending")}>
-          <CardContent className="flex items-center gap-3 pt-6">
-            <div className="rounded-lg bg-amber-500/10 p-2">
-              {pendingCount > 0 ? (
-                <Clock className="h-5 w-5 text-amber-500 animate-pulse" />
-              ) : (
-                <Clock className="h-5 w-5 text-amber-500" />
-              )}
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{pendingCount}</p>
-              <p className="text-xs text-muted-foreground">
-                {pendingCount > 0 ? "Sending..." : "Pending"}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Compact status filter chips */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1.5">
+          <Button
+            variant={statusFilter === "all" ? "default" : "outline"}
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => handleStatusFilter("all")}
+          >
+            All ({allTransfers.length})
+          </Button>
+          <Button
+            variant={statusFilter === "success" ? "default" : "outline"}
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => handleStatusFilter("success")}
+          >
+            <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
+            Delivered ({successCount})
+          </Button>
+          <Button
+            variant={statusFilter === "failed" ? "default" : "outline"}
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => handleStatusFilter("failed")}
+          >
+            <XCircle className="h-3.5 w-3.5 text-destructive" />
+            Failed ({failedCount})
+          </Button>
+          <Button
+            variant={statusFilter === "pending" ? "default" : "outline"}
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => handleStatusFilter("pending")}
+          >
+            <Clock className={`h-3.5 w-3.5 text-amber-500${pendingCount > 0 ? " animate-pulse" : ""}`} />
+            Pending ({pendingCount})
+          </Button>
+        </div>
       </div>
 
       {pendingCount > 0 && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-sm text-amber-600 dark:text-amber-400">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
-          {pendingCount} transfer{pendingCount > 1 ? "s" : ""} in progress \u2014 auto-refreshing every 5 seconds
-        </div>
-      )}
-
-      {statusFilter !== "all" && (
-        <div className="flex items-center gap-2">
-          <Badge variant="outline">Filtered: {statusFilter}</Badge>
-          <Button variant="ghost" size="sm" onClick={() => { setStatusFilter("all"); setPage(1); }} className="text-xs">Clear filter</Button>
+        <div className="flex items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+          <div className="h-3 w-3 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+          {pendingCount} transfer{pendingCount > 1 ? "s" : ""} in progress — auto-refreshing every 5s
         </div>
       )}
 
       {loading ? (
         <div className="rounded-lg border">
-          <TableSkeleton columns={6} />
+          <TableSkeleton columns={5} />
         </div>
       ) : (
         <div className="rounded-lg border">
@@ -297,7 +338,6 @@ export function TransfersPage() {
                 <TableHead>Study</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Sent</TableHead>
-                <TableHead>Duration</TableHead>
                 <TableHead className="w-[160px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -305,38 +345,56 @@ export function TransfersPage() {
               {transfers.map((t) => {
                 const cfg = statusConfig[t.status];
                 const StatusIcon = cfg.icon;
+                const info = studyNames[t.orthanc_study_id];
                 return (
-                  <TableRow key={t.id} className={t.status === "failed" ? "bg-destructive/5" : t.status === "pending" ? "bg-amber-50/50" : ""}>
+                  <TableRow key={t.id} className={t.status === "failed" ? "bg-destructive/5" : t.status === "pending" ? "bg-amber-50/50 dark:bg-amber-950/10" : ""}>
                     <TableCell>
-                      <div>
-                        <span className="font-medium">{t.pacs_node_name ?? "Unknown"}</span>
+                      <div className="flex flex-col">
+                        <span className="font-medium text-sm">{t.pacs_node_name ?? "Unknown"}</span>
                         {t.pacs_node_ae_title && (
-                          <span className="ml-1 text-xs text-muted-foreground">{t.pacs_node_ae_title}</span>
+                          <span className="text-xs text-muted-foreground">{t.pacs_node_ae_title}</span>
                         )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Link to={`/studies/${t.orthanc_study_id}`} className="text-primary hover:underline text-sm">
-                        {(t.orthanc_study_id ?? "").slice(0, 12)}\u2026
-                      </Link>
+                      <div className="flex flex-col">
+                        <Link to={`/studies/${t.orthanc_study_id}`} className="text-primary hover:underline text-sm font-medium">
+                          {info?.description || t.orthanc_study_id.slice(0, 12) + "\u2026"}
+                        </Link>
+                        {info?.patientName && (
+                          <span className="text-xs text-muted-foreground">{info.patientName.replace(/\^/g, " ")}</span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={cfg.variant} className="gap-1">
-                        {t.status === "pending" ? (
-                          <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
-                        ) : (
-                          <StatusIcon className="h-3 w-3" />
+                      <div className="flex flex-col gap-1">
+                        <Badge variant={cfg.variant} className="gap-1 w-fit">
+                          {t.status === "pending" ? (
+                            <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                          ) : (
+                            <StatusIcon className="h-3 w-3" />
+                          )}
+                          {cfg.label}
+                        </Badge>
+                        {t.status !== "pending" && (
+                          <span className="text-xs text-muted-foreground font-mono">
+                            {formatDuration(t.created_at, t.completed_at)}
+                          </span>
                         )}
-                        {cfg.label}
-                      </Badge>
+                        {t.status === "pending" && (
+                          <span className="text-xs text-amber-600 animate-pulse">sending...</span>
+                        )}
+                      </div>
                     </TableCell>
-                    <TableCell className="text-sm">
-                      {formatTimestamp(t.created_at)}
-                    </TableCell>
-                    <TableCell className="text-sm font-mono">
-                      {t.status === "pending" ? (
-                        <span className="text-amber-600 animate-pulse">sending...</span>
-                      ) : formatDuration(t.created_at, t.completed_at)}
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="text-sm" title={formatTimestamp(t.created_at)}>
+                          {formatRelativeTime(t.created_at)}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatTimestamp(t.created_at)}
+                        </span>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
@@ -375,7 +433,7 @@ export function TransfersPage() {
               })}
               {transfers.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                     <ArrowRightLeft className="mx-auto mb-2 h-8 w-8 opacity-30" />
                     {statusFilter === "all" ? "No transfers yet. Send a study from the Study Detail page." : `No ${statusFilter} transfers`}
                   </TableCell>
