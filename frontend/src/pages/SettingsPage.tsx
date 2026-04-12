@@ -12,12 +12,27 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Plus, Trash2, ShieldOff, Pencil } from "lucide-react";
+import { Plus, Trash2, ShieldOff, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
 import { PageError } from "@/components/page-error";
 import { formatTimestamp } from "@/lib/dicom";
+
+function formatRelativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffSec = Math.floor((now - then) / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays < 30) return `${diffDays}d ago`;
+  const diffMonths = Math.floor(diffDays / 30);
+  return `${diffMonths}mo ago`;
+}
 
 interface User {
   id: number;
@@ -226,30 +241,66 @@ export function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="grid gap-2 max-w-sm">
                 <Label htmlFor="clinic_name">Clinic Name</Label>
-                <Input
-                  id="clinic_name"
-                  value={settings.clinic_name || ""}
-                  onChange={(e) => setSettings({ ...settings, clinic_name: e.target.value })}
-                />
+                <div className="relative">
+                  <Input
+                    id="clinic_name"
+                    value={settings.clinic_name || ""}
+                    onChange={(e) => setSettings({ ...settings, clinic_name: e.target.value })}
+                    className="pr-8"
+                  />
+                  {settings.clinic_name && (
+                    <button
+                      type="button"
+                      onClick={() => setSettings({ ...settings, clinic_name: "" })}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="grid gap-2 max-w-sm">
                 <Label htmlFor="clinic_phone">Clinic Phone</Label>
-                <Input
-                  id="clinic_phone"
-                  value={settings.clinic_phone || ""}
-                  onChange={(e) => setSettings({ ...settings, clinic_phone: e.target.value })}
-                  placeholder="+1 (555) 000-0000"
-                />
+                <div className="relative">
+                  <Input
+                    id="clinic_phone"
+                    value={settings.clinic_phone || ""}
+                    onChange={(e) => setSettings({ ...settings, clinic_phone: e.target.value })}
+                    placeholder="+1 (555) 000-0000"
+                    className="pr-8"
+                  />
+                  {settings.clinic_phone && (
+                    <button
+                      type="button"
+                      onClick={() => setSettings({ ...settings, clinic_phone: "" })}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="grid gap-2 max-w-sm">
                 <Label htmlFor="clinic_email">Clinic Email</Label>
-                <Input
-                  id="clinic_email"
-                  type="email"
-                  value={settings.clinic_email || ""}
-                  onChange={(e) => setSettings({ ...settings, clinic_email: e.target.value })}
-                  placeholder="clinic@example.com"
-                />
+                <div className="relative">
+                  <Input
+                    id="clinic_email"
+                    type="email"
+                    value={settings.clinic_email || ""}
+                    onChange={(e) => setSettings({ ...settings, clinic_email: e.target.value })}
+                    placeholder="clinic@example.com"
+                    className="pr-8"
+                  />
+                  {settings.clinic_email && (
+                    <button
+                      type="button"
+                      onClick={() => setSettings({ ...settings, clinic_email: "" })}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="grid gap-2 max-w-sm">
                 <Label htmlFor="auto_logout">Auto-Logout (minutes)</Label>
@@ -298,7 +349,7 @@ export function SettingsPage() {
                   {users.map((u) => (
                     <TableRow key={u.id}>
                       <TableCell className="font-medium">{u.username}</TableCell>
-                      <TableCell className="text-xs">{formatTimestamp(u.created_at)}</TableCell>
+                      <TableCell className="text-xs" title={formatTimestamp(u.created_at)}>{formatRelativeTime(u.created_at)}</TableCell>
                       <TableCell>{u.token_version}</TableCell>
                       <TableCell>
                         <div className="flex gap-1">
