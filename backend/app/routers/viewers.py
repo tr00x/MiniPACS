@@ -29,9 +29,9 @@ async def create_viewer(
     db: aiosqlite.Connection = Depends(get_db),
 ):
     cursor = await db.execute(
-        "INSERT INTO external_viewers (name, icon, url_scheme, is_enabled, sort_order) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (body.name, body.icon, body.url_scheme, body.is_enabled, body.sort_order),
+        "INSERT INTO external_viewers (name, icon, url_scheme, is_enabled, sort_order, description, icon_key) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (body.name, body.icon, body.url_scheme, body.is_enabled, body.sort_order, body.description, body.icon_key),
     )
     await db.commit()
     viewer_id = cursor.lastrowid
@@ -63,7 +63,7 @@ async def update_viewer(
     if not updates:
         return dict(existing)
 
-    ALLOWED_COLUMNS = {"name", "icon", "url_scheme", "is_enabled", "sort_order"}
+    ALLOWED_COLUMNS = {"name", "icon", "url_scheme", "is_enabled", "sort_order", "description", "icon_key"}
     set_clauses = []
     values = []
     for col in ALLOWED_COLUMNS:

@@ -103,3 +103,36 @@ async def init_db():
             await db.commit()
         except Exception:
             pass  # Column already exists
+
+        try:
+            await db.execute("ALTER TABLE external_viewers ADD COLUMN description TEXT")
+            await db.commit()
+        except Exception:
+            pass  # Column already exists
+
+        try:
+            await db.execute("ALTER TABLE external_viewers ADD COLUMN icon_key TEXT")
+            await db.commit()
+        except Exception:
+            pass  # Column already exists
+
+        # Seed default external viewers if none exist
+        cursor = await db.execute("SELECT COUNT(*) FROM external_viewers")
+        count = (await cursor.fetchone())[0]
+        if count == 0:
+            default_viewers = [
+                ("OHIF Viewer", "/ohif/viewer?StudyInstanceUIDs={StudyInstanceUID}", 1, "Built-in zero-footprint DICOM viewer", "ohif"),
+                ("Papaya Viewer", "https://papaya.greenant.com/?url={StudyInstanceUID}", 0, "Lightweight neuroimaging viewer", "papaya"),
+                ("dwv (DICOM Web Viewer)", "https://ivmartel.github.io/dwv/demo/trunk/viewers/mobile/index.html", 0, "Open-source DICOM viewer", "dwv"),
+                ("Cornerstone.js", "https://tools.cornerstonejs.org/examples/", 0, "Medical imaging framework demo", "cornerstone"),
+                ("Stone Web Viewer", "https://www.orthanc-server.com/static.php?page=stone-web-viewer", 0, "Orthanc's Stone Web Viewer", "stone"),
+                ("3D Slicer", "https://www.slicer.org/", 0, "3D visualization and analysis platform", "slicer"),
+                ("Horos", "https://horosproject.org/", 0, "Free macOS DICOM viewer (desktop)", "horos"),
+                ("RadiAnt", "https://www.radiantviewer.com/", 0, "Fast DICOM viewer for Windows/Mac", "radiant"),
+            ]
+            for name, url_scheme, is_enabled, description, icon_key in default_viewers:
+                await db.execute(
+                    "INSERT INTO external_viewers (name, url_scheme, is_enabled, description, icon_key) VALUES (?, ?, ?, ?, ?)",
+                    (name, url_scheme, is_enabled, description, icon_key),
+                )
+            await db.commit()

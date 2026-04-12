@@ -12,12 +12,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Plus, Trash2, ShieldOff, Pencil, X } from "lucide-react";
+import { Plus, Trash2, ShieldOff, Pencil, X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
 import { PageError } from "@/components/page-error";
-import { formatTimestamp } from "@/lib/dicom";
+import { formatTimestamp, VIEWER_ICONS } from "@/lib/dicom";
 
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now();
@@ -48,6 +48,8 @@ interface Viewer {
   icon: string | null;
   sort_order: number;
   is_enabled: number;
+  description?: string;
+  icon_key?: string;
 }
 
 export function SettingsPage() {
@@ -67,7 +69,7 @@ export function SettingsPage() {
   // Viewer dialog
   const [viewerDialogOpen, setViewerDialogOpen] = useState(false);
   const [viewerEditingId, setViewerEditingId] = useState<number | null>(null);
-  const [viewerForm, setViewerForm] = useState({ name: "", url_scheme: "", icon: "", sort_order: "0" });
+  const [viewerForm, setViewerForm] = useState({ name: "", url_scheme: "", icon: "", sort_order: "0", description: "", icon_key: "" });
   const [viewerDialogError, setViewerDialogError] = useState<string | null>(null);
 
   // Confirm dialogs
@@ -160,6 +162,8 @@ export function SettingsPage() {
       icon: viewerForm.icon || null,
       sort_order: Number(viewerForm.sort_order) || 0,
       is_enabled: true,
+      description: viewerForm.description || "",
+      icon_key: viewerForm.icon_key || "",
     };
     try {
       if (viewerEditingId) {
@@ -186,6 +190,8 @@ export function SettingsPage() {
       url_scheme: v.url_scheme,
       icon: v.icon || "",
       sort_order: String(v.sort_order || 0),
+      description: v.description || "",
+      icon_key: v.icon_key || "",
     });
     setViewerDialogError(null);
     setViewerDialogOpen(true);
@@ -207,9 +213,10 @@ export function SettingsPage() {
     try {
       await api.put(`/viewers/${v.id}`, { is_enabled: !v.is_enabled });
       setViewers(viewers.map((x) => x.id === v.id ? { ...x, is_enabled: x.is_enabled ? 0 : 1 } : x));
+      toast.success(`${v.name} ${v.is_enabled ? "disabled" : "enabled"}`);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to update viewer");
+      toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to update viewer");
     }
   };
 
@@ -373,48 +380,48 @@ export function SettingsPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-medium">External Viewers</CardTitle>
-              <Button size="sm" onClick={() => { setViewerEditingId(null); setViewerForm({ name: "", url_scheme: "", icon: "", sort_order: "0" }); setViewerDialogOpen(true); setViewerDialogError(null); }}>
+              <Button size="sm" onClick={() => { setViewerEditingId(null); setViewerForm({ name: "", url_scheme: "", icon: "", sort_order: "0", description: "", icon_key: "" }); setViewerDialogOpen(true); setViewerDialogError(null); }}>
                 <Plus className="mr-1 h-4 w-4" /> Add Viewer
               </Button>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>URL Scheme</TableHead>
-                    <TableHead>Enabled</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {viewers.map((v) => (
-                    <TableRow key={v.id}>
-                      <TableCell className="font-medium">{v.name}</TableCell>
-                      <TableCell className="font-mono text-xs max-w-xs truncate">{v.url_scheme}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={v.is_enabled ? "default" : "secondary"}
-                          className="cursor-pointer"
-                          onClick={() => handleToggleViewer(v)}
-                        >
-                          {v.is_enabled ? "Enabled" : "Disabled"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" onClick={() => openEditViewer(v)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => setDeleteViewerId(v.id)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <div className="space-y-2">
+                {viewers.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-8">No external viewers configured. Add one to get started.</p>
+                )}
+                {viewers.map((v) => (
+                  <div key={v.id} className="flex items-center gap-4 rounded-lg border p-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-lg shrink-0">
+                      {VIEWER_ICONS[v.icon_key || ""] || v.name[0]}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{v.name}</span>
+                        {v.is_enabled ? (
+                          <Badge variant="default" className="text-[10px]">Active</Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px]">Disabled</Badge>
+                        )}
+                      </div>
+                      {v.description && (
+                        <p className="text-xs text-muted-foreground mt-0.5">{v.description}</p>
+                      )}
+                      <code className="text-[10px] text-muted-foreground/60 font-mono truncate block mt-0.5">{v.url_scheme}</code>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button variant="ghost" size="icon" onClick={() => handleToggleViewer(v)} title={v.is_enabled ? "Disable" : "Enable"}>
+                        {v.is_enabled ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => openEditViewer(v)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteViewerId(v.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -451,12 +458,21 @@ export function SettingsPage() {
               <Input id="viewer_name" value={viewerForm.name} onChange={(e) => setViewerForm({ ...viewerForm, name: e.target.value })} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="viewer_url">URL Scheme</Label>
-              <Input id="viewer_url" value={viewerForm.url_scheme} onChange={(e) => setViewerForm({ ...viewerForm, url_scheme: e.target.value })} placeholder="radiant://..." />
+              <Label htmlFor="viewer_description">Description</Label>
+              <Input id="viewer_description" value={viewerForm.description} onChange={(e) => setViewerForm({ ...viewerForm, description: e.target.value })} placeholder="Short description of the viewer" />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="viewer_url">URL Scheme</Label>
+              <Input id="viewer_url" value={viewerForm.url_scheme} onChange={(e) => setViewerForm({ ...viewerForm, url_scheme: e.target.value })} placeholder="/ohif/viewer?StudyInstanceUIDs={StudyInstanceUID}" />
+              <p className="text-xs text-muted-foreground">Use {"{StudyInstanceUID}"} or {"{study_id}"} as placeholders</p>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="viewer_icon">Icon</Label>
+                <Label htmlFor="viewer_icon_key">Icon Key</Label>
+                <Input id="viewer_icon_key" value={viewerForm.icon_key} onChange={(e) => setViewerForm({ ...viewerForm, icon_key: e.target.value })} placeholder="e.g. ohif" />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="viewer_icon">Icon (legacy)</Label>
                 <Input id="viewer_icon" value={viewerForm.icon} onChange={(e) => setViewerForm({ ...viewerForm, icon: e.target.value })} placeholder="e.g. radiant" />
               </div>
               <div className="grid gap-2">
