@@ -153,66 +153,73 @@ export function StudiesPage() {
       </div>
 
       {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="space-y-3">
         <Input
-          placeholder="Search patient, description..."
+          placeholder="Search patient name, description, MRN..."
           value={searchQuery}
           onChange={(e) => handleSearchChange(e.target.value)}
-          className="max-w-xs"
+          className="max-w-md"
         />
 
-        {/* Date presets */}
-        <div className="flex gap-1">
-          {datePresets.map((dp) => (
-            <Button
-              key={dp.key}
-              variant={datePreset === dp.key ? "default" : "outline"}
-              size="sm"
-              onClick={() => handleDatePreset(dp.key)}
-            >
-              {dp.label}
-            </Button>
-          ))}
-        </div>
-
-        {/* Custom date range */}
-        {datePreset === "custom" && (
+        <div className="flex flex-wrap items-center gap-4">
+          {/* Date presets */}
           <div className="flex items-center gap-1.5">
-            <Input
-              type="date"
-              value={customFrom}
-              onChange={(e) => { setCustomFrom(e.target.value); setPage(1); }}
-              className="w-[140px] h-8 text-xs"
-            />
-            <span className="text-xs text-muted-foreground">to</span>
-            <Input
-              type="date"
-              value={customTo}
-              onChange={(e) => { setCustomTo(e.target.value); setPage(1); }}
-              className="w-[140px] h-8 text-xs"
-            />
+            <span className="text-xs font-medium text-muted-foreground mr-1">Date:</span>
+            {datePresets.map((dp) => (
+              <Button
+                key={dp.key}
+                variant={datePreset === dp.key ? "default" : "outline"}
+                size="default"
+                className="h-8 px-3 text-sm"
+                onClick={() => handleDatePreset(dp.key)}
+              >
+                {dp.label}
+              </Button>
+            ))}
           </div>
-        )}
 
-        {/* Modality chips */}
-        <div className="flex gap-1">
-          <Button
-            variant={modFilter === "" ? "default" : "outline"}
-            size="sm"
-            onClick={() => handleModFilter("")}
-          >
-            All
-          </Button>
-          {modalities.map((m) => (
+          {/* Custom date range */}
+          {datePreset === "custom" && (
+            <div className="flex items-center gap-2">
+              <Input
+                type="date"
+                value={customFrom}
+                onChange={(e) => { setCustomFrom(e.target.value); setPage(1); }}
+                className="w-[150px] h-8"
+              />
+              <span className="text-sm text-muted-foreground">—</span>
+              <Input
+                type="date"
+                value={customTo}
+                onChange={(e) => { setCustomTo(e.target.value); setPage(1); }}
+                className="w-[150px] h-8"
+              />
+            </div>
+          )}
+
+          {/* Modality chips */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground mr-1">Modality:</span>
             <Button
-              key={m}
-              variant={modFilter === m ? "default" : "outline"}
-              size="sm"
-              onClick={() => handleModFilter(m)}
+              variant={modFilter === "" ? "default" : "outline"}
+              size="default"
+              className="h-8 px-3 text-sm"
+              onClick={() => handleModFilter("")}
             >
-              {m}
+              All
             </Button>
-          ))}
+            {modalities.map((m) => (
+              <Button
+                key={m}
+                variant={modFilter === m ? "default" : "outline"}
+                size="default"
+                className="h-8 px-3 text-sm"
+                onClick={() => handleModFilter(m)}
+              >
+                {m}
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -226,43 +233,58 @@ export function StudiesPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50">
-                <TableHead>Date</TableHead>
-                <TableHead>Patient</TableHead>
-                <TableHead>MRN</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Modality</TableHead>
-                <TableHead className="text-right">Series</TableHead>
+                <TableHead className="w-[100px]">Date</TableHead>
+                <TableHead className="w-[200px]">Patient</TableHead>
+                <TableHead>Study</TableHead>
+                <TableHead className="w-[100px]">Modality</TableHead>
+                <TableHead className="w-[80px] text-right">Series</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {studies.map((s) => {
                 const mod = tag(s, "ModalitiesInStudy");
+                const institution = tag(s, "InstitutionName");
+                const referrer = tag(s, "ReferringPhysicianName");
+                const accession = tag(s, "AccessionNumber");
                 return (
                   <TableRow
                     key={s.ID}
                     className="cursor-pointer hover:bg-accent/50"
                     onClick={() => navigate(`/studies/${s.ID}`)}
                   >
-                    <TableCell className="font-medium">
-                      {formatDicomDate(tag(s, "StudyDate"))}
+                    <TableCell>
+                      <span className="font-medium">{formatDicomDate(tag(s, "StudyDate"))}</span>
                     </TableCell>
                     <TableCell>
-                      <span
-                        className="font-medium text-primary hover:underline cursor-pointer"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/patients/${s.ParentPatient}`);
-                        }}
-                      >
-                        {formatDicomName(ptag(s, "PatientName"))}
-                      </span>
+                      <div>
+                        <span
+                          className="font-medium text-primary hover:underline cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/patients/${s.ParentPatient}`);
+                          }}
+                        >
+                          {formatDicomName(ptag(s, "PatientName"))}
+                        </span>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <code className="font-medical-id text-[11px] text-muted-foreground">
+                            {ptag(s, "PatientID")}
+                          </code>
+                        </div>
+                      </div>
                     </TableCell>
                     <TableCell>
-                      <code className="font-medical-id rounded bg-muted px-1.5 py-0.5 text-xs">
-                        {ptag(s, "PatientID")}
-                      </code>
+                      <div>
+                        <span className="font-medium text-sm">
+                          {tag(s, "StudyDescription") || "Untitled Study"}
+                        </span>
+                        <div className="flex items-center gap-3 mt-0.5 text-[11px] text-muted-foreground">
+                          {institution && <span>{institution}</span>}
+                          {referrer && <span>Ref: {formatDicomName(referrer)}</span>}
+                          {accession && <span className="font-medical-id">Acc# {accession}</span>}
+                        </div>
+                      </div>
                     </TableCell>
-                    <TableCell>{tag(s, "StudyDescription") || "\u2014"}</TableCell>
                     <TableCell>
                       {mod ? <ModalityBadgeList modalities={mod.replace(/\\/g, "/").split("/")} /> : "\u2014"}
                     </TableCell>
@@ -277,7 +299,7 @@ export function StudiesPage() {
               {studies.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={5}
                     className="h-24 text-center text-muted-foreground"
                   >
                     No studies match the current filters
