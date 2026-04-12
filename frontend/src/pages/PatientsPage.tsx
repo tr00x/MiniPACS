@@ -8,7 +8,7 @@ import {
 import { TableSkeleton } from "@/components/TableSkeleton";
 import { PageError } from "@/components/page-error";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
-import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ExternalLink } from "lucide-react";
 import api from "@/lib/api";
 import { formatDicomName, formatDicomDate, calculateAge } from "@/lib/dicom";
 
@@ -158,18 +158,15 @@ export function PatientsPage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50">
-                  <TableHead className="w-[220px] cursor-pointer group" onClick={() => toggleSort("name")}>
+                  <TableHead className="cursor-pointer group" onClick={() => toggleSort("name")}>
                     <span className="flex items-center gap-1">Patient <SortIcon col="name" /></span>
                   </TableHead>
-                  <TableHead>ID</TableHead>
-                  <TableHead className="cursor-pointer group" onClick={() => toggleSort("dob")}>
-                    <span className="flex items-center gap-1">Date of Birth <SortIcon col="dob" /></span>
-                  </TableHead>
-                  <TableHead>Sex</TableHead>
+                  <TableHead>Details</TableHead>
                   <TableHead>Last Study</TableHead>
-                  <TableHead className="text-right cursor-pointer group" onClick={() => toggleSort("studies")}>
-                    <span className="flex items-center gap-1 justify-end">Studies <SortIcon col="studies" /></span>
+                  <TableHead className="text-center cursor-pointer group" onClick={() => toggleSort("studies")}>
+                    <span className="flex items-center gap-1 justify-center">Studies <SortIcon col="studies" /></span>
                   </TableHead>
+                  <TableHead className="w-[80px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -180,43 +177,70 @@ export function PatientsPage() {
                   const sex = tag(p, "PatientSex");
                   const lastStudy = p.LastStudy;
                   const modality = lastStudy?.ModalitiesInStudy || "";
+                  const lastStudyId = p.Studies?.[p.Studies.length - 1];
                   return (
                     <TableRow key={p.ID} className="cursor-pointer hover:bg-accent/50" onClick={() => navigate(`/patients/${p.ID}`)}>
                       <TableCell>
-                        <span className="font-medium">{formatDicomName(rawName)}</span>
+                        <div>
+                          <span className="font-medium">{formatDicomName(rawName)}</span>
+                          <div className="mt-0.5">
+                            <code className="font-medical-id text-[11px] text-muted-foreground">{tag(p, "PatientID")}</code>
+                          </div>
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <code className="font-medical-id rounded bg-muted px-1.5 py-0.5 text-xs">{tag(p, "PatientID")}</code>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm">{formatDicomDate(dob)}</span>
-                        {dob && <span className="ml-1.5 text-xs text-muted-foreground">({calculateAge(dob)})</span>}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {sex === "M" ? "Male" : sex === "F" ? "Female" : sex || "\u2014"}
+                        <div className="space-y-0.5">
+                          <div className="text-sm">
+                            {formatDicomDate(dob)}
+                            {dob && <span className="ml-1 text-xs text-muted-foreground">({calculateAge(dob)})</span>}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {sex === "M" ? "Male" : sex === "F" ? "Female" : sex || ""}
+                          </div>
+                        </div>
                       </TableCell>
                       <TableCell>
                         {lastStudy ? (
-                          <div className="flex items-center gap-2">
-                            {modality && <ModalityBadgeList modalities={modality.replace(/\\/g, "/").split("/")} />}
-                            <span className="text-xs text-muted-foreground truncate max-w-[180px]">
-                              {lastStudy.StudyDescription || "\u2014"}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground/60 shrink-0">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              {modality && <ModalityBadgeList modalities={modality.replace(/\\/g, "/").split("/")} />}
+                              <span className="text-sm font-medium truncate max-w-[220px]">
+                                {lastStudy.StudyDescription || "Untitled"}
+                              </span>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
                               {formatDicomDate(lastStudy.StudyDate || "")}
-                            </span>
+                            </div>
                           </div>
                         ) : (
-                          <span className="text-xs text-muted-foreground">\u2014</span>
+                          <span className="text-xs text-muted-foreground">No studies</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right font-medium">{studyCount}</TableCell>
+                      <TableCell className="text-center">
+                        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-muted text-sm font-medium">
+                          {studyCount}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {lastStudyId && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 gap-1 text-xs"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/studies/${lastStudyId}`); }}
+                            title="Open last study"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            Last
+                          </Button>
+                        )}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
                 {patients.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                       {search ? "No patients match your search" : "No patients in the system"}
                     </TableCell>
                   </TableRow>
