@@ -98,8 +98,8 @@ export function SharesPage() {
   useEffect(() => {
     const ctrl = new AbortController();
     fetchShares(ctrl.signal);
-    api.get("/patients", { signal: ctrl.signal })
-      .then(({ data }) => setPatients(data))
+    api.get("/patients", { params: { limit: 100 }, signal: ctrl.signal })
+      .then(({ data }) => setPatients(data.items ?? data))
       .catch(() => {});
     return () => ctrl.abort();
   }, []);
