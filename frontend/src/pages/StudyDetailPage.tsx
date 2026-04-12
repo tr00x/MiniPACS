@@ -109,6 +109,7 @@ export function StudyDetailPage() {
   const [reportFile, setReportFile] = useState<File | null>(null);
   const [savingReport, setSavingReport] = useState(false);
   const [viewingReport, setViewingReport] = useState<number | null>(null);
+  const [pdfViewUrl, setPdfViewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -427,6 +428,80 @@ export function StudyDetailPage() {
         </div>
       )}
 
+      {/* Study Metadata (collapsed by default) */}
+      <Card>
+        <CardHeader className="cursor-pointer select-none pb-3" onClick={() => setShowMetadata(!showMetadata)}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Info className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Study Information</CardTitle>
+            </div>
+            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground">
+              {showMetadata ? "Hide" : "Show details"}
+            </Button>
+          </div>
+        </CardHeader>
+        {showMetadata && (
+          <CardContent>
+            <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm md:grid-cols-4">
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Patient</dt>
+                <dd className="mt-1 font-medium">
+                  {study?.ParentPatient ? (
+                    <Link to={`/patients/${study.ParentPatient}`} className="text-primary hover:underline">
+                      {formatDicomName(ptag("PatientName"))}
+                    </Link>
+                  ) : formatDicomName(ptag("PatientName"))}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Medical Record #</dt>
+                <dd className="mt-1">
+                  <code className="font-medical-id rounded bg-muted px-1.5 py-0.5 text-xs">{ptag("PatientID") || "—"}</code>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study Date</dt>
+                <dd className="mt-1">{formatDicomDate(stag("StudyDate"))}</dd>
+              </div>
+              {stag("InstitutionName") && (
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Institution</dt>
+                  <dd className="mt-1">{stag("InstitutionName")}</dd>
+                </div>
+              )}
+              {stag("ReferringPhysicianName") && (
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Referring Physician</dt>
+                  <dd className="mt-1">{formatDicomName(stag("ReferringPhysicianName"))}</dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Accession #</dt>
+                <dd className="mt-1">
+                  {stag("AccessionNumber") ? (
+                    <code className="font-medical-id rounded bg-muted px-1.5 py-0.5 text-xs">{stag("AccessionNumber")}</code>
+                  ) : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study UID</dt>
+                <dd className="mt-1 flex items-center gap-1">
+                  <code className="font-medical-id max-w-[200px] truncate rounded bg-muted px-1.5 py-0.5 text-xs" title={studyUid}>
+                    {studyUid || "—"}
+                  </code>
+                  {studyUid && (
+                    <Button variant="ghost" size="icon" className="h-5 w-5" onClick={copyUid}>
+                      {uidCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                    </Button>
+                  )}
+                </dd>
+              </div>
+            </dl>
+          </CardContent>
+        )}
+      </Card>
+
       {/* Series info blocks */}
       <Card>
         <CardHeader className="pb-3">
@@ -524,13 +599,23 @@ export function StudyDetailPage() {
                       ) : (
                         <div className="space-y-2">
                           <p className="text-xs text-muted-foreground">File: {r.filename}</p>
-                          <Button variant="outline" size="sm" onClick={() => {
-                            const blob = new Blob([Uint8Array.from(atob(r.content), c => c.charCodeAt(0))], { type: "application/pdf" });
-                            const url = URL.createObjectURL(blob);
-                            window.open(url, "_blank");
-                          }}>
-                            Open PDF
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button variant="outline" size="sm" onClick={() => {
+                              const blob = new Blob([Uint8Array.from(atob(r.content), c => c.charCodeAt(0))], { type: "application/pdf" });
+                              setPdfViewUrl(URL.createObjectURL(blob));
+                            }}>
+                              View PDF
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => {
+                              const blob = new Blob([Uint8Array.from(atob(r.content), c => c.charCodeAt(0))], { type: "application/pdf" });
+                              const a = document.createElement("a");
+                              a.href = URL.createObjectURL(blob);
+                              a.download = r.filename || "report.pdf";
+                              a.click();
+                            }}>
+                              Download PDF
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -540,80 +625,6 @@ export function StudyDetailPage() {
             </div>
           )}
         </CardContent>
-      </Card>
-
-      {/* Study Metadata (collapsed by default) */}
-      <Card>
-        <CardHeader className="cursor-pointer select-none pb-3" onClick={() => setShowMetadata(!showMetadata)}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Info className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-sm font-medium">Study Information</CardTitle>
-            </div>
-            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground">
-              {showMetadata ? "Hide" : "Show details"}
-            </Button>
-          </div>
-        </CardHeader>
-        {showMetadata && (
-          <CardContent>
-            <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm md:grid-cols-4">
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Patient</dt>
-                <dd className="mt-1 font-medium">
-                  {study?.ParentPatient ? (
-                    <Link to={`/patients/${study.ParentPatient}`} className="text-primary hover:underline">
-                      {formatDicomName(ptag("PatientName"))}
-                    </Link>
-                  ) : formatDicomName(ptag("PatientName"))}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Medical Record #</dt>
-                <dd className="mt-1">
-                  <code className="font-medical-id rounded bg-muted px-1.5 py-0.5 text-xs">{ptag("PatientID") || "—"}</code>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study Date</dt>
-                <dd className="mt-1">{formatDicomDate(stag("StudyDate"))}</dd>
-              </div>
-              {stag("InstitutionName") && (
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Institution</dt>
-                  <dd className="mt-1">{stag("InstitutionName")}</dd>
-                </div>
-              )}
-              {stag("ReferringPhysicianName") && (
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Referring Physician</dt>
-                  <dd className="mt-1">{formatDicomName(stag("ReferringPhysicianName"))}</dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Accession #</dt>
-                <dd className="mt-1">
-                  {stag("AccessionNumber") ? (
-                    <code className="font-medical-id rounded bg-muted px-1.5 py-0.5 text-xs">{stag("AccessionNumber")}</code>
-                  ) : "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study UID</dt>
-                <dd className="mt-1 flex items-center gap-1">
-                  <code className="font-medical-id max-w-[200px] truncate rounded bg-muted px-1.5 py-0.5 text-xs" title={studyUid}>
-                    {studyUid || "—"}
-                  </code>
-                  {studyUid && (
-                    <Button variant="ghost" size="icon" className="h-5 w-5" onClick={copyUid}>
-                      {uidCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-                    </Button>
-                  )}
-                </dd>
-              </div>
-            </dl>
-          </CardContent>
-        )}
       </Card>
 
       {/* Send Dialog */}
@@ -1014,6 +1025,14 @@ Clinton Medical`
               {savingReport ? "Saving..." : "Save Report"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* PDF Viewer Modal */}
+      <Dialog open={!!pdfViewUrl} onOpenChange={(open) => { if (!open) { if (pdfViewUrl) URL.revokeObjectURL(pdfViewUrl); setPdfViewUrl(null); } }}>
+        <DialogContent className="max-w-4xl h-[85vh] p-0">
+          {pdfViewUrl && (
+            <iframe src={pdfViewUrl} className="w-full h-full rounded-lg" title="PDF Report" />
+          )}
         </DialogContent>
       </Dialog>
     </div>
