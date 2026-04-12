@@ -8,7 +8,7 @@ import aiosqlite
 from app.database import get_db
 from app.models.shares import ShareCreate, ShareUpdate
 from app.routers.auth import get_current_user
-from app.services.auth import generate_share_token
+from app.services.auth import generate_share_token, hash_password, verify_password
 from app.services import orthanc
 from app.middleware.audit import log_audit
 
@@ -56,10 +56,14 @@ async def create_share(
     token = generate_share_token()
     expires_at = body.expires_at.isoformat() if body.expires_at else None
 
+    pin_hash = None
+    if body.pin:
+        pin_hash = hash_password(body.pin)
+
     cursor = await db.execute(
-        """INSERT INTO patient_shares (orthanc_patient_id, token, expires_at, created_by)
-           VALUES (?, ?, ?, ?)""",
-        (body.orthanc_patient_id, token, expires_at, user["id"]),
+        """INSERT INTO patient_shares (orthanc_patient_id, token, expires_at, created_by, pin_hash)
+           VALUES (?, ?, ?, ?, ?)""",
+        (body.orthanc_patient_id, token, expires_at, user["id"], pin_hash),
     )
     await db.commit()
     share_id = cursor.lastrowid
@@ -174,6 +178,64 @@ async def _validate_share(token: str, db: aiosqlite.Connection) -> dict:
     return share
 
 
+@portal_router.get("/{token}/info")
+async def share_info(
+    token: str,
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """Get basic share info (no PHI) -- used to show PIN prompt."""
+    cursor = await db.execute(
+        "SELECT token, pin_hash, is_active, expires_at FROM patient_shares WHERE token = ?",
+        (token,),
+    )
+    share = await cursor.fetchone()
+    if not share:
+        raise HTTPException(404, "Link not found")
+    share = dict(share)
+
+    if not share["is_active"]:
+        raise HTTPException(410, "This link has been revoked.")
+
+    if share["expires_at"]:
+        expires = datetime.fromisoformat(share["expires_at"])
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expires:
+            raise HTTPException(410, "This link has expired.")
+
+    return {
+        "has_pin": bool(share.get("pin_hash")),
+        "expires_at": share["expires_at"],
+    }
+
+
+@portal_router.post("/{token}/verify-pin")
+async def verify_share_pin(
+    token: str,
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """Verify PIN for a share. Returns 200 if correct, 401 if wrong."""
+    body = await request.json()
+    pin = body.get("pin", "")
+
+    cursor = await db.execute(
+        "SELECT * FROM patient_shares WHERE token = ?", (token,),
+    )
+    share = await cursor.fetchone()
+    if not share:
+        raise HTTPException(404, "Link not found")
+    share = dict(share)
+
+    if not share.get("pin_hash"):
+        return {"verified": True}
+
+    if verify_password(pin, share["pin_hash"]):
+        return {"verified": True}
+
+    raise HTTPException(401, "Invalid PIN")
+
+
 @portal_router.get("/{token}")
 async def patient_portal(
     token: str,
@@ -214,6 +276,7 @@ async def patient_portal(
         "share": {
             "orthanc_patient_id": share["orthanc_patient_id"],
             "expires_at": share["expires_at"],
+            "has_pin": bool(share.get("pin_hash")),
         },
     }
 
