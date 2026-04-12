@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import api from "@/lib/api";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
-import { ModalityBadge } from "@/components/ui/modality-badge";
+import { ModalityBadgeList } from "@/components/ui/modality-badge";
 import { TableSkeleton } from "@/components/TableSkeleton";
 import { PageError } from "@/components/page-error";
 
@@ -264,7 +264,7 @@ export function StudiesPage() {
                     </TableCell>
                     <TableCell>{tag(s, "StudyDescription") || "\u2014"}</TableCell>
                     <TableCell>
-                      {mod ? <ModalityBadge modality={mod} /> : "\u2014"}
+                      {mod ? <ModalityBadgeList modalities={mod.replace(/\\/g, "/").split("/")} /> : "\u2014"}
                     </TableCell>
                     <TableCell className="text-right">
                       <Badge variant="secondary" className="text-xs">
