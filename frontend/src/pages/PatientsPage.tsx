@@ -194,7 +194,9 @@ export function PatientsPage() {
                             {formatDicomDate(dob)}
                             {dob && <span className="ml-1 text-xs text-muted-foreground">({calculateAge(dob)})</span>}
                           </div>
-                          <div className="text-xs text-muted-foreground">
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            {sex === "M" && <span className="text-blue-500">&#9794;</span>}
+                            {sex === "F" && <span className="text-pink-500">&#9792;</span>}
                             {sex === "M" ? "Male" : sex === "F" ? "Female" : sex || ""}
                           </div>
                         </div>
