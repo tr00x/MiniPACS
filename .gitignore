@@ -16,3 +16,5 @@ frontend/build/
 .DS_Store
 Thumbs.db
 .worktrees/
+ohif-source/
+ohif-dist/

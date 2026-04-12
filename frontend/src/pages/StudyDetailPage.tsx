@@ -13,6 +13,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Download, Send, ExternalLink } from "lucide-react";
+import { OhifViewer } from "@/components/viewer/OhifViewer";
 import api from "@/lib/api";
 
 interface StudyData {
@@ -238,12 +239,7 @@ export function StudyDetailPage() {
             <CardTitle className="text-sm font-medium">OHIF Viewer</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <iframe
-              src={`/ohif/viewer?StudyInstanceUIDs=${studyUid}`}
-              className="h-[600px] w-full border-0"
-              title="OHIF DICOM Viewer"
-              allow="fullscreen"
-            />
+            <OhifViewer studyInstanceUID={studyUid} className="h-[600px] w-full border-0" />
           </CardContent>
         </Card>
       )}
