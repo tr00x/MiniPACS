@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Download, Eye, EyeOff, Shield, Phone, Mail, Calendar, User } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Download, Eye, EyeOff, Shield, Phone, Mail, Calendar, User, Lock } from "lucide-react";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import axios from "axios";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
@@ -31,6 +32,7 @@ interface Study {
 interface ShareInfo {
   orthanc_patient_id: string;
   expires_at: string | null;
+  has_pin?: boolean;
 }
 
 interface ClinicSettings {
@@ -52,14 +54,55 @@ export function PatientPortalPage() {
   const [viewingStudy, setViewingStudy] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
 
+  // PIN gate state
+  const [needsPin, setNeedsPin] = useState<boolean | null>(null); // null = checking
+  const [pinValue, setPinValue] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [pinVerified, setPinVerified] = useState(false);
+  const [pinSubmitting, setPinSubmitting] = useState(false);
+
   useEffect(() => {
     portalApi.get("/settings/public")
       .then(({ data }) => setClinicSettings(data))
       .catch(() => {});
   }, []);
 
+  // Step 1: Check if PIN is needed
   useEffect(() => {
     if (!token) return;
+    const ctrl = new AbortController();
+
+    portalApi
+      .get(`/patient-portal/${token}/info`, { signal: ctrl.signal })
+      .then(({ data }) => {
+        if (data.has_pin) {
+          setNeedsPin(true);
+          setLoading(false);
+        } else {
+          setNeedsPin(false);
+          setPinVerified(true); // No PIN needed, proceed directly
+        }
+      })
+      .catch((err) => {
+        if (err.name !== "CanceledError" && err.name !== "AbortError") {
+          const status = err?.response?.status;
+          if (status === 410) {
+            setError("This link has expired or been revoked. Please contact the clinic for a new link.");
+          } else if (status === 404) {
+            setError("This link is invalid. Please check the link or contact the clinic.");
+          } else {
+            setError(err?.response?.data?.detail ?? "Unable to load your records. Please try again later.");
+          }
+          setLoading(false);
+        }
+      });
+
+    return () => ctrl.abort();
+  }, [token]);
+
+  // Step 2: Load patient data (only after PIN verified or no PIN needed)
+  useEffect(() => {
+    if (!token || !pinVerified) return;
     const ctrl = new AbortController();
     setLoading(true);
     setError(null);
@@ -86,7 +129,27 @@ export function PatientPortalPage() {
       .finally(() => setLoading(false));
 
     return () => ctrl.abort();
-  }, [token]);
+  }, [token, pinVerified]);
+
+  const handlePinSubmit = async () => {
+    if (!token || pinValue.length < 4) return;
+    setPinSubmitting(true);
+    setPinError("");
+    try {
+      await portalApi.post(`/patient-portal/${token}/verify-pin`, { pin: pinValue });
+      setPinVerified(true);
+      setNeedsPin(false);
+    } catch (err) {
+      const e = err as { response?: { status?: number; data?: { detail?: string } } };
+      if (e?.response?.status === 401) {
+        setPinError("Incorrect PIN. Please try again.");
+      } else {
+        setPinError(e?.response?.data?.detail ?? "Verification failed. Please try again.");
+      }
+    } finally {
+      setPinSubmitting(false);
+    }
+  };
 
   if (!token) {
     return (
@@ -128,6 +191,55 @@ export function PatientPortalPage() {
 
   const clinicName = clinicSettings.clinic_name || "Medical Imaging Portal";
   const sex = ptag("PatientSex");
+
+  // PIN gate screen
+  if (needsPin === true && !pinVerified) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <Card className="w-full max-w-sm mx-4 shadow-lg">
+          <CardContent className="pt-8 pb-6 text-center space-y-6">
+            <div className="flex justify-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                <Lock className="h-6 w-6 text-primary" />
+              </div>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">{clinicName}</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Enter your PIN to access your records
+              </p>
+            </div>
+            <div className="space-y-3">
+              <Input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="Enter PIN"
+                value={pinValue}
+                onChange={(e) => {
+                  setPinValue(e.target.value.replace(/\D/g, ""));
+                  setPinError("");
+                }}
+                onKeyDown={(e) => e.key === "Enter" && handlePinSubmit()}
+                className="text-center text-2xl tracking-[0.5em] h-14 font-mono"
+                autoFocus
+              />
+              {pinError && (
+                <p className="text-sm text-destructive">{pinError}</p>
+              )}
+            </div>
+            <Button
+              onClick={handlePinSubmit}
+              className="w-full"
+              disabled={pinValue.length < 4 || pinSubmitting}
+            >
+              {pinSubmitting ? "Verifying..." : "Access Records"}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -181,6 +293,21 @@ export function PatientPortalPage() {
     );
   }
 
+  // Map modality to left border color
+  const modalityBorderColor = (mod: string): string => {
+    const m = mod.split("\\")[0]?.trim().toUpperCase();
+    switch (m) {
+      case "MR": return "border-l-blue-500";
+      case "CT": return "border-l-amber-500";
+      case "CR": case "DX": return "border-l-green-500";
+      case "US": return "border-l-purple-500";
+      case "XA": return "border-l-red-500";
+      case "MG": return "border-l-pink-500";
+      case "NM": case "PT": return "border-l-orange-500";
+      default: return "border-l-gray-300";
+    }
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
       {/* Header */}
@@ -222,7 +349,7 @@ export function PatientPortalPage() {
                 <User className="mt-0.5 h-4 w-4 text-muted-foreground shrink-0" />
                 <div>
                   <p className="text-xs text-muted-foreground">Patient ID</p>
-                  <p className="font-mono text-sm">{ptag("PatientID") || "—"}</p>
+                  <p className="font-mono text-sm">{ptag("PatientID") || "\u2014"}</p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
@@ -234,7 +361,7 @@ export function PatientPortalPage() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Sex</p>
-                <p className="text-sm">{sex === "M" ? "Male" : sex === "F" ? "Female" : sex || "—"}</p>
+                <p className="text-sm">{sex === "M" ? "Male" : sex === "F" ? "Female" : sex || "\u2014"}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Studies</p>
@@ -261,7 +388,10 @@ export function PatientPortalPage() {
               const modality = stag(s, "ModalitiesInStudy");
               const isDownloading = downloading === s.ID;
               return (
-                <Card key={s.ID} className="bg-white overflow-hidden">
+                <Card
+                  key={s.ID}
+                  className={`bg-white overflow-hidden border-l-4 ${modalityBorderColor(modality)}`}
+                >
                   <CardContent className="p-0">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5">
                       <div className="space-y-1 min-w-0">

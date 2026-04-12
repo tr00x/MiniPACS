@@ -193,6 +193,7 @@ export function StudyDetailPage() {
       const res = await api.post("/shares", {
         orthanc_patient_id: study.ParentPatient,
         expires_at: expiresAt,
+        pin: sharePin || undefined,
       });
       const token = res.data?.token ?? res.data?.share_token ?? res.data?.id ?? "";
       const portalLink = token ? `${window.location.origin}/patient-portal/${token}` : "";
