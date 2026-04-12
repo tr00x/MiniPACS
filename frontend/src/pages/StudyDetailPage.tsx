@@ -1033,6 +1033,11 @@ Clinton Medical`
           <div className="flex items-center justify-between border-b px-4 py-3 shrink-0">
             <span className="text-sm font-medium">PDF Report</span>
             <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {
+                const a = document.createElement("a"); a.href = pdfViewUrl; a.download = "report.pdf"; a.click();
+              }}>
+                <Download className="h-3.5 w-3.5" /> Download
+              </Button>
               <Button variant="outline" size="sm" onClick={() => window.open(pdfViewUrl, "_blank")}>
                 Open in New Tab
               </Button>
