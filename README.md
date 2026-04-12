@@ -104,26 +104,41 @@ Solo and small clinics pay $150–$2,000/month for cloud PACS solutions that are
 
 ## Screenshots
 
-> Screenshots coming soon. See the [demo](#quick-start) for a live preview.
-
-<!--
-<details>
-<summary>Click to view screenshots</summary>
+### Dashboard & Worklist
 
 | Dashboard | Worklist |
 |-----------|----------|
 | ![Dashboard](docs/assets/screenshots/dashboard.png) | ![Worklist](docs/assets/screenshots/worklist.png) |
 
-| Study Viewer | Patient Portal |
-|-------------|----------------|
-| ![Study](docs/assets/screenshots/study-detail.png) | ![Portal](docs/assets/screenshots/patient-portal.png) |
+### Patients & Study Viewer
 
-| Settings | Shares |
-|----------|--------|
-| ![Settings](docs/assets/screenshots/settings.png) | ![Shares](docs/assets/screenshots/shares.png) |
+| Patients | Study Detail + Share |
+|----------|---------------------|
+| ![Patients](docs/assets/screenshots/patients.png) | ![Study](docs/assets/screenshots/study-share.png) |
 
-</details>
--->
+### Patient Sharing
+
+| QR Code + Link | Patient Portal |
+|---------------|----------------|
+| ![QR](docs/assets/screenshots/share-qr.png) | ![Portal](docs/assets/screenshots/patient-portal.png) |
+
+### Transfers & Shares
+
+| Transfers | Patient Shares |
+|-----------|---------------|
+| ![Transfers](docs/assets/screenshots/transfers.png) | ![Shares](docs/assets/screenshots/shares.png) |
+
+### Admin
+
+| PACS Nodes | Settings — External Viewers |
+|------------|---------------------------|
+| ![PACS](docs/assets/screenshots/pacs-nodes.png) | ![Viewers](docs/assets/screenshots/settings-viewers.png) |
+
+### Dark Mode
+
+| Patients (Dark) | Audit Log |
+|----------------|-----------|
+| ![Dark](docs/assets/screenshots/patients-dark.png) | ![Audit](docs/assets/screenshots/audit-log.png) |
 
 ---
 
