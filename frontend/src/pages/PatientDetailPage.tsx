@@ -101,7 +101,7 @@ export function PatientDetailPage() {
               .catch(() => ({ data: [] }))
           )
         );
-        setTransfers(transferResults.flatMap((r) => r.data));
+        setTransfers(transferResults.flatMap((r) => r.data.items ?? r.data));
       })
       .catch((err) => {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
