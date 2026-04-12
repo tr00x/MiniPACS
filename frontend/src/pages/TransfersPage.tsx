@@ -27,7 +27,7 @@ interface Transfer {
   completed_at: string | null;
 }
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 50;
 
 const statusConfig: Record<Transfer["status"], { variant: "default" | "destructive" | "secondary"; icon: typeof CheckCircle; label: string }> = {
   success: { variant: "default", icon: CheckCircle, label: "Delivered" },

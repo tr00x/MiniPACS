@@ -12,7 +12,7 @@ import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from "lucid
 import api from "@/lib/api";
 import { formatDicomName, formatDicomDate, calculateAge } from "@/lib/dicom";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 50;
 
 interface Patient {
   ID: string;

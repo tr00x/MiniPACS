@@ -42,7 +42,7 @@ interface Patient {
   };
 }
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 50;
 
 function buildPortalUrl(token: string) {
   return `${window.location.origin}/patient-portal/${token}`;
