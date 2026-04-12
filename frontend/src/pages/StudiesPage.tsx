@@ -31,7 +31,7 @@ interface Study {
   Series?: string[];
 }
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 50;
 
 type DatePreset = "today" | "7d" | "30d" | "all" | "custom";
 
