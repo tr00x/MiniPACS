@@ -9,7 +9,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Layers, Lock } from "lucide-react";
+import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Layers, Lock, Shuffle, Mail } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { EXPIRY_PRESETS } from "@/lib/dicom";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
@@ -571,15 +571,27 @@ export function StudyDetailPage() {
                   <Lock className="h-3.5 w-3.5" />
                   PIN Protection (optional)
                 </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="4-6 digit PIN"
-                  value={sharePin}
-                  onChange={(e) => setSharePin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="4-6 digit PIN"
+                    value={sharePin}
+                    onChange={(e) => setSharePin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    className="flex h-9 flex-1 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 gap-1.5 shrink-0"
+                    onClick={() => setSharePin(String(Math.floor(1000 + Math.random() * 9000)))}
+                  >
+                    <Shuffle className="h-3.5 w-3.5" />
+                    Random
+                  </Button>
+                </div>
                 <p className="text-[11px] text-muted-foreground">
                   If set, the patient must enter this PIN to access their records.
                 </p>
@@ -658,8 +670,51 @@ export function StudyDetailPage() {
                 <p>Patient can view studies online and download DICOM files.</p>
               </div>
 
-              <DialogFooter>
-                <Button onClick={() => setShareDialogOpen(false)}>Done</Button>
+              <DialogFooter className="flex-col sm:flex-row gap-2">
+                {/* Email to Patient */}
+                <Button
+                  variant="outline"
+                  className="gap-1.5 flex-1"
+                  onClick={() => {
+                    const patientName = formatDicomName(ptag("PatientName")).split(" ")[0];
+                    const studyDesc = stag("StudyDescription") || "your imaging study";
+                    const studyDate = formatDicomDate(stag("StudyDate"));
+                    const expiryText = shareExpiry > 0
+                      ? `This link will expire in ${shareExpiry} days.`
+                      : "This link does not expire.";
+                    const pinText = sharePin
+                      ? `\n\nYou will need the following PIN to access your records: ${sharePin}`
+                      : "";
+
+                    const subject = encodeURIComponent(`Your Imaging Records — ${studyDesc}`);
+                    const body = encodeURIComponent(
+`Dear ${patientName},
+
+Your imaging records from ${studyDate} (${studyDesc}) are now available for viewing and download through our secure patient portal.
+
+Click the link below to access your records:
+${shareLink}
+${pinText}
+
+${expiryText}
+
+What you can do:
+• View your images online in our DICOM viewer
+• Download your images as a ZIP file for your records
+• Share this link with another physician if needed
+
+If you have any questions about your results, please contact our office.
+
+Best regards,
+Clinton Medical`
+                    );
+                    window.open(`mailto:?subject=${subject}&body=${body}`, "_self");
+                  }}
+                >
+                  <Mail className="h-4 w-4" />
+                  Email to Patient
+                </Button>
+                <Button onClick={() => setShareDialogOpen(false)} className="flex-1">Done</Button>
               </DialogFooter>
             </div>
           )}
