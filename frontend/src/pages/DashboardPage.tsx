@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, FileImage, ArrowRightLeft, Eye, AlertCircle, CheckCircle, XCircle, Clock, HardDrive, Activity } from "lucide-react";
+import { Users, FileImage, ArrowRightLeft, Eye, AlertCircle, CheckCircle, XCircle, Clock, HardDrive } from "lucide-react";
 import { CardSkeleton } from "@/components/CardSkeleton";
 import { PageError } from "@/components/page-error";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -23,7 +23,9 @@ interface SystemHealth {
     status: "online" | "offline";
     version?: string;
     storage_size?: string;
-    uptime?: number;
+    dicom_aet?: string;
+    count_studies?: number;
+    count_instances?: number;
   };
   last_received: string | null;
 }
@@ -50,15 +52,6 @@ interface Share {
 interface Patient {
   ID: string;
   MainDicomTags: { PatientName?: string };
-}
-
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -155,18 +148,21 @@ export function DashboardPage() {
           {orthancStatus === "online" && health?.orthanc && (
             <>
               <div className="h-4 w-px bg-border" />
+              <div className="text-xs text-muted-foreground">
+                v{health.orthanc.version}
+              </div>
+              <div className="h-4 w-px bg-border" />
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <HardDrive className="h-3 w-3" />
-                Storage: {health.orthanc.storage_size}
+                {health.orthanc.storage_size}
+              </div>
+              <div className="h-4 w-px bg-border" />
+              <div className="text-xs text-muted-foreground">
+                {health.orthanc.count_instances ?? 0} images
               </div>
               <div className="h-4 w-px bg-border" />
               <div className="text-xs text-muted-foreground">
                 Last received: {health.last_received ? formatRelativeTime(health.last_received) : "never"}
-              </div>
-              <div className="h-4 w-px bg-border" />
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Activity className="h-3 w-3" />
-                Uptime: {formatUptime(health.orthanc.uptime ?? 0)}
               </div>
             </>
           )}

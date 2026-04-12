@@ -64,23 +64,26 @@ async def get_stats(
     }
 
 
-def _format_storage_size(dicom_size: int) -> str:
+def _format_storage_size(dicom_size) -> str:
     """Format bytes into human-readable storage size."""
-    if dicom_size < 1024:
-        return f"{dicom_size}B"
-    elif dicom_size < 1024 ** 2:
-        return f"{dicom_size / 1024:.1f}KB"
-    elif dicom_size < 1024 ** 3:
-        return f"{dicom_size / (1024 ** 2):.1f}MB"
+    try:
+        size = int(dicom_size)
+    except (TypeError, ValueError):
+        return "0B"
+    if size < 1024:
+        return f"{size}B"
+    elif size < 1024 ** 2:
+        return f"{size / 1024:.1f}KB"
+    elif size < 1024 ** 3:
+        return f"{size / (1024 ** 2):.1f}MB"
     else:
-        return f"{dicom_size / (1024 ** 3):.1f}GB"
+        return f"{size / (1024 ** 3):.1f}GB"
 
 
 @router.get("/system-health")
 async def get_system_health(
     user: dict = Depends(get_current_user),
 ):
-    # Orthanc system info — /system for version+uptime, /statistics for storage
     orthanc_info = {"status": "offline"}
     try:
         r_sys = await orthanc._http().get("/system")
@@ -90,15 +93,17 @@ async def get_system_health(
                 "status": "online",
                 "version": sys_data.get("Version", "unknown"),
                 "storage_size": "0B",
-                "uptime": sys_data.get("Uptime", 0),
+                "dicom_aet": sys_data.get("DicomAet", ""),
             }
-            # Get storage size from /statistics
+            # Get storage size + counts from /statistics
             r_stat = await orthanc._http().get("/statistics")
             if r_stat.status_code == 200:
                 stat_data = r_stat.json()
                 orthanc_info["storage_size"] = _format_storage_size(
                     stat_data.get("TotalDiskSize", 0)
                 )
+                orthanc_info["count_studies"] = stat_data.get("CountStudies", 0)
+                orthanc_info["count_instances"] = stat_data.get("CountInstances", 0)
     except Exception:
         pass
 
