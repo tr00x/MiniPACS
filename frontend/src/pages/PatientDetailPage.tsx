@@ -11,7 +11,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Eye, FileImage, Share2, ArrowLeft, Copy, Check, Plus, Pencil, Ban, CalendarClock, ArrowRightLeft, ChevronDown } from "lucide-react";
+import { Eye, FileImage, Share2, ArrowLeft, Copy, Check, Plus, Pencil, Ban, ArrowRightLeft, ChevronDown, Lock, Shuffle, Mail, Download } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
@@ -68,12 +70,15 @@ export function PatientDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<number | null>(null);
 
-  // Share management
-  const [createShareOpen, setCreateShareOpen] = useState(false);
-  const [expiryPreset, setExpiryPreset] = useState("30");
-  const [customExpiry, setCustomExpiry] = useState("");
+  // Share dialog — 3-step flow
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareStep, setShareStep] = useState<"config" | "existing" | "result">("config");
+  const [existingShares, setExistingShares] = useState<Array<{ id: number; token: string; expires_at: string | null; is_active: number; view_count: number; created_at: string }>>([]);
+  const [shareLink, setShareLink] = useState("");
+  const [shareLinkCopied, setShareLinkCopied] = useState(false);
+  const [shareExpiry, setShareExpiry] = useState(30);
+  const [sharePin, setSharePin] = useState("");
   const [creatingShare, setCreatingShare] = useState(false);
-  const [createShareError, setCreateShareError] = useState<string | null>(null);
   const [editShare, setEditShare] = useState<Share | null>(null);
   const [editExpiry, setEditExpiry] = useState("");
   const [savingShare, setSavingShare] = useState(false);
@@ -132,31 +137,59 @@ export function PatientDetailPage() {
     setTimeout(() => setCopiedToken(null), 2000);
   };
 
-  const handleCreateShare = async () => {
+  const openShareDialog = async () => {
+    setShareLink("");
+    setShareLinkCopied(false);
+    setShareExpiry(30);
+    setSharePin("");
+    setShareDialogOpen(true);
+
+    // Check for existing active shares
+    try {
+      const { data } = await api.get("/shares", { params: { patient_id: id } });
+      const allShares = (data.items ?? data) as typeof existingShares;
+      const active = allShares.filter((s) => s.is_active);
+      if (active.length > 0) {
+        setExistingShares(active);
+        setShareStep("existing");
+        return;
+      }
+    } catch {
+      // ignore — proceed to create
+    }
+    setShareStep("config");
+  };
+
+  const handleShareCreate = async () => {
     if (!id) return;
     setCreatingShare(true);
-    setCreateShareError(null);
-    let expires_at: string | null = null;
-    const days = parseInt(expiryPreset);
-    if (days > 0) {
-      const d = new Date();
-      d.setDate(d.getDate() + days);
-      expires_at = d.toISOString();
-    } else if (expiryPreset === "custom" && customExpiry) {
-      expires_at = new Date(customExpiry).toISOString();
-    }
     try {
-      const { data } = await api.post("/shares", { orthanc_patient_id: id, expires_at });
-      setShares([data, ...shares]);
-      setCreateShareOpen(false);
-      setExpiryPreset("30");
-      setCustomExpiry("");
+      const expiresAt = shareExpiry > 0
+        ? new Date(Date.now() + shareExpiry * 24 * 60 * 60 * 1000).toISOString()
+        : null;
+      const { data } = await api.post("/shares", {
+        orthanc_patient_id: id,
+        expires_at: expiresAt,
+        pin: sharePin || undefined,
+      });
+      const token = data?.token ?? data?.share_token ?? data?.id ?? "";
+      setShareLink(token ? `${window.location.origin}/patient-portal/${token}` : "");
+      setShareStep("result");
+      // Refresh shares list
+      const sharesRes = await api.get("/shares", { params: { patient_id: id } });
+      setShares(sharesRes.data.items ?? sharesRes.data);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setCreateShareError(e?.response?.data?.detail ?? e?.message ?? "Failed to create share");
+      toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to create share");
     } finally {
       setCreatingShare(false);
     }
+  };
+
+  const copyShareLink = () => {
+    navigator.clipboard.writeText(shareLink);
+    setShareLinkCopied(true);
+    setTimeout(() => setShareLinkCopied(false), 2000);
   };
 
   const handleEditShare = async () => {
@@ -286,47 +319,235 @@ export function PatientDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Create Share Dialog */}
-      <Dialog open={createShareOpen} onOpenChange={(open) => { setCreateShareOpen(open); if (!open) setCreateShareError(null); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Create Patient Portal Link</DialogTitle></DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label>Link Expiry</Label>
-              <div className="flex flex-wrap gap-2">
-                {EXPIRY_PRESETS.map((preset) => (
-                  <Button
-                    key={preset.days}
-                    type="button"
-                    variant={expiryPreset === String(preset.days) ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => { setExpiryPreset(String(preset.days)); setCustomExpiry(""); }}
-                  >
-                    {preset.label}
-                  </Button>
-                ))}
-                <Button
-                  type="button"
-                  variant={expiryPreset === "custom" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setExpiryPreset("custom")}
-                >
-                  <CalendarClock className="mr-1 h-3 w-3" />
-                  Custom
+      {/* Share Dialog — 3-step flow */}
+      <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Share with Patient</DialogTitle>
+          </DialogHeader>
+
+          {shareStep === "existing" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                This patient has {existingShares.length} active share link{existingShares.length > 1 ? "s" : ""}. Select one to view its details, or create a new link.
+              </p>
+              <div className="space-y-2">
+                {existingShares.map((s) => {
+                  const isExpired = s.expires_at && new Date(s.expires_at) < new Date();
+                  return (
+                    <button
+                      key={s.id}
+                      className="w-full text-left rounded-lg border p-4 hover:border-primary/50 hover:bg-accent/30 transition-all"
+                      onClick={() => {
+                        setShareLink(`${window.location.origin}/patient-portal/${s.token}`);
+                        setShareStep("result");
+                      }}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium">
+                          {s.expires_at
+                            ? isExpired ? "Expired" : `Expires ${new Date(s.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+                            : "No expiry"}
+                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          s.view_count > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
+                        }`}>
+                          {s.view_count > 0 ? `${s.view_count} view${s.view_count > 1 ? "s" : ""}` : "Not viewed"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Created {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t">
+                <Button variant="ghost" size="sm" asChild className="text-xs text-muted-foreground">
+                  <Link to="/shares">Manage All Shares</Link>
+                </Button>
+                <Button onClick={() => setShareStep("config")} className="gap-2">
+                  <Share2 className="h-4 w-4" />
+                  Create New Link
                 </Button>
               </div>
-              {expiryPreset === "custom" && (
-                <Input type="datetime-local" value={customExpiry} onChange={(e) => setCustomExpiry(e.target.value)} className="mt-2" />
-              )}
             </div>
-          </div>
-          {createShareError && <p className="text-sm text-destructive" role="alert">{createShareError}</p>}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateShareOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreateShare} disabled={creatingShare}>
-              {creatingShare ? "Creating..." : "Create Link"}
-            </Button>
-          </DialogFooter>
+          )}
+
+          {shareStep === "config" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Create a patient portal link for viewing and downloading imaging studies.
+              </p>
+
+              {/* Expiry selection */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Link Expiry</label>
+                <div className="flex flex-wrap gap-2">
+                  {EXPIRY_PRESETS.map((p) => (
+                    <Button
+                      key={p.days}
+                      variant={shareExpiry === p.days ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setShareExpiry(p.days)}
+                    >
+                      {p.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Optional PIN */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-1.5">
+                  <Lock className="h-3.5 w-3.5" />
+                  PIN Protection (optional)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="4-6 digit PIN"
+                    value={sharePin}
+                    onChange={(e) => setSharePin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    className="flex h-9 flex-1 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 gap-1.5 shrink-0"
+                    onClick={() => setSharePin(String(Math.floor(1000 + Math.random() * 9000)))}
+                  >
+                    <Shuffle className="h-3.5 w-3.5" />
+                    Random
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  If set, the patient must enter this PIN to access their records.
+                </p>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setShareDialogOpen(false)}>Cancel</Button>
+                <Button onClick={handleShareCreate} disabled={creatingShare} className="gap-2">
+                  <Share2 className="h-4 w-4" />
+                  {creatingShare ? "Creating..." : "Create Link"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {shareStep === "result" && (
+            <div className="space-y-4">
+              {/* QR Code + download */}
+              {shareLink && (
+                <div className="flex flex-col items-center gap-3 py-2">
+                  <div id="share-qr-patient" className="rounded-lg border bg-white p-4">
+                    <QRCodeSVG value={shareLink} size={180} />
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => {
+                      const svg = document.querySelector("#share-qr-patient svg");
+                      if (!svg) return;
+                      const canvas = document.createElement("canvas");
+                      canvas.width = 256;
+                      canvas.height = 256;
+                      const ctx = canvas.getContext("2d");
+                      if (!ctx) return;
+                      ctx.fillStyle = "white";
+                      ctx.fillRect(0, 0, 256, 256);
+                      const img = new Image();
+                      const svgData = new XMLSerializer().serializeToString(svg);
+                      img.onload = () => {
+                        ctx.drawImage(img, 28, 28, 200, 200);
+                        const a = document.createElement("a");
+                        a.download = "patient-portal-qr.png";
+                        a.href = canvas.toDataURL("image/png");
+                        a.click();
+                      };
+                      img.src = "data:image/svg+xml;base64," + btoa(svgData);
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Save QR Code
+                  </Button>
+                </div>
+              )}
+
+              {/* Link with copy */}
+              <div className="rounded-md bg-muted p-3 space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Portal Link</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs break-all rounded bg-background p-2 border min-w-0">
+                    {shareLink}
+                  </code>
+                  <Button variant="outline" size="sm" onClick={copyShareLink} className="shrink-0 w-[72px] gap-1.5">
+                    {shareLinkCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    {shareLinkCopied ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Info */}
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200 space-y-1">
+                <p>
+                  {shareExpiry > 0 ? `Expires in ${shareExpiry} days.` : "No expiration set."}
+                  {sharePin ? ` PIN: ${sharePin}` : " No PIN protection."}
+                </p>
+                <p>Patient can view studies online and download DICOM files.</p>
+              </div>
+
+              <DialogFooter className="flex-col sm:flex-row gap-2">
+                {/* Email to Patient */}
+                <Button
+                  variant="outline"
+                  className="gap-1.5 flex-1"
+                  onClick={() => {
+                    const patientName = formatDicomName(ptag("PatientName")).split(" ")[0];
+                    const expiryText = shareExpiry > 0
+                      ? `This link will expire in ${shareExpiry} days.`
+                      : "This link does not expire.";
+                    const pinText = sharePin
+                      ? `\n\nYou will need the following PIN to access your records: ${sharePin}`
+                      : "";
+
+                    const subject = encodeURIComponent(`Your Imaging Records — ${formatDicomName(ptag("PatientName"))}`);
+                    const body = encodeURIComponent(
+`Dear ${patientName},
+
+Your imaging records are now available for viewing and download through our secure patient portal.
+
+Click the link below to access your records:
+${shareLink}
+${pinText}
+
+${expiryText}
+
+What you can do:
+\u2022 View your images online in our DICOM viewer
+\u2022 Download your images as a ZIP file for your records
+\u2022 Share this link with another physician if needed
+
+If you have any questions about your results, please contact our office.
+
+Best regards,
+Clinton Medical`
+                    );
+                    window.open(`mailto:?subject=${subject}&body=${body}`, "_self");
+                  }}
+                >
+                  <Mail className="h-4 w-4" />
+                  Email to Patient
+                </Button>
+                <Button onClick={() => setShareDialogOpen(false)} className="flex-1">Done</Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -415,7 +636,7 @@ export function PatientDetailPage() {
               Patient Portal Links ({shares.length})
             </CardTitle>
           </div>
-          <Button size="sm" onClick={() => { setCreateShareOpen(true); setCreateShareError(null); }}>
+          <Button size="sm" onClick={openShareDialog}>
             <Plus className="mr-1 h-4 w-4" /> Create Link
           </Button>
         </CardHeader>
