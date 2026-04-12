@@ -55,21 +55,20 @@ interface Patient {
 }
 
 function formatOrthancDate(dateStr: string): string {
-  // Orthanc dates: "20260411T220000" → readable format with relative hint
-  const clean = dateStr.replace(/T/, " ").replace(/(\d{4})(\d{2})(\d{2}) (\d{2})(\d{2})(\d{2})/, "$1-$2-$3T$4:$5:$6");
+  // Orthanc dates: "20260412T043541" in UTC → readable format
+  const clean = dateStr.replace(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/, "$1-$2-$3T$4:$5:$6Z");
   const date = new Date(clean);
   if (isNaN(date.getTime())) return dateStr;
 
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
+  const diffMin = Math.round(diffMs / 60000);
 
-  // Show relative for recent, absolute for older
+  if (diffMin < 1) return "<1m ago";
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h ago`;
 
-  // Older than 24h — show date
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
