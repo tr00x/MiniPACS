@@ -54,20 +54,23 @@ interface Patient {
   MainDicomTags: { PatientName?: string };
 }
 
-function formatRelativeTime(dateStr: string): string {
-  // Orthanc dates come as "20260411T220000" — parse manually
+function formatOrthancDate(dateStr: string): string {
+  // Orthanc dates: "20260411T220000" → readable format with relative hint
   const clean = dateStr.replace(/T/, " ").replace(/(\d{4})(\d{2})(\d{2}) (\d{2})(\d{2})(\d{2})/, "$1-$2-$3T$4:$5:$6");
   const date = new Date(clean);
   if (isNaN(date.getTime())) return dateStr;
+
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return "<1m ago";
+
+  // Show relative for recent, absolute for older
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay}d ago`;
+
+  // Older than 24h — show date
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 export function DashboardPage() {
@@ -158,7 +161,7 @@ export function DashboardPage() {
               </div>
               <div className="h-4 w-px bg-border" />
               <div className="text-xs text-muted-foreground">
-                Last received: {health.last_received ? formatRelativeTime(health.last_received) : "never"}
+                Last received: {health.last_received ? formatOrthancDate(health.last_received) : "never"}
               </div>
             </>
           )}
