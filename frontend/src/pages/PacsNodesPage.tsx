@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TableSkeleton } from "@/components/TableSkeleton";
+import { StatusDot } from "@/components/ui/status-dot";
 import { Plus, Pencil, Trash2, Radio } from "lucide-react";
 import api from "@/lib/api";
 
@@ -22,6 +23,7 @@ interface PacsNode {
   port: number;
   description: string | null;
   is_active: number;
+  last_echo_at: string | null;
 }
 
 interface NodeForm {
@@ -34,6 +36,27 @@ interface NodeForm {
 }
 
 const emptyForm: NodeForm = { name: "", ae_title: "", ip: "", port: "4242", description: "", is_active: true };
+
+function formatRelativeTime(isoString: string): string {
+  const now = Date.now();
+  const then = new Date(isoString).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
+function echoStatus(lastEchoAt: string | null): "online" | "warning" | null {
+  if (!lastEchoAt) return null;
+  const diffMs = Date.now() - new Date(lastEchoAt).getTime();
+  const tenMinutes = 10 * 60 * 1000;
+  return diffMs <= tenMinutes ? "online" : "warning";
+}
 
 export function PacsNodesPage() {
   const [nodes, setNodes] = useState<PacsNode[]>([]);
@@ -144,6 +167,8 @@ export function PacsNodesPage() {
     try {
       const { data } = await api.post(`/pacs-nodes/${id}/echo`);
       setEchoResults((prev) => ({ ...prev, [id]: data.success }));
+      // Refresh nodes to get updated last_echo_at
+      fetchNodes();
     } catch {
       setEchoResults((prev) => ({ ...prev, [id]: false }));
     }
@@ -169,13 +194,14 @@ export function PacsNodesPage() {
       </div>
       {loading ? (
         <div className="rounded-lg border">
-          <TableSkeleton columns={8} />
+          <TableSkeleton columns={9} />
         </div>
       ) : (
         <div className="rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Status</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>AE Title</TableHead>
               <TableHead>IP</TableHead>
@@ -187,54 +213,69 @@ export function PacsNodesPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {nodes.map((n) => (
-              <TableRow key={n.id}>
-                <TableCell className="font-medium">{n.name}</TableCell>
-                <TableCell className="font-mono text-sm">{n.ae_title}</TableCell>
-                <TableCell className="font-mono text-sm">{n.ip}</TableCell>
-                <TableCell>{n.port}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {n.description || "—"}
-                </TableCell>
-                <TableCell>
-                  <button
-                    onClick={() => handleToggleActive(n)}
-                    disabled={togglingId === n.id}
-                    className="cursor-pointer disabled:opacity-50"
-                    title={n.is_active ? "Click to deactivate" : "Click to activate"}
-                  >
-                    <Badge variant={n.is_active ? "default" : "secondary"}>
-                      {togglingId === n.id ? "..." : (n.is_active ? "Active" : "Inactive")}
-                    </Badge>
-                  </button>
-                </TableCell>
-                <TableCell>
-                  {echoResults[n.id] === "testing" ? (
-                    <span className="text-xs text-muted-foreground">Testing...</span>
-                  ) : echoResults[n.id] === true ? (
-                    <Badge variant="default">OK</Badge>
-                  ) : echoResults[n.id] === false ? (
-                    <Badge variant="destructive">Failed</Badge>
-                  ) : null}
-                </TableCell>
-                <TableCell>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => handleEcho(n.id)}>
-                      <Radio className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => openEdit(n)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(n.id)}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
+            {nodes.map((n) => {
+              const status = echoStatus(n.last_echo_at);
+              return (
+                <TableRow key={n.id}>
+                  <TableCell>
+                    {status ? (
+                      <div className="flex flex-col items-start">
+                        <StatusDot status={status} />
+                        <span className="text-[10px] text-muted-foreground mt-0.5">
+                          {formatRelativeTime(n.last_echo_at!)}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="font-medium">{n.name}</TableCell>
+                  <TableCell className="font-medical-id text-sm">{n.ae_title}</TableCell>
+                  <TableCell className="font-medical-id text-sm">{n.ip}</TableCell>
+                  <TableCell>{n.port}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {n.description || "—"}
+                  </TableCell>
+                  <TableCell>
+                    <button
+                      onClick={() => handleToggleActive(n)}
+                      disabled={togglingId === n.id}
+                      className="cursor-pointer disabled:opacity-50"
+                      title={n.is_active ? "Click to deactivate" : "Click to activate"}
+                    >
+                      <Badge variant={n.is_active ? "default" : "secondary"}>
+                        {togglingId === n.id ? "..." : (n.is_active ? "Active" : "Inactive")}
+                      </Badge>
+                    </button>
+                  </TableCell>
+                  <TableCell>
+                    {echoResults[n.id] === "testing" ? (
+                      <span className="text-xs text-muted-foreground">Testing...</span>
+                    ) : echoResults[n.id] === true ? (
+                      <Badge variant="default">OK</Badge>
+                    ) : echoResults[n.id] === false ? (
+                      <Badge variant="destructive">Failed</Badge>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => handleEcho(n.id)}>
+                        <Radio className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(n)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(n.id)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
             {nodes.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
+                <TableCell colSpan={9} className="text-center text-muted-foreground">
                   No PACS nodes configured
                 </TableCell>
               </TableRow>
