@@ -79,6 +79,12 @@ export function StudyDetailPage() {
   const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
   const [showMetadata, setShowMetadata] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Share dialog
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareLink, setShareLink] = useState("");
+  const [shareLinkCopied, setShareLinkCopied] = useState(false);
+  // Download dialog
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -161,7 +167,36 @@ export function StudyDetailPage() {
     setSendStatus("idle");
   };
 
-  const handleDownload = async () => {
+  // handleDownload removed — replaced by handleDownloadConfirm with dialog
+
+  const handleShare = async () => {
+    if (!study?.ParentPatient) return;
+    setSharing(true);
+    try {
+      const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const res = await api.post("/shares", {
+        orthanc_patient_id: study.ParentPatient,
+        expires_at: thirtyDaysFromNow,
+      });
+      const token = res.data?.token ?? res.data?.share_token ?? res.data?.id ?? "";
+      const portalLink = token ? `${window.location.origin}/patient-portal/${token}` : "";
+      setShareLink(portalLink);
+      setShareDialogOpen(true);
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to create share"));
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const copyShareLink = () => {
+    navigator.clipboard.writeText(shareLink);
+    setShareLinkCopied(true);
+    setTimeout(() => setShareLinkCopied(false), 2000);
+  };
+
+  const handleDownloadConfirm = async () => {
+    setDownloadDialogOpen(false);
     setDownloading(true);
     try {
       const res = await api.get(`/studies/${id}/download`, { responseType: "blob" });
@@ -176,30 +211,6 @@ export function StudyDetailPage() {
       toast.error(getErrorMessage(err, "Failed to download study"));
     } finally {
       setDownloading(false);
-    }
-  };
-
-  const handleShare = async () => {
-    if (!study?.ParentPatient) return;
-    setSharing(true);
-    try {
-      const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-      const res = await api.post("/shares", {
-        orthanc_patient_id: study.ParentPatient,
-        expires_at: thirtyDaysFromNow,
-      });
-      const token = res.data?.token ?? res.data?.share_token ?? res.data?.id ?? "";
-      const portalLink = token ? `${window.location.origin}/patient-portal/${token}` : "";
-      if (portalLink) {
-        await navigator.clipboard.writeText(portalLink);
-        toast.success("Portal link copied to clipboard", { description: portalLink });
-      } else {
-        toast.success("Share created successfully");
-      }
-    } catch (err: unknown) {
-      toast.error(getErrorMessage(err, "Failed to create share"));
-    } finally {
-      setSharing(false);
     }
   };
 
@@ -273,12 +284,12 @@ export function StudyDetailPage() {
           {study?.ParentPatient && (
             <Button variant="outline" onClick={handleShare} disabled={sharing} className="gap-2">
               <Share2 className="h-4 w-4" />
-              {sharing ? "Sharing..." : "Share"}
+              {sharing ? "Creating..." : "Share"}
             </Button>
           )}
-          <Button variant="outline" onClick={handleDownload} disabled={downloading} className="gap-2">
+          <Button variant="outline" onClick={() => setDownloadDialogOpen(true)} disabled={downloading} className="gap-2">
             <Download className="h-4 w-4" />
-            {downloading ? "..." : "Download"}
+            {downloading ? "Downloading..." : "Download"}
           </Button>
           {viewers.map((v) => (
             <Button
@@ -504,6 +515,65 @@ export function StudyDetailPage() {
               </div>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Share Dialog — shows link + copy button after share creation */}
+      <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Share with Patient</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              A patient portal link has been created. The patient can view and download their imaging studies using this link.
+            </p>
+            <div className="rounded-md bg-muted p-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Portal Link</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-xs break-all rounded bg-background p-2 border">
+                  {shareLink}
+                </code>
+                <Button variant="outline" size="sm" onClick={copyShareLink} className="shrink-0 gap-1.5">
+                  {shareLinkCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  {shareLinkCopied ? "Copied" : "Copy"}
+                </Button>
+              </div>
+            </div>
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              This link expires in 30 days. The patient can view studies online and download DICOM files.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setShareDialogOpen(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Download Dialog — confirmation before download */}
+      <Dialog open={downloadDialogOpen} onOpenChange={setDownloadDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Download Study</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-md bg-muted p-3 text-sm">
+              <p className="font-medium">{stag("StudyDescription") || "Study"}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {series.length} series · {totalInstances} images · DICOM ZIP archive
+              </p>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              The study will be downloaded as a ZIP file containing all DICOM images. This may take a moment for large studies.
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDownloadDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleDownloadConfirm} className="gap-2">
+              <Download className="h-4 w-4" />
+              Download ZIP
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
