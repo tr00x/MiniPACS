@@ -100,16 +100,16 @@ export function getModalityColor(modality: string): string {
 }
 
 /** Icon map for known external DICOM viewers. Keyed by icon_key from the database. */
-/** Favicon URLs for known DICOM viewers — pulled from their official sites */
+/** Favicon URLs via Google proxy (avoids CORS) — size 64 for crisp display */
 export const VIEWER_LOGOS: Record<string, string> = {
-  ohif: "https://ohif.org/favicon.ico",
-  osirix: "https://www.osirix-viewer.com/favicon.ico",
-  horos: "https://horosproject.org/wp-content/uploads/2018/07/cropped-horos-32x32.png",
-  radiant: "https://www.radiantviewer.com/favicon.ico",
-  slicer: "https://www.slicer.org/assets/img/3D-Slicer-Mark.svg",
-  microdicom: "https://www.microdicom.com/favicon.ico",
-  postdicom: "https://www.postdicom.com/favicon.ico",
-  meddream: "https://www.softneta.com/favicon.ico",
+  ohif: "https://www.google.com/s2/favicons?domain=ohif.org&sz=64",
+  osirix: "https://www.google.com/s2/favicons?domain=osirix-viewer.com&sz=64",
+  horos: "https://www.google.com/s2/favicons?domain=horosproject.org&sz=64",
+  radiant: "https://www.google.com/s2/favicons?domain=radiantviewer.com&sz=64",
+  slicer: "https://www.google.com/s2/favicons?domain=slicer.org&sz=64",
+  microdicom: "https://www.google.com/s2/favicons?domain=microdicom.com&sz=64",
+  postdicom: "https://www.google.com/s2/favicons?domain=postdicom.com&sz=64",
+  meddream: "https://www.google.com/s2/favicons?domain=softneta.com&sz=64",
 };
 
 /** Determine share link status from is_active flag and expires_at timestamp. */
