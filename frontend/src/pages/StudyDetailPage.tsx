@@ -19,7 +19,7 @@ import { OhifViewer } from "@/components/viewer/OhifViewer";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import api, { getErrorMessage } from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
-import { formatDicomName, formatDicomDate, VIEWER_ICONS } from "@/lib/dicom";
+import { formatDicomName, formatDicomDate, VIEWER_COLORS, getViewerIconLabel } from "@/lib/dicom";
 import { toast } from "sonner";
 
 interface StudyData {
@@ -359,7 +359,7 @@ export function StudyDetailPage() {
                 window.open(url, "_blank");
               }}
             >
-              <span>{VIEWER_ICONS[v.icon_key || ""] || "\u{1F517}"}</span>
+              <span className={`inline-flex h-5 w-5 items-center justify-center rounded text-[9px] font-bold ${(VIEWER_COLORS[v.icon_key || ""] || ["bg-muted", "text-foreground"]).join(" ")}`}>{getViewerIconLabel(v.name, v.icon_key)}</span>
               {v.name}
             </Button>
           ))}

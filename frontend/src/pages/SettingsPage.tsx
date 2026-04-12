@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
 import { PageError } from "@/components/page-error";
-import { formatTimestamp, VIEWER_ICONS } from "@/lib/dicom";
+import { formatTimestamp, VIEWER_COLORS, getViewerIconLabel } from "@/lib/dicom";
 
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now();
@@ -391,8 +391,8 @@ export function SettingsPage() {
                 )}
                 {viewers.map((v) => (
                   <div key={v.id} className="flex items-center gap-4 rounded-lg border p-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-lg shrink-0">
-                      {VIEWER_ICONS[v.icon_key || ""] || v.name[0]}
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-lg text-xs font-bold shrink-0 ${(VIEWER_COLORS[v.icon_key || ""] || ["bg-muted", "text-foreground"]).join(" ")}`}>
+                      {getViewerIconLabel(v.name, v.icon_key)}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">

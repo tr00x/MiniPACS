@@ -100,20 +100,26 @@ export function getModalityColor(modality: string): string {
 }
 
 /** Icon map for known external DICOM viewers. Keyed by icon_key from the database. */
-export const VIEWER_ICONS: Record<string, string> = {
-  ohif: "\u{1F52C}",
-  papaya: "\u{1F9E0}",
-  dwv: "\u{1F4CA}",
-  cornerstone: "\u{1F3D7}\uFE0F",
-  stone: "\u{1FAA8}",
-  osirix: "\u{1F4BB}",
-  horos: "\u{1F5A5}\uFE0F",
-  radiant: "\u2600\uFE0F",
-  slicer: "\u{1FA94}",
-  microdicom: "\u{1F4C1}",
-  postdicom: "\u2601\uFE0F",
-  meddream: "\u{1F3E5}",
+/** Color scheme for viewer icons — maps icon_key to [bgColor, textColor] */
+export const VIEWER_COLORS: Record<string, [string, string]> = {
+  ohif: ["bg-blue-600", "text-white"],
+  osirix: ["bg-gray-800", "text-yellow-400"],
+  horos: ["bg-emerald-600", "text-white"],
+  radiant: ["bg-orange-500", "text-white"],
+  slicer: ["bg-indigo-600", "text-white"],
+  microdicom: ["bg-sky-500", "text-white"],
+  postdicom: ["bg-teal-600", "text-white"],
+  meddream: ["bg-purple-600", "text-white"],
 };
+
+/** Get short label for viewer icon (first 1-2 chars) */
+export function getViewerIconLabel(name: string, iconKey?: string): string {
+  const labels: Record<string, string> = {
+    ohif: "OH", osirix: "Ox", horos: "H", radiant: "R",
+    slicer: "3D", microdicom: "uD", postdicom: "PD", meddream: "MD",
+  };
+  return labels[iconKey || ""] || name.slice(0, 2).toUpperCase();
+}
 
 /** Determine share link status from is_active flag and expires_at timestamp. */
 export const EXPIRY_PRESETS = [
