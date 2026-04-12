@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { useTheme } from "next-themes";
 import {
   LayoutDashboard, Users, ClipboardList, Send, Share2,
   Network, Settings, ScrollText, LogOut, ChevronDown, ChevronUp,
-  Menu, PanelLeftClose, PanelLeft,
+  Menu, PanelLeftClose, PanelLeft, Sun, Moon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -34,6 +35,7 @@ interface SidebarContentProps {
 function SidebarContent({ collapsed, onNavigate, onToggleCollapse }: SidebarContentProps) {
   const location = useLocation();
   const { logout, user } = useAuth();
+  const { theme, setTheme } = useTheme();
   const [adminExpanded, setAdminExpanded] = useState(true);
 
   const isActive = (to: string) =>
@@ -109,8 +111,27 @@ function SidebarContent({ collapsed, onNavigate, onToggleCollapse }: SidebarCont
 
           {(collapsed || adminExpanded) && adminNav.map(renderNavItem)}
         </nav>
-        <div className="border-t p-2">
+        <div className="border-t p-2 space-y-1">
           {!collapsed && <div className="mb-2 px-3 text-xs text-muted-foreground">{user?.username}</div>}
+          {!collapsed ? (
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {theme === "dark" ? "Light Mode" : "Dark Mode"}
+            </Button>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="w-full" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+                  {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">{theme === "dark" ? "Light Mode" : "Dark Mode"}</TooltipContent>
+            </Tooltip>
+          )}
           {collapsed ? (
             <Tooltip>
               <TooltipTrigger asChild>

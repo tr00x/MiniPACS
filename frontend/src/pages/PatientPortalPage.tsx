@@ -202,7 +202,7 @@ export function PatientPortalPage() {
 
   if (!token) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50 to-white">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50/50 to-background dark:from-blue-950/20">
         <p className="text-muted-foreground">Invalid portal link</p>
       </div>
     );
@@ -211,7 +211,7 @@ export function PatientPortalPage() {
   // ──── PIN Screen ────
   if (needsPin === true && !pinVerified) {
     return (
-      <div className="flex min-h-screen flex-col bg-gradient-to-b from-blue-50 to-white">
+      <div className="flex min-h-screen flex-col bg-gradient-to-b from-blue-50/50 to-background dark:from-blue-950/20">
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="w-full max-w-sm space-y-8">
             <div className="text-center space-y-3">
@@ -224,10 +224,10 @@ export function PatientPortalPage() {
               </div>
             </div>
 
-            <Card className="shadow-xl border-0 bg-white">
+            <Card className="shadow-xl border-0 bg-card">
               <CardContent className="pt-8 pb-8 px-6 space-y-6">
                 <div className="text-center">
-                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 mb-3">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-950/30 mb-3">
                     <Lock className="h-5 w-5 text-blue-600" />
                   </div>
                   <p className="text-sm text-muted-foreground">
@@ -252,12 +252,12 @@ export function PatientPortalPage() {
                       }}
                       onKeyDown={(e) => e.key === "Enter" && handlePinSubmit()}
                       autoFocus
-                      className="w-full text-center text-3xl tracking-[0.75em] h-16 rounded-xl border-2 border-gray-200 bg-white font-mono focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all placeholder:text-gray-300"
+                      className="w-full text-center text-3xl tracking-[0.75em] h-16 rounded-xl border-2 border-input bg-card font-mono focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all placeholder:text-muted-foreground/40"
                     />
                     <button
                       type="button"
                       onClick={handlePastePin}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-gray-100 transition-colors"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                       title="Paste from clipboard"
                     >
                       <ClipboardPaste className="h-4 w-4" />
@@ -304,7 +304,7 @@ export function PatientPortalPage() {
   // ──── Loading ────
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50 to-white">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50/50 to-background dark:from-blue-950/20">
         <div className="text-center space-y-4">
           <div className="mx-auto h-10 w-10 animate-spin rounded-full border-[3px] border-blue-600 border-t-transparent" />
           <p className="text-sm text-muted-foreground">Loading your records...</p>
@@ -316,10 +316,10 @@ export function PatientPortalPage() {
   // ──── Error ────
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50 to-white p-4">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50/50 to-background dark:from-blue-950/20 p-4">
         <Card className="w-full max-w-md shadow-xl border-0">
           <CardContent className="pt-8 pb-8 text-center space-y-4">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-50">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-50 dark:bg-red-950/30">
               <Shield className="h-7 w-7 text-red-500" />
             </div>
             <div>
@@ -351,7 +351,7 @@ export function PatientPortalPage() {
 
   if (!patient) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50 to-white">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50/50 to-background dark:from-blue-950/20">
         <p className="text-muted-foreground">Patient not found</p>
       </div>
     );
@@ -361,9 +361,9 @@ export function PatientPortalPage() {
 
   // ──── Main Portal ────
   return (
-    <div className="flex min-h-screen flex-col bg-gradient-to-b from-blue-50/50 to-white">
+    <div className="flex min-h-screen flex-col bg-gradient-to-b from-blue-50/50 to-background dark:from-blue-950/20">
       {/* Header */}
-      <header className="bg-white border-b shadow-sm sticky top-0 z-10">
+      <header className="bg-card border-b shadow-sm sticky top-0 z-10">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 shadow">
@@ -375,7 +375,7 @@ export function PatientPortalPage() {
             </div>
           </div>
           {share?.expires_at && (
-            <div className="flex items-center gap-1 text-[11px] text-muted-foreground bg-gray-100 rounded-full px-2.5 py-1">
+            <div className="flex items-center gap-1 text-[11px] text-muted-foreground bg-muted rounded-full px-2.5 py-1">
               <Clock className="h-3 w-3" />
               <span className="hidden sm:inline">Expires</span> {new Date(share.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
             </div>
@@ -395,7 +395,7 @@ export function PatientPortalPage() {
         </div>
 
         {/* Patient Info — compact row */}
-        <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm rounded-xl bg-white border p-3.5 shadow-sm">
+        <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm rounded-xl bg-card border p-3.5 shadow-sm">
           <div className="flex items-center gap-1.5">
             <User className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-muted-foreground text-xs">ID</span>
@@ -421,7 +421,7 @@ export function PatientPortalPage() {
           <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Your Studies</h3>
 
           {studies.length === 0 ? (
-            <div className="rounded-xl border bg-white p-12 text-center shadow-sm">
+            <div className="rounded-xl border bg-card p-12 text-center shadow-sm">
               <FileImage className="mx-auto h-10 w-10 text-muted-foreground/30 mb-3" />
               <p className="text-muted-foreground">No imaging studies are available at this time.</p>
             </div>
@@ -432,7 +432,7 @@ export function PatientPortalPage() {
               const modality = stag(s, "ModalitiesInStudy");
               const isDownloading = downloading === s.ID;
               return (
-                <div key={s.ID} className="rounded-xl border bg-white overflow-hidden shadow-sm">
+                <div key={s.ID} className="rounded-xl border bg-card overflow-hidden shadow-sm">
                   <div className="p-4 sm:p-5">
                     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                       <div className="space-y-1.5 min-w-0">
@@ -515,7 +515,7 @@ export function PatientPortalPage() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t py-5 mt-auto">
+      <footer className="bg-card border-t py-5 mt-auto">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 text-center space-y-3">
           {(clinicSettings.clinic_phone || clinicSettings.clinic_email) && (
             <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-5">
