@@ -64,9 +64,9 @@ async def create_share(
         pin_hash = hash_password(body.pin)
 
     cursor = await db.execute(
-        """INSERT INTO patient_shares (orthanc_patient_id, token, expires_at, created_by, pin_hash, pin)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (body.orthanc_patient_id, token, expires_at, user["id"], pin_hash, body.pin),
+        """INSERT INTO patient_shares (orthanc_patient_id, token, expires_at, created_by, pin_hash)
+           VALUES (?, ?, ?, ?, ?)""",
+        (body.orthanc_patient_id, token, expires_at, user["id"], pin_hash),
     )
     await db.commit()
     share_id = cursor.lastrowid
@@ -78,7 +78,11 @@ async def create_share(
 
     cursor = await db.execute("SELECT * FROM patient_shares WHERE id = ?", (share_id,))
     share = await cursor.fetchone()
-    return dict(share)
+    result = dict(share)
+    # Return plain PIN once so frontend can display it at creation time only
+    if body.pin:
+        result["pin_display"] = body.pin
+    return result
 
 
 @auth_router.put("/{share_id}")
