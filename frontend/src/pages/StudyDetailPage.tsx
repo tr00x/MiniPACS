@@ -9,6 +9,9 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Layers, Lock, Shuffle, Mail } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { EXPIRY_PRESETS } from "@/lib/dicom";
@@ -254,6 +257,24 @@ export function StudyDetailPage() {
     setTimeout(() => setUidCopied(false), 2000);
   };
 
+  const downloadSeries = async (seriesId: string, format: "dicom" | "images") => {
+    try {
+      const endpoint = format === "dicom"
+        ? `/studies/${id}/series/${seriesId}/download`
+        : `/studies/${id}/series/${seriesId}/download-images`;
+      const res = await api.get(endpoint, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `series-${seriesId}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(format === "dicom" ? "DICOM download started" : "Image download started");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to download series"));
+    }
+  };
+
   const studyUid = stag("StudyInstanceUID");
 
   if (loading) return <PageLoader />;
@@ -379,6 +400,21 @@ export function StudyDetailPage() {
                     </p>
                   </div>
                   <ModalityBadge modality={s.MainDicomTags?.Modality || "OT"} />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+                        <Download className="h-3.5 w-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => downloadSeries(s.ID, "dicom")}>
+                        DICOM (for physicians)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => downloadSeries(s.ID, "images")}>
+                        JPEG Images (for patients)
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               );
             })}
