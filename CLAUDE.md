@@ -162,6 +162,27 @@ cd frontend && npx vite build
 - useState после conditional return (нарушает React hooks rules)
 - Загружать ВСЕ записи когда есть серверная фильтрация
 
+## Рабочий процесс
+
+### Superpowers skills — использовать когда подходит:
+- **Brainstorming** — `superpowers:brainstorming` перед новой фичей или крупным изменением
+- **Writing plans** — `superpowers:writing-plans` для многошаговых задач
+- **Code review** — `superpowers:requesting-code-review` после крупных изменений
+- **Verification** — `superpowers:verification-before-completion` перед финальным коммитом
+- **Debugging** — `superpowers:systematic-debugging` при непонятных багах
+
+Не обязательно для каждого мелкого фикса. Для баг-фиксов и точечных правок — делай сразу.
+
+### Память (claude-mem)
+
+Persistent memory: observations за все сессии. Используй:
+1. `$CMEM` timeline — сканируй IDs по теме
+2. `get_observations([IDs])` — детали (~300 токенов каждый)
+3. `mem-search` — полнотекстовый поиск по прошлым сессиям
+4. `smart_outline(file)` — структура файла без чтения тела
+
+Порядок: memory → smart_outline → Read конкретных строк. Не читай целые файлы когда достаточно outline.
+
 ## Язык
 
 Общение на русском. Технические термины и идентификаторы — на английском.
