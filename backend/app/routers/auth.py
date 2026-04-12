@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -16,20 +16,20 @@ from app.middleware.audit import log_audit
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 security = HTTPBearer()
 
-_login_attempts: dict[str, list[float]] = {}
 MAX_ATTEMPTS = 5
-WINDOW_SECONDS = 300
+WINDOW_MINUTES = 5
 
 
-def _check_rate_limit(ip: str):
-    now = datetime.now(timezone.utc).timestamp()
-    attempts = _login_attempts.get(ip, [])
-    attempts = [t for t in attempts if now - t < WINDOW_SECONDS]
-    _login_attempts[ip] = attempts
-    if len(attempts) >= MAX_ATTEMPTS:
-        raise HTTPException(429, "Too many login attempts. Try again later.")
-    attempts.append(now)
-    _login_attempts[ip] = attempts
+async def _check_rate_limit(ip: str, db: aiosqlite.Connection):
+    """Check if IP is rate-limited based on failed login audit entries. Survives restarts."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=WINDOW_MINUTES)).isoformat()
+    cursor = await db.execute(
+        "SELECT COUNT(*) FROM audit_log WHERE ip_address = ? AND action = 'login_failed' AND timestamp > ?",
+        (ip, cutoff),
+    )
+    count = (await cursor.fetchone())[0]
+    if count >= MAX_ATTEMPTS:
+        raise HTTPException(429, "Too many login attempts. Try again in 5 minutes.")
 
 
 async def get_current_user(
@@ -53,7 +53,7 @@ async def get_current_user(
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, request: Request, db: aiosqlite.Connection = Depends(get_db)):
     ip = request.client.host
-    _check_rate_limit(ip)
+    await _check_rate_limit(ip, db)
 
     cursor = await db.execute("SELECT * FROM users WHERE username = ?", (body.username,))
     user = await cursor.fetchone()
