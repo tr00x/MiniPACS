@@ -83,7 +83,8 @@ export function StudyDetailPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Share dialog
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
-  const [shareStep, setShareStep] = useState<"config" | "result">("config");
+  const [shareStep, setShareStep] = useState<"config" | "existing" | "result">("config");
+  const [existingShares, setExistingShares] = useState<Array<{ id: number; token: string; expires_at: string | null; is_active: number; view_count: number; created_at: string }>>([]);
   const [shareLink, setShareLink] = useState("");
   const [shareLinkCopied, setShareLinkCopied] = useState(false);
   const [shareExpiry, setShareExpiry] = useState(30); // days
@@ -174,13 +175,29 @@ export function StudyDetailPage() {
 
   // handleDownload removed — replaced by handleDownloadConfirm with dialog
 
-  const openShareDialog = () => {
-    setShareStep("config");
+  const openShareDialog = async () => {
     setShareLink("");
     setShareLinkCopied(false);
     setShareExpiry(30);
     setSharePin("");
     setShareDialogOpen(true);
+
+    // Check for existing active shares for this patient
+    if (study?.ParentPatient) {
+      try {
+        const { data } = await api.get("/shares", { params: { patient_id: study.ParentPatient } });
+        const shares = (data.items ?? data) as typeof existingShares;
+        const active = shares.filter((s) => s.is_active);
+        if (active.length > 0) {
+          setExistingShares(active);
+          setShareStep("existing");
+          return;
+        }
+      } catch {
+        // ignore — proceed to create
+      }
+    }
+    setShareStep("config");
   };
 
   const handleShareCreate = async () => {
@@ -541,6 +558,52 @@ export function StudyDetailPage() {
           <DialogHeader>
             <DialogTitle>Share with Patient</DialogTitle>
           </DialogHeader>
+
+          {shareStep === "existing" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                This patient already has active share links. You can use an existing one or create a new link.
+              </p>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {existingShares.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between rounded-lg border p-3 hover:bg-accent/30">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium font-medical-id truncate">
+                        ...{s.token.slice(-12)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {s.expires_at ? `Expires ${new Date(s.expires_at).toLocaleDateString()}` : "No expiry"}
+                        {s.view_count > 0 ? ` · ${s.view_count} views` : " · Not viewed"}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 gap-1.5"
+                      onClick={() => {
+                        const link = `${window.location.origin}/patient-portal/${s.token}`;
+                        setShareLink(link);
+                        setShareStep("result");
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      Use This
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setShareDialogOpen(false)}>Cancel</Button>
+                <Button variant="outline" asChild>
+                  <Link to="/shares">Manage All Shares</Link>
+                </Button>
+                <Button onClick={() => setShareStep("config")} className="gap-2">
+                  <Share2 className="h-4 w-4" />
+                  Create New
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
 
           {shareStep === "config" && (
             <div className="space-y-4">
