@@ -108,13 +108,13 @@ export function DashboardPage() {
       .finally(() => setStatsLoading(false));
 
     Promise.all([
-      api.get("/transfers", { params: { limit: 8 }, signal }),
+      api.get("/transfers", { params: { limit: 5 }, signal }),
       api.get("/shares", { signal }),
-      api.get("/patients", { params: { limit: 50 }, signal }),
+      api.get("/patients", { params: { limit: 100 }, signal }),
     ])
       .then(([t, s, p]) => {
         const transferItems = t.data.items ?? t.data;
-        setTransfers(Array.isArray(transferItems) ? transferItems.slice(0, 8) : []);
+        setTransfers(Array.isArray(transferItems) ? transferItems.slice(0, 5) : []);
         const sharesData = s.data.items ?? s.data;
         setShares((Array.isArray(sharesData) ? sharesData : []).filter((sh: Share) => sh.is_active).slice(0, 5));
         const patientItems = p.data.items ?? p.data;
