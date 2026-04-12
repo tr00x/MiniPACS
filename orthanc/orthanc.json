@@ -40,7 +40,6 @@
 
   "Plugins": [
     "/usr/share/orthanc/plugins/libOrthancDicomWeb.so",
-    "/usr/share/orthanc/plugins/libOrthancAuthorization.so",
     "/usr/share/orthanc/plugins/libOrthancTransfers.so"
   ],
 
@@ -53,15 +52,6 @@
     "Ssl": false,
     "StudiesMetadata": "MainDicomTags",
     "SeriesMetadata": "Full"
-  },
-
-  "Authorization": {
-    "WebServiceRootUrl": "http://localhost:48922",
-    "WebServiceTokenValidation": "http://localhost:48922/api/orthanc/validate",
-    "StandardConfigurations": [
-      "ohif"
-    ],
-    "CheckedLevel": "studies"
   },
 
   "Transfers": {
