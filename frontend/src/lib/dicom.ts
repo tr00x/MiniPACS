@@ -99,6 +99,18 @@ export function getModalityColor(modality: string): string {
   return map[modality] ?? "";
 }
 
+/** Icon map for known external DICOM viewers. Keyed by icon_key from the database. */
+export const VIEWER_ICONS: Record<string, string> = {
+  ohif: "\u{1F52C}",
+  papaya: "\u{1F9E0}",
+  dwv: "\u{1F4CA}",
+  cornerstone: "\u{1F3D7}\uFE0F",
+  stone: "\u{1FAA8}",
+  slicer: "\u{1FA94}",
+  horos: "\u{1F5A5}\uFE0F",
+  radiant: "\u2600\uFE0F",
+};
+
 /** Determine share link status from is_active flag and expires_at timestamp. */
 export const EXPIRY_PRESETS = [
   { label: "7 days", days: 7 },
