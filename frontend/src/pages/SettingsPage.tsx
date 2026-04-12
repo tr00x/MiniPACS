@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
 import { PageError } from "@/components/page-error";
-import { formatTimestamp, VIEWER_COLORS, getViewerIconLabel } from "@/lib/dicom";
+import { formatTimestamp, VIEWER_LOGOS } from "@/lib/dicom";
 
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now();
@@ -391,8 +391,18 @@ export function SettingsPage() {
                 )}
                 {viewers.map((v) => (
                   <div key={v.id} className="flex items-center gap-4 rounded-lg border p-4">
-                    <div className={`flex h-10 w-10 items-center justify-center rounded-lg text-xs font-bold shrink-0 ${(VIEWER_COLORS[v.icon_key || ""] || ["bg-muted", "text-foreground"]).join(" ")}`}>
-                      {getViewerIconLabel(v.name, v.icon_key)}
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted shrink-0 overflow-hidden">
+                      {VIEWER_LOGOS[v.icon_key || ""] ? (
+                        <img
+                          src={VIEWER_LOGOS[v.icon_key || ""]}
+                          alt={v.name}
+                          className="h-7 w-7 object-contain"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden"); }}
+                        />
+                      ) : null}
+                      <span className={VIEWER_LOGOS[v.icon_key || ""] ? "hidden text-sm font-bold" : "text-sm font-bold"}>
+                        {v.name[0]}
+                      </span>
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
