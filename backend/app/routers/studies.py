@@ -1,3 +1,6 @@
+import io
+import zipfile as zipfile_mod
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
@@ -119,4 +122,63 @@ async def download_study(
         orthanc.download_study_stream(study_id),
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=study-{study_id}.zip"},
+    )
+
+
+@router.get("/{study_id}/series/{series_id}/download")
+async def download_series(
+    study_id: str,
+    series_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Download a single series as a DICOM ZIP archive."""
+    await log_audit("download_series", "series", series_id, user_id=user["id"], ip_address=request.client.host)
+
+    async def stream():
+        req = orthanc._http().build_request("GET", f"/series/{series_id}/archive")
+        resp = await orthanc._http().send(req, stream=True)
+        resp.raise_for_status()
+        try:
+            async for chunk in resp.aiter_bytes(chunk_size=65536):
+                yield chunk
+        finally:
+            await resp.aclose()
+
+    return StreamingResponse(
+        stream(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=series-{series_id}.zip"},
+    )
+
+
+@router.get("/{study_id}/series/{series_id}/download-images")
+async def download_series_images(
+    study_id: str,
+    series_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Download series as ZIP of JPEG images (for patients who can't open DICOM)."""
+    await log_audit("download_series_images", "series", series_id, user_id=user["id"], ip_address=request.client.host)
+
+    series_data = await orthanc.get_series(series_id)
+    instance_ids = series_data.get("Instances", [])
+    series_desc = series_data.get("MainDicomTags", {}).get("SeriesDescription", "series")
+
+    buf = io.BytesIO()
+    with zipfile_mod.ZipFile(buf, "w", zipfile_mod.ZIP_DEFLATED) as zf:
+        for i, iid in enumerate(instance_ids, 1):
+            try:
+                resp = await orthanc._http().get(f"/instances/{iid}/preview")
+                if resp.status_code == 200:
+                    zf.writestr(f"{series_desc}_{i:04d}.jpg", resp.content)
+            except Exception:
+                pass
+
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.read()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={series_desc}-images.zip"},
     )

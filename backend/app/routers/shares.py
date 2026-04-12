@@ -1,3 +1,5 @@
+import io
+import zipfile as zipfile_mod
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -309,6 +311,58 @@ async def patient_portal_download(
         orthanc.download_study_stream(study_id),
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=study-{study_id}.zip"},
+    )
+
+
+@portal_router.get("/{token}/download-images/{study_id}/{series_id}")
+async def patient_portal_download_series_images(
+    token: str,
+    study_id: str,
+    series_id: str,
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """Download a single series as ZIP of JPEG images (patient portal)."""
+    share = await _validate_share(token, db)
+
+    # Verify study belongs to patient
+    try:
+        patient = await orthanc.get_patient(share["orthanc_patient_id"])
+    except Exception:
+        raise HTTPException(502, "Unable to retrieve patient data")
+
+    if study_id not in patient.get("Studies", []):
+        raise HTTPException(403, "Study does not belong to this patient")
+
+    # Verify series belongs to study
+    study_data = await orthanc.get_study(study_id)
+    if series_id not in study_data.get("Series", []):
+        raise HTTPException(403, "Series does not belong to this study")
+
+    await log_audit(
+        "patient_portal_download_images", "series", series_id,
+        patient_token=token, ip_address=request.client.host,
+    )
+
+    series_data = await orthanc.get_series(series_id)
+    instance_ids = series_data.get("Instances", [])
+    series_desc = series_data.get("MainDicomTags", {}).get("SeriesDescription", "series")
+
+    buf = io.BytesIO()
+    with zipfile_mod.ZipFile(buf, "w", zipfile_mod.ZIP_DEFLATED) as zf:
+        for i, iid in enumerate(instance_ids, 1):
+            try:
+                resp = await orthanc._http().get(f"/instances/{iid}/preview")
+                if resp.status_code == 200:
+                    zf.writestr(f"{series_desc}_{i:04d}.jpg", resp.content)
+            except Exception:
+                pass
+
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.read()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={series_desc}-images.zip"},
     )
 
 
