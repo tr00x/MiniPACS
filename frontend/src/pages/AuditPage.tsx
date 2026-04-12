@@ -40,6 +40,7 @@ export function AuditPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     api.get("/users").then(({ data }) => setUsers(data)).catch(() => {});
@@ -75,20 +76,32 @@ export function AuditPage() {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
-  const exportCsv = () => {
-    const header = "Timestamp,Action,Resource Type,Resource ID,User,IP Address";
-    const rows = entries.map(e => {
-      const username = e.user_id != null ? (users.find(u => u.id === e.user_id)?.username ?? `#${e.user_id}`) : "";
-      return [e.timestamp, e.action, e.resource_type || "", e.resource_id || "", username, e.ip_address || ""].map(v => `"${v}"`).join(",");
-    });
-    const csv = [header, ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const params: Record<string, string | number> = { limit: 10000, offset: 0 };
+      if (actionFilter) params.action = actionFilter;
+      if (userFilter) params.user_id = Number(userFilter);
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      const { data } = await api.get("/audit-log", { params });
+      const allEntries: AuditEntry[] = data.items;
+      const header = "Timestamp,Action,Resource Type,Resource ID,User,IP Address";
+      const rows = allEntries.map(e => {
+        const username = e.user_id != null ? (users.find(u => u.id === e.user_id)?.username ?? `#${e.user_id}`) : "";
+        return [e.timestamp, e.action, e.resource_type || "", e.resource_id || "", username, e.ip_address || ""].map(v => `"${v}"`).join(",");
+      });
+      const csv = [header, ...rows].join("\n");
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
   };
 
   if (error) {
@@ -135,15 +148,16 @@ export function AuditPage() {
           className="max-w-[160px]"
           placeholder="To"
         />
-        <Button variant="outline" size="sm" onClick={exportCsv} className="ml-auto">
+        <Button variant="outline" size="sm" onClick={exportCsv} disabled={exporting} className="ml-auto">
           <Download className="mr-1 h-4 w-4" />
-          Export CSV
+          {exporting ? "Exporting…" : "Export CSV"}
         </Button>
       </div>
       {loading ? (
         <div className="rounded-lg border"><TableSkeleton columns={5} /></div>
       ) : (
         <>
+          <div className="rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -175,6 +189,7 @@ export function AuditPage() {
               )}
             </TableBody>
           </Table>
+          </div>
           {totalPages > 1 && (
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">

@@ -96,15 +96,20 @@ export function PatientDetailPage() {
     Promise.all([
       api.get(`/patients/${id}`, { signal: ctrl.signal }),
       api.get("/shares", { params: { patient_id: id }, signal: ctrl.signal }),
-      api.get("/transfers", { signal: ctrl.signal }),
     ])
-      .then(([patientRes, sharesRes, transfersRes]) => {
+      .then(async ([patientRes, sharesRes]) => {
         setPatient(patientRes.data.patient);
         const patientStudies: Study[] = patientRes.data.studies;
         setStudies(patientStudies);
         setShares(sharesRes.data);
-        const studyIds = new Set(patientStudies.map((s: Study) => s.ID));
-        setTransfers(transfersRes.data.filter((t: Transfer) => studyIds.has(t.orthanc_study_id)));
+        const studyIds = patientStudies.map((s: Study) => s.ID);
+        const transferResults = await Promise.all(
+          studyIds.map((sid: string) =>
+            api.get("/transfers", { params: { study_id: sid }, signal: ctrl.signal })
+              .catch(() => ({ data: [] }))
+          )
+        );
+        setTransfers(transferResults.flatMap((r) => r.data));
       })
       .catch((err) => {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {

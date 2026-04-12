@@ -77,6 +77,7 @@ export function StudyDetailPage() {
   const [downloading, setDownloading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [uidCopied, setUidCopied] = useState(false);
+  const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
 
   useEffect(() => {
     if (!id) return;
@@ -109,8 +110,6 @@ export function StudyDetailPage() {
 
   const stag = (key: keyof StudyData["MainDicomTags"]) => study?.MainDicomTags?.[key] || "";
   const ptag = (key: keyof NonNullable<StudyData["PatientMainDicomTags"]>) => study?.PatientMainDicomTags?.[key] || "";
-
-  const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
 
   const handleSend = async () => {
     if (!selectedNode) return;
