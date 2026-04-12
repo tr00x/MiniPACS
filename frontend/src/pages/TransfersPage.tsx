@@ -9,7 +9,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { TableSkeleton } from "@/components/TableSkeleton";
-import { RefreshCw, ArrowRightLeft, CheckCircle, XCircle, Clock } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import { RefreshCw, ArrowRightLeft, CheckCircle, XCircle, Clock, AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import { formatTimestamp } from "@/lib/dicom";
@@ -47,6 +50,7 @@ export function TransfersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<number | null>(null);
+  const [errorDetail, setErrorDetail] = useState<{ pacs: string; error: string; date: string } | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -242,7 +246,19 @@ export function TransfersPage() {
                     </TableCell>
                     <TableCell>
                       {t.error_message ? (
-                        <span className="text-xs text-destructive">{t.error_message}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-auto px-2 py-1 gap-1 text-destructive hover:text-destructive"
+                          onClick={() => setErrorDetail({
+                            pacs: t.pacs_node_name || "Unknown",
+                            error: t.error_message!,
+                            date: t.created_at,
+                          })}
+                        >
+                          <AlertCircle className="h-3.5 w-3.5" />
+                          <span className="text-xs">View Error</span>
+                        </Button>
                       ) : "—"}
                     </TableCell>
                     <TableCell>
@@ -274,6 +290,35 @@ export function TransfersPage() {
           </Table>
         </div>
       )}
+      {/* Error Detail Dialog */}
+      <Dialog open={!!errorDetail} onOpenChange={(open) => { if (!open) setErrorDetail(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Transfer Error Details</DialogTitle>
+          </DialogHeader>
+          {errorDetail && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">Destination</p>
+                  <p className="font-medium">{errorDetail.pacs}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Date</p>
+                  <p>{formatTimestamp(errorDetail.date)}</p>
+                </div>
+              </div>
+              <div className="rounded-md border bg-destructive/5 p-4">
+                <p className="text-xs font-medium text-destructive mb-2">Error Message</p>
+                <pre className="text-sm whitespace-pre-wrap break-all">{errorDetail.error}</pre>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Share this error with IT support if you need help resolving the issue.
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
