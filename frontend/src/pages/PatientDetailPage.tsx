@@ -72,8 +72,7 @@ export function PatientDetailPage() {
 
   // Share dialog — 3-step flow
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
-  const [shareStep, setShareStep] = useState<"config" | "existing" | "result">("config");
-  const [existingShares, setExistingShares] = useState<Array<{ id: number; token: string; expires_at: string | null; is_active: number; view_count: number; created_at: string }>>([]);
+  const [shareStep, setShareStep] = useState<"config" | "result">("config");
   const [shareLink, setShareLink] = useState("");
   const [shareLinkCopied, setShareLinkCopied] = useState(false);
   const [shareExpiry, setShareExpiry] = useState(30);
@@ -137,27 +136,13 @@ export function PatientDetailPage() {
     setTimeout(() => setCopiedToken(null), 2000);
   };
 
-  const openShareDialog = async () => {
+  const openShareDialog = () => {
     setShareLink("");
     setShareLinkCopied(false);
     setShareExpiry(30);
     setSharePin("");
-    setShareDialogOpen(true);
-
-    // Check for existing active shares
-    try {
-      const { data } = await api.get("/shares", { params: { patient_id: id } });
-      const allShares = (data.items ?? data) as typeof existingShares;
-      const active = allShares.filter((s) => s.is_active);
-      if (active.length > 0) {
-        setExistingShares(active);
-        setShareStep("existing");
-        return;
-      }
-    } catch {
-      // ignore — proceed to create
-    }
     setShareStep("config");
+    setShareDialogOpen(true);
   };
 
   const handleShareCreate = async () => {
@@ -326,55 +311,7 @@ export function PatientDetailPage() {
             <DialogTitle>Share with Patient</DialogTitle>
           </DialogHeader>
 
-          {shareStep === "existing" && (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                This patient has {existingShares.length} active share link{existingShares.length > 1 ? "s" : ""}. Select one to view its details, or create a new link.
-              </p>
-              <div className="space-y-2">
-                {existingShares.map((s) => {
-                  const isExpired = s.expires_at && new Date(s.expires_at) < new Date();
-                  return (
-                    <button
-                      key={s.id}
-                      className="w-full text-left rounded-lg border p-4 hover:border-primary/50 hover:bg-accent/30 transition-all"
-                      onClick={() => {
-                        setShareLink(`${window.location.origin}/patient-portal/${s.token}`);
-                        setShareStep("result");
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium">
-                          {s.expires_at
-                            ? isExpired ? "Expired" : `Expires ${new Date(s.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
-                            : "No expiry"}
-                        </span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${
-                          s.view_count > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
-                        }`}>
-                          {s.view_count > 0 ? `${s.view_count} view${s.view_count > 1 ? "s" : ""}` : "Not viewed"}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Created {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="flex items-center justify-between pt-2 border-t">
-                <Button variant="ghost" size="sm" asChild className="text-xs text-muted-foreground">
-                  <Link to="/shares">Manage All Shares</Link>
-                </Button>
-                <Button onClick={() => setShareStep("config")} className="gap-2">
-                  <Share2 className="h-4 w-4" />
-                  Create New Link
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {shareStep === "config" && (
+                    {shareStep === "config" && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Create a patient portal link for viewing and downloading imaging studies.
