@@ -45,7 +45,8 @@ async def init_db():
                 ip TEXT NOT NULL,
                 port INTEGER NOT NULL,
                 description TEXT,
-                is_active INTEGER DEFAULT 1
+                is_active INTEGER DEFAULT 1,
+                last_echo_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS transfer_log (
@@ -86,3 +87,10 @@ async def init_db():
             );
         """)
         await db.commit()
+
+        # Migrations for existing databases
+        try:
+            await db.execute("ALTER TABLE pacs_nodes ADD COLUMN last_echo_at TEXT")
+            await db.commit()
+        except Exception:
+            pass  # Column already exists

@@ -165,6 +165,13 @@ async def echo_pacs_node(
     modality = _modality_id(existing["name"])
     success = await orthanc.echo_modality(modality)
 
+    if success:
+        await db.execute(
+            "UPDATE pacs_nodes SET last_echo_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), node_id),
+        )
+        await db.commit()
+
     await log_audit(
         "echo_pacs_node", "pacs_node", str(node_id),
         user_id=user["id"], ip_address=request.client.host,
