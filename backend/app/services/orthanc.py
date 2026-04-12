@@ -85,7 +85,7 @@ async def _enrich_study_modalities(studies: list) -> list:
             except Exception:
                 pass
         if modalities:
-            tags["ModalitiesInStudy"] = "\\".join(sorted(modalities))
+            tags["ModalitiesInStudy"] = "/".join(sorted(modalities))
         return study
 
     return list(await asyncio.gather(*[enrich(s) for s in studies]))

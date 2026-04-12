@@ -30,6 +30,21 @@ async def get_study(
         raise HTTPException(status_code=404, detail="Study not found")
     await log_audit("view_study", "study", study_id, user_id=user["id"], ip_address=request.client.host)
     series = await orthanc.get_study_series(study_id)
+    # Enrich study with modalities from already-loaded series
+    study_tags = study.get("MainDicomTags", {})
+    if not study_tags.get("ModalitiesInStudy"):
+        modalities = set()
+        for s in series:
+            mod = s.get("MainDicomTags", {}).get("Modality")
+            if mod:
+                modalities.add(mod)
+        if modalities:
+            study_tags["ModalitiesInStudy"] = "/".join(sorted(modalities))
+    # Fill instance counts from Instances array if not in tags
+    for s in series:
+        tags = s.get("MainDicomTags", {})
+        if not tags.get("NumberOfSeriesRelatedInstances"):
+            tags["NumberOfSeriesRelatedInstances"] = str(len(s.get("Instances", [])))
     return {"study": study, "series": series}
 
 
