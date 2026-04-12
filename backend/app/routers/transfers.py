@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 import aiosqlite
 
@@ -18,28 +18,44 @@ router = APIRouter(prefix="/api/transfers", tags=["transfers"])
 async def list_transfers(
     request: Request,
     study_id: str = None,
+    status: str = None,
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user),
     db: aiosqlite.Connection = Depends(get_db),
 ):
     await log_audit("list_transfers", user_id=user["id"], ip_address=request.client.host)
+
+    where_clauses = []
+    params = []
+
     if study_id:
-        cursor = await db.execute(
-            """SELECT t.*, p.name as pacs_node_name, p.ae_title as pacs_node_ae_title
-               FROM transfer_log t
-               LEFT JOIN pacs_nodes p ON t.pacs_node_id = p.id
-               WHERE t.orthanc_study_id = ?
-               ORDER BY t.created_at DESC""",
-            (study_id,),
-        )
-    else:
-        cursor = await db.execute(
-            """SELECT t.*, p.name as pacs_node_name, p.ae_title as pacs_node_ae_title
-               FROM transfer_log t
-               LEFT JOIN pacs_nodes p ON t.pacs_node_id = p.id
-               ORDER BY t.created_at DESC""",
-        )
+        where_clauses.append("t.orthanc_study_id = ?")
+        params.append(study_id)
+    if status:
+        where_clauses.append("t.status = ?")
+        params.append(status)
+
+    where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    # Get total count
+    count_cursor = await db.execute(
+        f"SELECT COUNT(*) FROM transfer_log t{where_sql}", params
+    )
+    total = (await count_cursor.fetchone())[0]
+
+    # Get paginated results
+    cursor = await db.execute(
+        f"""SELECT t.*, p.name as pacs_node_name, p.ae_title as pacs_node_ae_title
+            FROM transfer_log t
+            LEFT JOIN pacs_nodes p ON t.pacs_node_id = p.id
+            {where_sql}
+            ORDER BY t.created_at DESC
+            LIMIT ? OFFSET ?""",
+        params + [limit, offset],
+    )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return {"items": [dict(row) for row in rows], "total": total}
 
 
 @router.post("", status_code=201)
