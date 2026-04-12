@@ -110,21 +110,29 @@ export function StudyDetailPage() {
   const stag = (key: keyof StudyData["MainDicomTags"]) => study?.MainDicomTags?.[key] || "";
   const ptag = (key: keyof NonNullable<StudyData["PatientMainDicomTags"]>) => study?.PatientMainDicomTags?.[key] || "";
 
+  const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
+
   const handleSend = async () => {
     if (!selectedNode) return;
     setSending(true);
     setSendError(null);
+    setSendStatus("sending");
     try {
       await api.post("/transfers", { study_id: id, pacs_node_id: Number(selectedNode) });
-      const nodeName = pacsNodes.find((n) => String(n.id) === selectedNode)?.name || "PACS";
-      toast.success(`Study sent to ${nodeName}`);
-      setSendDialogOpen(false);
-      setSelectedNode("");
+      setSendStatus("success");
     } catch (err: unknown) {
       setSendError(getErrorMessage(err, "Failed to send study"));
+      setSendStatus("error");
     } finally {
       setSending(false);
     }
+  };
+
+  const closeSendDialog = () => {
+    setSendDialogOpen(false);
+    setSendError(null);
+    setSelectedNode("");
+    setSendStatus("idle");
   };
 
   const handleDownload = async () => {
@@ -397,37 +405,85 @@ export function StudyDetailPage() {
       </Card>
 
       {/* Send Dialog */}
-      <Dialog open={sendDialogOpen} onOpenChange={(open) => { setSendDialogOpen(open); if (!open) setSendError(null); }}>
+      <Dialog open={sendDialogOpen} onOpenChange={(open) => { if (!open) closeSendDialog(); else setSendDialogOpen(true); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Send Study to PACS</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Sending: {stag("StudyDescription") || "Study"} — {formatDicomName(ptag("PatientName"))}
-          </p>
-          <div className="py-2">
-            <Select value={selectedNode} onValueChange={setSelectedNode}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select destination PACS..." />
-              </SelectTrigger>
-              <SelectContent>
-                {pacsNodes.map((n) => (
-                  <SelectItem key={n.id} value={String(n.id)}>
-                    {n.name} ({n.ae_title})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+
+          {/* Study info */}
+          <div className="rounded-md bg-muted p-3 space-y-1">
+            <p className="text-sm font-medium">{stag("StudyDescription") || "Study"}</p>
+            <p className="text-xs text-muted-foreground">
+              {formatDicomName(ptag("PatientName"))} · {formatDicomDate(stag("StudyDate"))} · {series.length} series, {series.reduce((sum, s) => sum + parseInt(s.MainDicomTags?.NumberOfSeriesRelatedInstances || "0", 10), 0)} images
+            </p>
           </div>
-          {sendError && (
-            <p className="text-sm text-destructive" role="alert">{sendError}</p>
+
+          {sendStatus === "idle" && (
+            <>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Destination</label>
+                <Select value={selectedNode} onValueChange={setSelectedNode}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select destination PACS..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pacsNodes.map((n) => (
+                      <SelectItem key={n.id} value={String(n.id)}>
+                        {n.name} ({n.ae_title})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {pacsNodes.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No PACS nodes configured. Add one in Settings → PACS Nodes.</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={closeSendDialog}>Cancel</Button>
+                <Button onClick={handleSend} disabled={!selectedNode}>
+                  <Send className="mr-2 h-4 w-4" /> Send
+                </Button>
+              </DialogFooter>
+            </>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSendDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSend} disabled={!selectedNode || sending}>
-              {sending ? "Sending..." : "Send"}
-            </Button>
-          </DialogFooter>
+
+          {sendStatus === "sending" && (
+            <div className="py-6 text-center space-y-3">
+              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <p className="text-sm font-medium">Sending to {pacsNodes.find(n => String(n.id) === selectedNode)?.name}...</p>
+              <p className="text-xs text-muted-foreground">This may take a moment depending on the study size.</p>
+            </div>
+          )}
+
+          {sendStatus === "success" && (
+            <div className="py-6 text-center space-y-3">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10">
+                <Check className="h-6 w-6 text-emerald-500" />
+              </div>
+              <p className="text-sm font-medium">Study sent successfully</p>
+              <p className="text-xs text-muted-foreground">
+                Sent to {pacsNodes.find(n => String(n.id) === selectedNode)?.name}. Check the Transfers page for status.
+              </p>
+              <DialogFooter className="justify-center">
+                <Button onClick={closeSendDialog}>Done</Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {sendStatus === "error" && (
+            <div className="py-6 text-center space-y-3">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+                <Send className="h-6 w-6 text-destructive" />
+              </div>
+              <p className="text-sm font-medium">Transfer failed</p>
+              <p className="text-sm text-destructive">{sendError}</p>
+              <DialogFooter className="justify-center gap-2">
+                <Button variant="outline" onClick={closeSendDialog}>Close</Button>
+                <Button onClick={() => { setSendStatus("idle"); setSendError(null); }}>Try Again</Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
