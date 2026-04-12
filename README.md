@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/assets/logo.png" alt="MiniPACS" width="80" />
-</p>
-
 <h1 align="center">MiniPACS</h1>
 
 <p align="center">
