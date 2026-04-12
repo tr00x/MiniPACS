@@ -1,15 +1,15 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { TableSkeleton } from "@/components/TableSkeleton";
+import { ModalityBadge } from "@/components/ui/modality-badge";
 import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from "lucide-react";
 import api from "@/lib/api";
-import { formatDicomName, formatDicomDate, calculateAge, getModalityColor } from "@/lib/dicom";
+import { formatDicomName, formatDicomDate, calculateAge } from "@/lib/dicom";
 
 const PAGE_SIZE = 25;
 
@@ -35,6 +35,7 @@ type SortDir = "asc" | "desc";
 export function PatientsPage() {
   const navigate = useNavigate();
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -48,15 +49,21 @@ export function PatientsPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     debounceRef.current = setTimeout(() => {
-      setPage(1);
       setLoading(true);
       setError(null);
       api
         .get("/patients", {
-          params: search ? { search } : {},
+          params: {
+            ...(search ? { search } : {}),
+            limit: PAGE_SIZE,
+            offset: (page - 1) * PAGE_SIZE,
+          },
           signal: ctrl.signal,
         })
-        .then(({ data }) => setPatients(data))
+        .then(({ data }) => {
+          setPatients(data.items);
+          setTotal(data.total);
+        })
         .catch((err) => {
           if (err.name !== "CanceledError" && err.name !== "AbortError") {
             setError(err?.response?.data?.detail ?? err.message ?? "Failed to load patients");
@@ -69,7 +76,12 @@ export function PatientsPage() {
       ctrl.abort();
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [search]);
+  }, [search, page]);
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setPage(1);
+  };
 
   const tag = (p: Patient, key: keyof Patient["MainDicomTags"]) =>
     p.MainDicomTags?.[key] || "";
@@ -81,7 +93,6 @@ export function PatientsPage() {
       setSortKey(key);
       setSortDir("asc");
     }
-    setPage(1);
   };
 
   const SortIcon = ({ col }: { col: SortKey }) => {
@@ -91,6 +102,7 @@ export function PatientsPage() {
       : <ChevronDown className="h-3 w-3" />;
   };
 
+  // Client-side sort of current page only
   const sorted = [...patients].sort((a, b) => {
     const dir = sortDir === "asc" ? 1 : -1;
     if (sortKey === "name") {
@@ -105,8 +117,7 @@ export function PatientsPage() {
     return 0;
   });
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   if (error) {
     return (
@@ -123,7 +134,7 @@ export function PatientsPage() {
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Patients</h2>
           <p className="text-sm text-muted-foreground">
-            {patients.length} patient{patients.length !== 1 ? "s" : ""}
+            {total} patient{total !== 1 ? "s" : ""}
           </p>
         </div>
       </div>
@@ -133,13 +144,13 @@ export function PatientsPage() {
         <Input
           placeholder="Search by name or ID..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => handleSearchChange(e.target.value)}
           className="pl-9"
         />
       </div>
 
       {loading ? (
-        <div className="rounded-lg border"><TableSkeleton columns={5} /></div>
+        <div className="rounded-lg border"><TableSkeleton columns={6} /></div>
       ) : (
         <>
           <div className="rounded-lg border">
@@ -161,7 +172,7 @@ export function PatientsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginated.map((p) => {
+                {sorted.map((p) => {
                   const rawName = tag(p, "PatientName");
                   const studyCount = p.Studies?.length || 0;
                   const dob = tag(p, "PatientBirthDate");
@@ -174,32 +185,28 @@ export function PatientsPage() {
                         <span className="font-medium">{formatDicomName(rawName)}</span>
                       </TableCell>
                       <TableCell>
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{tag(p, "PatientID")}</code>
+                        <code className="font-medical-id rounded bg-muted px-1.5 py-0.5 text-xs">{tag(p, "PatientID")}</code>
                       </TableCell>
                       <TableCell>
                         <span className="text-sm">{formatDicomDate(dob)}</span>
                         {dob && <span className="ml-1.5 text-xs text-muted-foreground">({calculateAge(dob)})</span>}
                       </TableCell>
                       <TableCell className="text-sm">
-                        {sex === "M" ? "Male" : sex === "F" ? "Female" : sex || "—"}
+                        {sex === "M" ? "Male" : sex === "F" ? "Female" : sex || "\u2014"}
                       </TableCell>
                       <TableCell>
                         {lastStudy ? (
                           <div className="flex items-center gap-2">
-                            {modality && (
-                              <Badge variant="outline" className={`font-mono text-[10px] px-1.5 py-0 ${getModalityColor(modality)}`}>
-                                {modality}
-                              </Badge>
-                            )}
+                            {modality && <ModalityBadge modality={modality} />}
                             <span className="text-xs text-muted-foreground truncate max-w-[180px]">
-                              {lastStudy.StudyDescription || "—"}
+                              {lastStudy.StudyDescription || "\u2014"}
                             </span>
                             <span className="text-[10px] text-muted-foreground/60 shrink-0">
                               {formatDicomDate(lastStudy.StudyDate || "")}
                             </span>
                           </div>
                         ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <span className="text-xs text-muted-foreground">\u2014</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right font-medium">{studyCount}</TableCell>
@@ -219,7 +226,7 @@ export function PatientsPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between text-sm text-muted-foreground">
               <span>
-                Showing {Math.min((page - 1) * PAGE_SIZE + 1, sorted.length)}–{Math.min(page * PAGE_SIZE, sorted.length)} of {sorted.length}
+                Showing {Math.min((page - 1) * PAGE_SIZE + 1, total)}\u2013{Math.min(page * PAGE_SIZE, total)} of {total}
               </span>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
