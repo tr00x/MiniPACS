@@ -143,14 +143,10 @@ export function DashboardPage() {
         <CardContent className="flex items-center gap-6 py-3 px-4">
           <div className="flex items-center gap-2">
             <StatusDot status={orthancStatus === "online" ? "online" : "offline"} />
-            <span className="text-sm font-medium">Orthanc PACS</span>
+            <span className="text-sm font-medium">PACS Server</span>
           </div>
           {orthancStatus === "online" && health?.orthanc && (
             <>
-              <div className="h-4 w-px bg-border" />
-              <div className="text-xs text-muted-foreground">
-                v{health.orthanc.version}
-              </div>
               <div className="h-4 w-px bg-border" />
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <HardDrive className="h-3 w-3" />
@@ -158,7 +154,7 @@ export function DashboardPage() {
               </div>
               <div className="h-4 w-px bg-border" />
               <div className="text-xs text-muted-foreground">
-                {health.orthanc.count_instances ?? 0} images
+                {health.orthanc.count_studies ?? 0} studies · {health.orthanc.count_instances ?? 0} images
               </div>
               <div className="h-4 w-px bg-border" />
               <div className="text-xs text-muted-foreground">
