@@ -143,7 +143,7 @@ export function StudiesPage() {
     { key: "custom", label: "Custom" },
   ];
 
-  const modalities = ["CT", "MR", "US", "XR"];
+  const modalities = ["CT", "MR", "US", "XR", "DX", "MG", "NM", "PT", "RF", "XA"];
 
   return (
     <div className="space-y-4">
