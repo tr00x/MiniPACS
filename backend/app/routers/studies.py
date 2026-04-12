@@ -11,12 +11,59 @@ router = APIRouter(prefix="/api/studies", tags=["studies"])
 @router.get("")
 async def list_studies(
     request: Request,
-    limit: int = Query(default=100, ge=1, le=500),
+    search: str = "",
+    modality: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user),
 ):
     await log_audit("list_studies", user_id=user["id"], ip_address=request.client.host)
-    return await orthanc.get_studies(limit=limit, since=offset)
+
+    # Fetch all studies expanded (with modality enrichment from orthanc service)
+    all_studies = await orthanc.get_studies()
+
+    # Filter by search (patient name, study description, patient ID)
+    if search:
+        search_lower = search.lower()
+        all_studies = [
+            s for s in all_studies
+            if search_lower in s.get("PatientMainDicomTags", {}).get("PatientName", "").lower()
+            or search_lower in s.get("MainDicomTags", {}).get("StudyDescription", "").lower()
+            or search_lower in s.get("PatientMainDicomTags", {}).get("PatientID", "").lower()
+        ]
+
+    # Filter by modality (comma-separated, e.g. "CT,MR")
+    if modality:
+        mod_set = set(m.strip().upper() for m in modality.split(",") if m.strip())
+        all_studies = [
+            s for s in all_studies
+            if mod_set & set(s.get("MainDicomTags", {}).get("ModalitiesInStudy", "").replace("\\", "/").split("/"))
+        ]
+
+    # Filter by date range (YYYYMMDD format)
+    if date_from:
+        all_studies = [
+            s for s in all_studies
+            if s.get("MainDicomTags", {}).get("StudyDate", "") >= date_from
+        ]
+    if date_to:
+        all_studies = [
+            s for s in all_studies
+            if s.get("MainDicomTags", {}).get("StudyDate", "") <= date_to
+        ]
+
+    # Sort by StudyDate descending (most recent first)
+    all_studies.sort(
+        key=lambda s: s.get("MainDicomTags", {}).get("StudyDate", ""),
+        reverse=True,
+    )
+
+    total = len(all_studies)
+    page = all_studies[offset:offset + limit]
+
+    return {"items": page, "total": total}
 
 
 @router.get("/{study_id}")
