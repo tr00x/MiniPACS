@@ -106,9 +106,13 @@ export const VIEWER_ICONS: Record<string, string> = {
   dwv: "\u{1F4CA}",
   cornerstone: "\u{1F3D7}\uFE0F",
   stone: "\u{1FAA8}",
-  slicer: "\u{1FA94}",
+  osirix: "\u{1F4BB}",
   horos: "\u{1F5A5}\uFE0F",
   radiant: "\u2600\uFE0F",
+  slicer: "\u{1FA94}",
+  microdicom: "\u{1F4C1}",
+  postdicom: "\u2601\uFE0F",
+  meddream: "\u{1F3E5}",
 };
 
 /** Determine share link status from is_active flag and expires_at timestamp. */

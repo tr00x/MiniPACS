@@ -121,14 +121,14 @@ async def init_db():
         count = (await cursor.fetchone())[0]
         if count == 0:
             default_viewers = [
-                ("OHIF Viewer", "/ohif/viewer?StudyInstanceUIDs={StudyInstanceUID}", 1, "Built-in zero-footprint DICOM viewer", "ohif"),
-                ("Papaya Viewer", "https://papaya.greenant.com/?url={StudyInstanceUID}", 0, "Lightweight neuroimaging viewer", "papaya"),
-                ("dwv (DICOM Web Viewer)", "https://ivmartel.github.io/dwv/demo/trunk/viewers/mobile/index.html", 0, "Open-source DICOM viewer", "dwv"),
-                ("Cornerstone.js", "https://tools.cornerstonejs.org/examples/", 0, "Medical imaging framework demo", "cornerstone"),
-                ("Stone Web Viewer", "https://www.orthanc-server.com/static.php?page=stone-web-viewer", 0, "Orthanc's Stone Web Viewer", "stone"),
-                ("3D Slicer", "https://www.slicer.org/", 0, "3D visualization and analysis platform", "slicer"),
-                ("Horos", "https://horosproject.org/", 0, "Free macOS DICOM viewer (desktop)", "horos"),
-                ("RadiAnt", "https://www.radiantviewer.com/", 0, "Fast DICOM viewer for Windows/Mac", "radiant"),
+                ("OHIF Viewer", "/ohif/viewer?StudyInstanceUIDs={StudyInstanceUID}", 1, "Built-in web viewer", "ohif"),
+                ("OsiriX", "osirix://open?StudyInstanceUID={StudyInstanceUID}", 0, "macOS DICOM viewer", "osirix"),
+                ("Horos", "horos://open?StudyInstanceUID={StudyInstanceUID}", 0, "Free macOS DICOM viewer", "horos"),
+                ("RadiAnt", "radiant://open?StudyInstanceUID={StudyInstanceUID}", 0, "Windows/Mac DICOM viewer", "radiant"),
+                ("3D Slicer", "slicer://viewer/?StudyInstanceUID={StudyInstanceUID}", 0, "3D visualization platform", "slicer"),
+                ("MicroDicom", "microdicom://open?StudyInstanceUID={StudyInstanceUID}", 0, "Free Windows DICOM viewer", "microdicom"),
+                ("PostDICOM", "https://cloud.postdicom.com/viewer.html?StudyInstanceUID={StudyInstanceUID}", 0, "Cloud DICOM viewer", "postdicom"),
+                ("MedDream", "https://demo.meddream.com/viewer/{StudyInstanceUID}", 0, "Web-based diagnostic viewer", "meddream"),
             ]
             for name, url_scheme, is_enabled, description, icon_key in default_viewers:
                 await db.execute(
