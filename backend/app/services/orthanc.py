@@ -33,9 +33,12 @@ async def get_patients(limit: int | None = None, since: int | None = None):
         params["limit"] = str(limit)
     if since is not None:
         params["since"] = str(since)
-    resp = await _http().get("/patients", params=params)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = await _http().get("/patients", params=params)
+        resp.raise_for_status()
+        return resp.json()
+    except (httpx.ConnectError, httpx.ConnectTimeout):
+        return []
 
 
 async def get_patient(patient_id: str):
@@ -61,9 +64,12 @@ async def get_studies(limit: int | None = None, since: int | None = None):
         params["limit"] = str(limit)
     if since is not None:
         params["since"] = str(since)
-    resp = await _http().get("/studies", params=params)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = await _http().get("/studies", params=params)
+        resp.raise_for_status()
+        return resp.json()
+    except (httpx.ConnectError, httpx.ConnectTimeout):
+        return []
 
 
 async def get_study(study_id: str):
