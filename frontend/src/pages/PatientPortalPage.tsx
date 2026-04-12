@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Download, Eye, EyeOff, Shield, Phone, Mail, Calendar, User, Lock } from "lucide-react";
+import { Download, Eye, EyeOff, Shield, Phone, Mail, Calendar, User, Lock, FileImage, Clock } from "lucide-react";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import axios from "axios";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
-import { formatDicomName, formatDicomDate, formatTimestamp } from "@/lib/dicom";
+import { formatDicomName, formatDicomDate } from "@/lib/dicom";
 
 interface PatientData {
   MainDicomTags: {
@@ -54,8 +53,8 @@ export function PatientPortalPage() {
   const [viewingStudy, setViewingStudy] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
 
-  // PIN gate state
-  const [needsPin, setNeedsPin] = useState<boolean | null>(null); // null = checking
+  // PIN gate
+  const [needsPin, setNeedsPin] = useState<boolean | null>(null);
   const [pinValue, setPinValue] = useState("");
   const [pinError, setPinError] = useState("");
   const [pinVerified, setPinVerified] = useState(false);
@@ -67,11 +66,9 @@ export function PatientPortalPage() {
       .catch(() => {});
   }, []);
 
-  // Step 1: Check if PIN is needed
   useEffect(() => {
     if (!token) return;
     const ctrl = new AbortController();
-
     portalApi
       .get(`/patient-portal/${token}/info`, { signal: ctrl.signal })
       .then(({ data }) => {
@@ -80,33 +77,26 @@ export function PatientPortalPage() {
           setLoading(false);
         } else {
           setNeedsPin(false);
-          setPinVerified(true); // No PIN needed, proceed directly
+          setPinVerified(true);
         }
       })
       .catch((err) => {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
           const status = err?.response?.status;
-          if (status === 410) {
-            setError("This link has expired or been revoked. Please contact the clinic for a new link.");
-          } else if (status === 404) {
-            setError("This link is invalid. Please check the link or contact the clinic.");
-          } else {
-            setError(err?.response?.data?.detail ?? "Unable to load your records. Please try again later.");
-          }
+          if (status === 410) setError("This link has expired or been revoked. Please contact the clinic for a new link.");
+          else if (status === 404) setError("This link is invalid. Please check the link or contact the clinic.");
+          else setError(err?.response?.data?.detail ?? "Unable to load your records.");
           setLoading(false);
         }
       });
-
     return () => ctrl.abort();
   }, [token]);
 
-  // Step 2: Load patient data (only after PIN verified or no PIN needed)
   useEffect(() => {
     if (!token || !pinVerified) return;
     const ctrl = new AbortController();
     setLoading(true);
     setError(null);
-
     portalApi
       .get(`/patient-portal/${token}`, { signal: ctrl.signal })
       .then(({ data }) => {
@@ -117,17 +107,12 @@ export function PatientPortalPage() {
       .catch((err) => {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
           const status = err?.response?.status;
-          if (status === 410) {
-            setError("This link has expired or been revoked. Please contact the clinic for a new link.");
-          } else if (status === 404) {
-            setError("This link is invalid. Please check the link or contact the clinic.");
-          } else {
-            setError(err?.response?.data?.detail ?? "Unable to load your records. Please try again later.");
-          }
+          if (status === 410) setError("This link has expired or been revoked.");
+          else if (status === 404) setError("This link is invalid.");
+          else setError(err?.response?.data?.detail ?? "Unable to load your records.");
         }
       })
       .finally(() => setLoading(false));
-
     return () => ctrl.abort();
   }, [token, pinVerified]);
 
@@ -141,142 +126,160 @@ export function PatientPortalPage() {
       setNeedsPin(false);
     } catch (err) {
       const e = err as { response?: { status?: number; data?: { detail?: string } } };
-      if (e?.response?.status === 401) {
-        setPinError("Incorrect PIN. Please try again.");
-      } else {
-        setPinError(e?.response?.data?.detail ?? "Verification failed. Please try again.");
-      }
+      if (e?.response?.status === 401) setPinError("Incorrect PIN. Please try again.");
+      else setPinError("Verification failed. Please try again.");
     } finally {
       setPinSubmitting(false);
     }
   };
 
-  if (!token) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-6 text-center">
-            <p className="text-destructive">Invalid portal link</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const ptag = (key: keyof PatientData["MainDicomTags"]) =>
-    patient?.MainDicomTags?.[key] || "";
-
-  const stag = (s: Study, key: keyof Study["MainDicomTags"]) =>
-    s.MainDicomTags?.[key] || "";
+  const ptag = (key: keyof PatientData["MainDicomTags"]) => patient?.MainDicomTags?.[key] || "";
+  const stag = (s: Study, key: keyof Study["MainDicomTags"]) => s.MainDicomTags?.[key] || "";
 
   const handleDownload = async (studyId: string) => {
     setDownloading(studyId);
     try {
-      const res = await portalApi.get(`/patient-portal/${token}/download/${studyId}`, {
-        responseType: "blob",
-      });
+      const res = await portalApi.get(`/patient-portal/${token}/download/${studyId}`, { responseType: "blob" });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url;
       a.download = `study-${studyId}.zip`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to download study");
+    } catch {
+      setError("Failed to download. Please try again.");
     } finally {
       setDownloading(null);
     }
   };
 
   const clinicName = clinicSettings.clinic_name || "Medical Imaging Portal";
-  const sex = ptag("PatientSex");
 
-  // PIN gate screen
-  if (needsPin === true && !pinVerified) {
+  if (!token) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <Card className="w-full max-w-sm mx-4 shadow-lg">
-          <CardContent className="pt-8 pb-6 text-center space-y-6">
-            <div className="flex justify-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                <Lock className="h-6 w-6 text-primary" />
-              </div>
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold">{clinicName}</h2>
-              <p className="text-sm text-muted-foreground mt-1">
-                Enter your PIN to access your records
-              </p>
-            </div>
-            <div className="space-y-3">
-              <Input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                placeholder="Enter PIN"
-                value={pinValue}
-                onChange={(e) => {
-                  setPinValue(e.target.value.replace(/\D/g, ""));
-                  setPinError("");
-                }}
-                onKeyDown={(e) => e.key === "Enter" && handlePinSubmit()}
-                className="text-center text-2xl tracking-[0.5em] h-14 font-mono"
-                autoFocus
-              />
-              {pinError && (
-                <p className="text-sm text-destructive">{pinError}</p>
-              )}
-            </div>
-            <Button
-              onClick={handlePinSubmit}
-              className="w-full"
-              disabled={pinValue.length < 4 || pinSubmitting}
-            >
-              {pinSubmitting ? "Verifying..." : "Access Records"}
-            </Button>
-          </CardContent>
-        </Card>
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50 to-white">
+        <p className="text-muted-foreground">Invalid portal link</p>
       </div>
     );
   }
 
-  if (loading) {
+  // ──── PIN Screen ────
+  if (needsPin === true && !pinVerified) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="text-center space-y-3">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          <p className="text-muted-foreground">Loading your records...</p>
+      <div className="flex min-h-screen flex-col bg-gradient-to-b from-blue-50 to-white">
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm space-y-8">
+            <div className="text-center space-y-3">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/20">
+                <Shield className="h-8 w-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold">{clinicName}</h1>
+                <p className="text-sm text-muted-foreground">Secure Patient Portal</p>
+              </div>
+            </div>
+
+            <Card className="shadow-xl border-0 bg-white">
+              <CardContent className="pt-8 pb-8 px-6 space-y-6">
+                <div className="text-center">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 mb-3">
+                    <Lock className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Enter the PIN provided by your clinic
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="- - - -"
+                    value={pinValue}
+                    onChange={(e) => { setPinValue(e.target.value.replace(/\D/g, "")); setPinError(""); }}
+                    onKeyDown={(e) => e.key === "Enter" && handlePinSubmit()}
+                    autoFocus
+                    className="w-full text-center text-3xl tracking-[0.75em] h-16 rounded-xl border-2 border-gray-200 bg-white font-mono focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all placeholder:text-gray-300"
+                  />
+                  {pinError && (
+                    <p className="text-sm text-center text-red-500 font-medium">{pinError}</p>
+                  )}
+                </div>
+
+                <Button
+                  onClick={handlePinSubmit}
+                  className="w-full h-12 text-base rounded-xl bg-blue-600 hover:bg-blue-700 shadow-sm"
+                  disabled={pinValue.length < 4 || pinSubmitting}
+                >
+                  {pinSubmitting ? "Verifying..." : "Access My Records"}
+                </Button>
+              </CardContent>
+            </Card>
+
+            {(clinicSettings.clinic_phone || clinicSettings.clinic_email) && (
+              <div className="text-center space-y-1.5">
+                <p className="text-xs text-muted-foreground">Need help? Contact your clinic</p>
+                <div className="flex items-center justify-center gap-4 text-sm">
+                  {clinicSettings.clinic_phone && (
+                    <a href={`tel:${clinicSettings.clinic_phone}`} className="text-blue-600 hover:underline flex items-center gap-1">
+                      <Phone className="h-3 w-3" /> {clinicSettings.clinic_phone}
+                    </a>
+                  )}
+                  {clinicSettings.clinic_email && (
+                    <a href={`mailto:${clinicSettings.clinic_email}`} className="text-blue-600 hover:underline flex items-center gap-1">
+                      <Mail className="h-3 w-3" /> Email
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
+  // ──── Loading ────
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50 to-white">
+        <div className="text-center space-y-4">
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-[3px] border-blue-600 border-t-transparent" />
+          <p className="text-sm text-muted-foreground">Loading your records...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ──── Error ────
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <Card className="w-full max-w-md mx-4">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50 to-white p-4">
+        <Card className="w-full max-w-md shadow-xl border-0">
           <CardContent className="pt-8 pb-8 text-center space-y-4">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-              <Shield className="h-6 w-6 text-destructive" />
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-50">
+              <Shield className="h-7 w-7 text-red-500" />
             </div>
             <div>
               <p className="font-semibold text-lg">Unable to Access Records</p>
               <p className="mt-2 text-sm text-muted-foreground">{error}</p>
             </div>
             {(clinicSettings.clinic_phone || clinicSettings.clinic_email) && (
-              <div className="pt-2 border-t space-y-1">
-                <p className="text-xs text-muted-foreground font-medium">Contact the clinic:</p>
-                {clinicSettings.clinic_phone && (
-                  <a href={`tel:${clinicSettings.clinic_phone}`} className="flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                    <Phone className="h-3 w-3" /> {clinicSettings.clinic_phone}
-                  </a>
-                )}
-                {clinicSettings.clinic_email && (
-                  <a href={`mailto:${clinicSettings.clinic_email}`} className="flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                    <Mail className="h-3 w-3" /> {clinicSettings.clinic_email}
-                  </a>
-                )}
+              <div className="pt-4 border-t space-y-2">
+                <p className="text-xs text-muted-foreground font-medium">Contact your clinic:</p>
+                <div className="flex items-center justify-center gap-4">
+                  {clinicSettings.clinic_phone && (
+                    <a href={`tel:${clinicSettings.clinic_phone}`} className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
+                      <Phone className="h-3.5 w-3.5" /> Call
+                    </a>
+                  )}
+                  {clinicSettings.clinic_email && (
+                    <a href={`mailto:${clinicSettings.clinic_email}`} className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
+                      <Mail className="h-3.5 w-3.5" /> Email
+                    </a>
+                  )}
+                </div>
               </div>
             )}
           </CardContent>
@@ -287,100 +290,80 @@ export function PatientPortalPage() {
 
   if (!patient) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-blue-50 to-white">
         <p className="text-muted-foreground">Patient not found</p>
       </div>
     );
   }
 
-  // Map modality to left border color
-  const modalityBorderColor = (mod: string): string => {
-    const m = mod.split("\\")[0]?.trim().toUpperCase();
-    switch (m) {
-      case "MR": return "border-l-blue-500";
-      case "CT": return "border-l-amber-500";
-      case "CR": case "DX": return "border-l-green-500";
-      case "US": return "border-l-purple-500";
-      case "XA": return "border-l-red-500";
-      case "MG": return "border-l-pink-500";
-      case "NM": case "PT": return "border-l-orange-500";
-      default: return "border-l-gray-300";
-    }
-  };
+  const sex = ptag("PatientSex");
 
+  // ──── Main Portal ────
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
+    <div className="flex min-h-screen flex-col bg-gradient-to-b from-blue-50/50 to-white">
       {/* Header */}
-      <header className="border-b bg-white">
-        <div className="mx-auto max-w-4xl px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+      <header className="bg-white border-b shadow-sm sticky top-0 z-10">
+        <div className="mx-auto max-w-3xl px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
-              <Shield className="h-5 w-5 text-primary-foreground" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 shadow">
+              <Shield className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="font-semibold">{clinicName}</h1>
-              <p className="text-xs text-muted-foreground">Secure Patient Portal</p>
+              <h1 className="font-semibold text-sm sm:text-base leading-tight">{clinicName}</h1>
+              <p className="text-[11px] text-muted-foreground">Secure Patient Portal</p>
             </div>
           </div>
           {share?.expires_at && (
-            <p className="text-xs text-muted-foreground">
-              Link expires {formatTimestamp(share.expires_at)}
-            </p>
+            <div className="flex items-center gap-1 text-[11px] text-muted-foreground bg-gray-100 rounded-full px-2.5 py-1">
+              <Clock className="h-3 w-3" />
+              <span className="hidden sm:inline">Expires</span> {new Date(share.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            </div>
           )}
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-4xl flex-1 px-4 sm:px-6 py-8 space-y-8">
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 sm:px-6 py-5 sm:py-8 space-y-5 sm:space-y-6">
         {/* Welcome */}
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">
-            Hello, {formatDicomName(ptag("PatientName"))}
+        <div className="space-y-1">
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
+            Welcome, {formatDicomName(ptag("PatientName")).split(" ")[0]}
           </h2>
-          <p className="mt-1 text-muted-foreground">
-            Your imaging records are available below. You can view them online or download for your records.
+          <p className="text-sm text-muted-foreground">
+            Your imaging records are ready to view and download.
           </p>
         </div>
 
-        {/* Patient Info */}
-        <Card className="bg-white">
-          <CardContent className="pt-6">
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="flex items-start gap-3">
-                <User className="mt-0.5 h-4 w-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="text-xs text-muted-foreground">Patient ID</p>
-                  <p className="font-mono text-sm">{ptag("PatientID") || "\u2014"}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <Calendar className="mt-0.5 h-4 w-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="text-xs text-muted-foreground">Date of Birth</p>
-                  <p className="text-sm">{formatDicomDate(ptag("PatientBirthDate"))}</p>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Sex</p>
-                <p className="text-sm">{sex === "M" ? "Male" : sex === "F" ? "Female" : sex || "\u2014"}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Studies</p>
-                <p className="text-sm font-medium">{studies.length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Patient Info — compact row */}
+        <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm rounded-xl bg-white border p-3.5 shadow-sm">
+          <div className="flex items-center gap-1.5">
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground text-xs">ID</span>
+            <span className="font-mono font-medium text-xs">{ptag("PatientID") || "—"}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground text-xs">DOB</span>
+            <span className="font-medium text-xs">{formatDicomDate(ptag("PatientBirthDate"))}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-muted-foreground text-xs">Sex</span>
+            <span className="font-medium text-xs">{sex === "M" ? "Male" : sex === "F" ? "Female" : sex || "—"}</span>
+          </div>
+          <div className="flex items-center gap-1.5 ml-auto">
+            <FileImage className="h-3.5 w-3.5 text-blue-600" />
+            <span className="font-semibold text-xs">{studies.length} {studies.length === 1 ? "study" : "studies"}</span>
+          </div>
+        </div>
 
         {/* Studies */}
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Your Imaging Studies</h3>
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Your Studies</h3>
 
           {studies.length === 0 ? (
-            <Card className="bg-white">
-              <CardContent className="py-12 text-center text-muted-foreground">
-                No imaging studies are available at this time.
-              </CardContent>
-            </Card>
+            <div className="rounded-xl border bg-white p-12 text-center shadow-sm">
+              <FileImage className="mx-auto h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-muted-foreground">No imaging studies are available at this time.</p>
+            </div>
           ) : (
             studies.map((s) => {
               const studyInstanceUID = stag(s, "StudyInstanceUID");
@@ -388,55 +371,62 @@ export function PatientPortalPage() {
               const modality = stag(s, "ModalitiesInStudy");
               const isDownloading = downloading === s.ID;
               return (
-                <Card
-                  key={s.ID}
-                  className={`bg-white overflow-hidden border-l-4 ${modalityBorderColor(modality)}`}
-                >
-                  <CardContent className="p-0">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5">
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium truncate">
+                <div key={s.ID} className="rounded-xl border bg-white overflow-hidden shadow-sm">
+                  <div className="p-4 sm:p-5">
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                      <div className="space-y-1.5 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-semibold">
                             {stag(s, "StudyDescription") || "Imaging Study"}
-                          </p>
-                          {modality && (
-                            <ModalityBadge modality={modality} className="shrink-0" />
+                          </h4>
+                          {modality && <ModalityBadge modality={modality} />}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Calendar className="h-3 w-3" />
+                          <span>{formatDicomDate(stag(s, "StudyDate"))}</span>
+                          {stag(s, "InstitutionName") && (
+                            <>
+                              <span className="text-muted-foreground/30">·</span>
+                              <span>{stag(s, "InstitutionName")}</span>
+                            </>
                           )}
                         </div>
-                        {stag(s, "InstitutionName") && (
-                          <p className="text-xs text-muted-foreground">{stag(s, "InstitutionName")}</p>
-                        )}
-                        <p className="text-sm text-muted-foreground">
-                          {formatDicomDate(stag(s, "StudyDate"))}
-                        </p>
-                      </div>
-                      <div className="flex flex-col sm:flex-row gap-2 shrink-0">
-                        {studyInstanceUID && (
-                          <Button
-                            className="w-full sm:w-auto"
-                            variant={isViewing ? "default" : "outline"}
-                            onClick={() => setViewingStudy(isViewing ? null : s.ID)}
-                          >
-                            {isViewing ? (
-                              <><EyeOff className="mr-2 h-4 w-4" /> Close Viewer</>
-                            ) : (
-                              <><Eye className="mr-2 h-4 w-4" /> View Online</>
-                            )}
-                          </Button>
-                        )}
-                        <Button className="w-full sm:w-auto" variant="outline" onClick={() => handleDownload(s.ID)} disabled={isDownloading}>
-                          <Download className="mr-2 h-4 w-4" />
-                          {isDownloading ? "Downloading..." : "Download"}
-                        </Button>
                       </div>
                     </div>
-                    {isViewing && studyInstanceUID && (
-                      <div className="border-t">
-                        <OhifViewer studyInstanceUID={studyInstanceUID} className="h-[400px] sm:h-[600px] w-full" />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+
+                    {/* Buttons — full width on mobile */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
+                      {studyInstanceUID && (
+                        <Button
+                          className="h-12 text-sm rounded-lg"
+                          variant={isViewing ? "default" : "outline"}
+                          onClick={() => setViewingStudy(isViewing ? null : s.ID)}
+                        >
+                          {isViewing ? (
+                            <><EyeOff className="mr-2 h-4 w-4" /> Close Viewer</>
+                          ) : (
+                            <><Eye className="mr-2 h-4 w-4" /> View Images</>
+                          )}
+                        </Button>
+                      )}
+                      <Button
+                        className="h-12 text-sm rounded-lg"
+                        variant="outline"
+                        onClick={() => handleDownload(s.ID)}
+                        disabled={isDownloading}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        {isDownloading ? "Preparing..." : "Download"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {isViewing && studyInstanceUID && (
+                    <div className="border-t bg-black">
+                      <OhifViewer studyInstanceUID={studyInstanceUID} className="h-[300px] sm:h-[450px] lg:h-[600px] w-full" />
+                    </div>
+                  )}
+                </div>
               );
             })
           )}
@@ -444,24 +434,24 @@ export function PatientPortalPage() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t bg-white py-6 mt-8">
-        <div className="mx-auto max-w-4xl px-4 sm:px-6 text-center space-y-2">
+      <footer className="bg-white border-t py-5 mt-auto">
+        <div className="mx-auto max-w-3xl px-4 sm:px-6 text-center space-y-3">
           {(clinicSettings.clinic_phone || clinicSettings.clinic_email) && (
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-6 text-sm">
+            <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-5">
               {clinicSettings.clinic_phone && (
-                <a href={`tel:${clinicSettings.clinic_phone}`} className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
-                  <Phone className="h-3.5 w-3.5" /> {clinicSettings.clinic_phone}
+                <a href={`tel:${clinicSettings.clinic_phone}`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-blue-600 transition-colors">
+                  <Phone className="h-4 w-4" /> {clinicSettings.clinic_phone}
                 </a>
               )}
               {clinicSettings.clinic_email && (
-                <a href={`mailto:${clinicSettings.clinic_email}`} className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
-                  <Mail className="h-3.5 w-3.5" /> {clinicSettings.clinic_email}
+                <a href={`mailto:${clinicSettings.clinic_email}`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-blue-600 transition-colors">
+                  <Mail className="h-4 w-4" /> {clinicSettings.clinic_email}
                 </a>
               )}
             </div>
           )}
-          <p className="text-xs text-muted-foreground">
-            Your records are transmitted securely. This link is personal — do not share it with others.
+          <p className="text-[11px] text-muted-foreground/60 leading-relaxed">
+            Your records are encrypted and transmitted securely. This link is personal — do not share it with others.
           </p>
         </div>
       </footer>
