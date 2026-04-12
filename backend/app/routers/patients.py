@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.routers.auth import get_current_user
@@ -24,6 +26,35 @@ async def list_patients(
             if search_lower in str(p.get("MainDicomTags", {}).get("PatientName", "")).lower()
             or search_lower in str(p.get("MainDicomTags", {}).get("PatientID", "")).lower()
         ]
+
+    # Enrich with last study info for each patient
+    async def enrich_last_study(patient: dict) -> dict:
+        study_ids = patient.get("Studies", [])
+        if not study_ids:
+            return patient
+        try:
+            last_study = await orthanc.get_study(study_ids[-1])
+            if last_study:
+                tags = last_study.get("MainDicomTags", {})
+                # Enrich modality from series if missing
+                if not tags.get("ModalitiesInStudy"):
+                    series_ids = last_study.get("Series", [])
+                    if series_ids:
+                        r = await orthanc._http().get(f"/series/{series_ids[0]}")
+                        if r.status_code == 200:
+                            mod = r.json().get("MainDicomTags", {}).get("Modality")
+                            if mod:
+                                tags["ModalitiesInStudy"] = mod
+                patient["LastStudy"] = {
+                    "StudyDate": tags.get("StudyDate"),
+                    "StudyDescription": tags.get("StudyDescription"),
+                    "ModalitiesInStudy": tags.get("ModalitiesInStudy"),
+                }
+        except Exception:
+            pass
+        return patient
+
+    patients = list(await asyncio.gather(*[enrich_last_study(p) for p in patients]))
     return patients
 
 
