@@ -335,7 +335,7 @@ export function DashboardPage() {
                       </div>
                       <div className="flex items-center gap-2 shrink-0 ml-2">
                         {s.view_count > 0 ? (
-                          <span className="text-xs text-emerald-600 flex items-center gap-1">
+                          <span className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                             <Eye className="h-3 w-3" /> {s.view_count}
                           </span>
                         ) : (

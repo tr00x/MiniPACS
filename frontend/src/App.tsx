@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -19,6 +20,7 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
 
 export default function App() {
   return (
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
     <BrowserRouter>
       <ErrorBoundary>
         <AuthProvider>
@@ -43,5 +45,6 @@ export default function App() {
         </AuthProvider>
       </ErrorBoundary>
     </BrowserRouter>
+    </ThemeProvider>
   );
 }
