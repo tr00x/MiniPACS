@@ -118,8 +118,13 @@ export function StudyDetailPage() {
     setSendError(null);
     setSendStatus("sending");
     try {
-      await api.post("/transfers", { study_id: id, pacs_node_id: Number(selectedNode) });
-      setSendStatus("success");
+      const { data } = await api.post("/transfers", { study_id: id, pacs_node_id: Number(selectedNode) });
+      if (data.status === "failed") {
+        setSendError(data.error_message || "Transfer failed — the destination PACS may be unreachable.");
+        setSendStatus("error");
+      } else {
+        setSendStatus("success");
+      }
     } catch (err: unknown) {
       setSendError(getErrorMessage(err, "Failed to send study"));
       setSendStatus("error");
