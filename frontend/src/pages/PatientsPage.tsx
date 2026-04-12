@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/table";
 import { TableSkeleton } from "@/components/TableSkeleton";
 import { PageError } from "@/components/page-error";
-import { ModalityBadge } from "@/components/ui/modality-badge";
+import { ModalityBadgeList } from "@/components/ui/modality-badge";
 import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from "lucide-react";
 import api from "@/lib/api";
 import { formatDicomName, formatDicomDate, calculateAge } from "@/lib/dicom";
@@ -198,7 +198,7 @@ export function PatientsPage() {
                       <TableCell>
                         {lastStudy ? (
                           <div className="flex items-center gap-2">
-                            {modality && <ModalityBadge modality={modality} />}
+                            {modality && <ModalityBadgeList modalities={modality.replace(/\\/g, "/").split("/")} />}
                             <span className="text-xs text-muted-foreground truncate max-w-[180px]">
                               {lastStudy.StudyDescription || "\u2014"}
                             </span>
