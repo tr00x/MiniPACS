@@ -43,3 +43,17 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+/**
+ * Extract a human-readable error message from an axios error.
+ * Handles both string detail and FastAPI validation error arrays.
+ */
+export function getErrorMessage(err: unknown, fallback = "An error occurred"): string {
+  const e = err as { response?: { data?: { detail?: unknown } }; message?: string };
+  const detail = e?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((d: { msg?: string; loc?: string[] }) => d.msg || "Validation error").join(". ");
+  }
+  return e?.message ?? fallback;
+}
