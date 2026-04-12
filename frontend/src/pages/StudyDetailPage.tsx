@@ -562,46 +562,48 @@ export function StudyDetailPage() {
           {shareStep === "existing" && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                This patient already has active share links. You can use an existing one or create a new link.
+                This patient has {existingShares.length} active share link{existingShares.length > 1 ? "s" : ""}. Select one to view its details, or create a new link.
               </p>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {existingShares.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between rounded-lg border p-3 hover:bg-accent/30">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium font-medical-id truncate">
-                        ...{s.token.slice(-12)}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {s.expires_at ? `Expires ${new Date(s.expires_at).toLocaleDateString()}` : "No expiry"}
-                        {s.view_count > 0 ? ` · ${s.view_count} views` : " · Not viewed"}
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0 gap-1.5"
+              <div className="space-y-2">
+                {existingShares.map((s) => {
+                  const isExpired = s.expires_at && new Date(s.expires_at) < new Date();
+                  return (
+                    <button
+                      key={s.id}
+                      className="w-full text-left rounded-lg border p-4 hover:border-primary/50 hover:bg-accent/30 transition-all"
                       onClick={() => {
-                        const link = `${window.location.origin}/patient-portal/${s.token}`;
-                        setShareLink(link);
+                        setShareLink(`${window.location.origin}/patient-portal/${s.token}`);
                         setShareStep("result");
                       }}
                     >
-                      <Copy className="h-3.5 w-3.5" />
-                      Use This
-                    </Button>
-                  </div>
-                ))}
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium">
+                          {s.expires_at
+                            ? isExpired ? "Expired" : `Expires ${new Date(s.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+                            : "No expiry"}
+                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          s.view_count > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
+                        }`}>
+                          {s.view_count > 0 ? `${s.view_count} view${s.view_count > 1 ? "s" : ""}` : "Not viewed"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Created {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
-              <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => setShareDialogOpen(false)}>Cancel</Button>
-                <Button variant="outline" asChild>
+              <div className="flex items-center justify-between pt-2 border-t">
+                <Button variant="ghost" size="sm" asChild className="text-xs text-muted-foreground">
                   <Link to="/shares">Manage All Shares</Link>
                 </Button>
                 <Button onClick={() => setShareStep("config")} className="gap-2">
                   <Share2 className="h-4 w-4" />
-                  Create New
+                  Create New Link
                 </Button>
-              </DialogFooter>
+              </div>
             </div>
           )}
 
