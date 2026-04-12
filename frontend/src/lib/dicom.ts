@@ -100,26 +100,17 @@ export function getModalityColor(modality: string): string {
 }
 
 /** Icon map for known external DICOM viewers. Keyed by icon_key from the database. */
-/** Color scheme for viewer icons — maps icon_key to [bgColor, textColor] */
-export const VIEWER_COLORS: Record<string, [string, string]> = {
-  ohif: ["bg-blue-600", "text-white"],
-  osirix: ["bg-gray-800", "text-yellow-400"],
-  horos: ["bg-emerald-600", "text-white"],
-  radiant: ["bg-orange-500", "text-white"],
-  slicer: ["bg-indigo-600", "text-white"],
-  microdicom: ["bg-sky-500", "text-white"],
-  postdicom: ["bg-teal-600", "text-white"],
-  meddream: ["bg-purple-600", "text-white"],
+/** Favicon URLs for known DICOM viewers — pulled from their official sites */
+export const VIEWER_LOGOS: Record<string, string> = {
+  ohif: "https://ohif.org/favicon.ico",
+  osirix: "https://www.osirix-viewer.com/favicon.ico",
+  horos: "https://horosproject.org/wp-content/uploads/2018/07/cropped-horos-32x32.png",
+  radiant: "https://www.radiantviewer.com/favicon.ico",
+  slicer: "https://www.slicer.org/assets/img/3D-Slicer-Mark.svg",
+  microdicom: "https://www.microdicom.com/favicon.ico",
+  postdicom: "https://www.postdicom.com/favicon.ico",
+  meddream: "https://www.softneta.com/favicon.ico",
 };
-
-/** Get short label for viewer icon (first 1-2 chars) */
-export function getViewerIconLabel(name: string, iconKey?: string): string {
-  const labels: Record<string, string> = {
-    ohif: "OH", osirix: "Ox", horos: "H", radiant: "R",
-    slicer: "3D", microdicom: "uD", postdicom: "PD", meddream: "MD",
-  };
-  return labels[iconKey || ""] || name.slice(0, 2).toUpperCase();
-}
 
 /** Determine share link status from is_active flag and expires_at timestamp. */
 export const EXPIRY_PRESETS = [
