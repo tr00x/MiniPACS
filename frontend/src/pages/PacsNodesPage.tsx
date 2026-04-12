@@ -192,6 +192,40 @@ export function PacsNodesPage() {
           Add Node
         </Button>
       </div>
+
+      {/* Receiving info card — share with external facilities */}
+      <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+        <p className="text-sm font-medium">Receiving DICOM Studies</p>
+        <p className="text-xs text-muted-foreground">
+          To receive imaging studies from external equipment or facilities, provide them with the following connection details:
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">AE Title</p>
+            <p className="font-mono font-medium text-sm">MINIPACS</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">IP Address</p>
+            <p className="font-mono font-medium text-sm">{window.location.hostname}</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">DICOM Port</p>
+            <p className="font-mono font-medium text-sm">48924</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Protocol</p>
+            <p className="font-mono font-medium text-sm">C-STORE</p>
+          </div>
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-1">
+          Equipment (MRI, CT, X-ray) should be configured to send studies to this address via DICOM C-STORE.
+        </p>
+      </div>
+
+      {/* Outbound nodes info */}
+      <p className="text-xs text-muted-foreground">
+        <strong>Outbound PACS nodes</strong> are destinations where you can send studies. Add a node with its AE Title, IP, and port, then use C-ECHO to verify connectivity before sending.
+      </p>
       {loading ? (
         <div className="rounded-lg border">
           <TableSkeleton columns={9} />
@@ -304,16 +338,17 @@ export function PacsNodesPage() {
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="name">Name</Label>
-              <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. City Hospital Radiology" />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="ae_title">AE Title</Label>
-              <Input id="ae_title" value={form.ae_title} onChange={(e) => setForm({ ...form, ae_title: e.target.value })} />
+              <Input id="ae_title" value={form.ae_title} onChange={(e) => setForm({ ...form, ae_title: e.target.value })} placeholder="e.g. CITYHOSPRAD" />
+              <p className="text-[10px] text-muted-foreground">Application Entity Title — ask the receiving facility for this</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="ip">IP Address</Label>
-                <Input id="ip" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} />
+                <Input id="ip" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} placeholder="192.168.1.100" />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="port">Port</Label>
@@ -322,7 +357,7 @@ export function PacsNodesPage() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="description">Description</Label>
-              <Input id="description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+              <Input id="description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="e.g. Primary hospital PACS for referrals" />
             </div>
             {editingId && (
               <div className="flex items-center gap-2">
