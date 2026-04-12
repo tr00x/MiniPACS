@@ -8,13 +8,14 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { TableSkeleton } from "@/components/TableSkeleton";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import { TableSkeleton } from "@/components/TableSkeleton";
 import { RefreshCw, ArrowRightLeft, CheckCircle, XCircle, Clock, AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
-import api from "@/lib/api";
+import { toast } from "sonner";
+import api, { getErrorMessage } from "@/lib/api";
 import { formatTimestamp } from "@/lib/dicom";
 
 interface Transfer {
@@ -29,9 +30,9 @@ interface Transfer {
 }
 
 const statusConfig: Record<Transfer["status"], { variant: "default" | "destructive" | "secondary"; icon: typeof CheckCircle; label: string }> = {
-  success: { variant: "default", icon: CheckCircle, label: "Success" },
+  success: { variant: "default", icon: CheckCircle, label: "Delivered" },
   failed: { variant: "destructive", icon: XCircle, label: "Failed" },
-  pending: { variant: "secondary", icon: Clock, label: "Pending" },
+  pending: { variant: "secondary", icon: Clock, label: "Sending..." },
 };
 
 type StatusFilter = "all" | "success" | "failed" | "pending";
@@ -45,14 +46,24 @@ function formatDuration(created: string, completed: string | null): string {
   return `${Math.floor(sec / 60)}m ${sec % 60}s`;
 }
 
+function humanizeError(raw: string): string {
+  if (raw.includes("not found") || raw.includes("404")) return "PACS node not registered in Orthanc. Remove and re-add it in PACS Nodes settings.";
+  if (raw.includes("timeout") || raw.includes("Timeout")) return "Connection timed out. The destination may be offline or unreachable.";
+  if (raw.includes("refused") || raw.includes("Refused")) return "Connection refused. The destination is not accepting connections.";
+  if (raw.includes("network") || raw.includes("Network")) return "Network error. Check that the destination IP and port are correct.";
+  return "Transfer failed. See technical details below.";
+}
+
 export function TransfersPage() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<number | null>(null);
-  const [errorDetail, setErrorDetail] = useState<{ pacs: string; error: string; date: string } | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Error detail dialog
+  const [errorDetail, setErrorDetail] = useState<Transfer | null>(null);
 
   const fetchTransfers = (signal?: AbortSignal) => {
     setLoading(true);
@@ -62,7 +73,7 @@ export function TransfersPage() {
       .then(({ data }) => setTransfers(data))
       .catch((err) => {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
-          setError(err?.response?.data?.detail ?? err.message ?? "Failed to load transfers");
+          setError(getErrorMessage(err, "Failed to load transfers"));
         }
       })
       .finally(() => setLoading(false));
@@ -71,7 +82,21 @@ export function TransfersPage() {
   const fetchTransfersSilent = () => {
     api
       .get("/transfers")
-      .then(({ data }) => setTransfers(data))
+      .then(({ data }) => {
+        setTransfers((prev) => {
+          // Notify on status changes
+          for (const t of data) {
+            const old = prev.find((p) => p.id === t.id);
+            if (old && old.status === "pending" && t.status === "success") {
+              toast.success(`Transfer to ${t.pacs_node_name || "PACS"} completed`);
+            }
+            if (old && old.status === "pending" && t.status === "failed") {
+              toast.error(`Transfer to ${t.pacs_node_name || "PACS"} failed`);
+            }
+          }
+          return data;
+        });
+      })
       .catch(() => {});
   };
 
@@ -84,13 +109,11 @@ export function TransfersPage() {
   // Auto-refresh when pending transfers exist
   useEffect(() => {
     const hasPending = transfers.some((t) => t.status === "pending");
-    if (hasPending) {
-      intervalRef.current = setInterval(fetchTransfersSilent, 10_000);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
+    if (hasPending && !intervalRef.current) {
+      intervalRef.current = setInterval(fetchTransfersSilent, 5_000);
+    } else if (!hasPending && intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
     return () => {
       if (intervalRef.current) {
@@ -100,17 +123,37 @@ export function TransfersPage() {
     };
   }, [transfers]);
 
-  const handleRetry = async (id: number) => {
-    setRetrying(id);
+  const handleRetry = async (t: Transfer) => {
+    setRetrying(t.id);
     try {
-      await api.post(`/transfers/${id}/retry`);
+      const { data } = await api.post(`/transfers/${t.id}/retry`);
+      if (data.status === "success") {
+        toast.success(`Retried successfully — delivered to ${t.pacs_node_name || "PACS"}`);
+      } else if (data.status === "failed") {
+        toast.error(`Retry failed — ${humanizeError(data.error_message || "")}`);
+      } else {
+        toast.info("Retry initiated — transfer is pending");
+      }
       fetchTransfers();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to retry transfer");
+      toast.error(getErrorMessage(err, "Failed to retry transfer"));
     } finally {
       setRetrying(null);
     }
+  };
+
+  const handleRetryAllFailed = async () => {
+    const failed = transfers.filter((t) => t.status === "failed");
+    if (failed.length === 0) return;
+    toast.info(`Retrying ${failed.length} failed transfer${failed.length > 1 ? "s" : ""}...`);
+    for (const t of failed) {
+      try {
+        await api.post(`/transfers/${t.id}/retry`);
+      } catch {
+        // individual errors handled on refresh
+      }
+    }
+    fetchTransfers();
   };
 
   const successCount = transfers.filter((t) => t.status === "success").length;
@@ -132,24 +175,32 @@ export function TransfersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight">Transfers</h2>
-        <p className="text-sm text-muted-foreground">DICOM study transfer history</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight">Transfers</h2>
+          <p className="text-sm text-muted-foreground">DICOM study transfer history</p>
+        </div>
+        {failedCount > 0 && (
+          <Button variant="outline" onClick={handleRetryAllFailed} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Retry All Failed ({failedCount})
+          </Button>
+        )}
       </div>
 
       <div className="flex gap-4">
-        <Card className="flex-1">
+        <Card className={`flex-1 cursor-pointer transition-colors ${statusFilter === "success" ? "ring-2 ring-emerald-500" : ""}`} onClick={() => setStatusFilter(statusFilter === "success" ? "all" : "success")}>
           <CardContent className="flex items-center gap-3 pt-6">
             <div className="rounded-lg bg-emerald-500/10 p-2">
               <CheckCircle className="h-5 w-5 text-emerald-500" />
             </div>
             <div>
               <p className="text-2xl font-bold">{successCount}</p>
-              <p className="text-xs text-muted-foreground">Successful</p>
+              <p className="text-xs text-muted-foreground">Delivered</p>
             </div>
           </CardContent>
         </Card>
-        <Card className="flex-1">
+        <Card className={`flex-1 cursor-pointer transition-colors ${statusFilter === "failed" ? "ring-2 ring-red-500" : ""}`} onClick={() => setStatusFilter(statusFilter === "failed" ? "all" : "failed")}>
           <CardContent className="flex items-center gap-3 pt-6">
             <div className="rounded-lg bg-red-500/10 p-2">
               <XCircle className="h-5 w-5 text-red-500" />
@@ -160,42 +211,42 @@ export function TransfersPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="flex-1">
+        <Card className={`flex-1 cursor-pointer transition-colors ${statusFilter === "pending" ? "ring-2 ring-amber-500" : ""}`} onClick={() => setStatusFilter(statusFilter === "pending" ? "all" : "pending")}>
           <CardContent className="flex items-center gap-3 pt-6">
             <div className="rounded-lg bg-amber-500/10 p-2">
-              <Clock className="h-5 w-5 text-amber-500" />
+              {pendingCount > 0 ? (
+                <Clock className="h-5 w-5 text-amber-500 animate-pulse" />
+              ) : (
+                <Clock className="h-5 w-5 text-amber-500" />
+              )}
             </div>
             <div>
               <p className="text-2xl font-bold">{pendingCount}</p>
-              <p className="text-xs text-muted-foreground">Pending</p>
+              <p className="text-xs text-muted-foreground">
+                {pendingCount > 0 ? "Sending..." : "Pending"}
+              </p>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      <div className="flex items-center justify-between">
-        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Filter by status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="success">Success</SelectItem>
-            <SelectItem value="failed">Failed</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-          </SelectContent>
-        </Select>
-        {pendingCount > 0 && (
-          <p className="text-xs text-muted-foreground flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            Auto-refreshing every 10s
-          </p>
-        )}
-      </div>
+      {pendingCount > 0 && (
+        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+          {pendingCount} transfer{pendingCount > 1 ? "s" : ""} in progress — auto-refreshing every 5 seconds
+        </div>
+      )}
+
+      {statusFilter !== "all" && (
+        <div className="flex items-center gap-2">
+          <Badge variant="outline">Filtered: {statusFilter}</Badge>
+          <Button variant="ghost" size="sm" onClick={() => setStatusFilter("all")} className="text-xs">Clear filter</Button>
+        </div>
+      )}
 
       {loading ? (
         <div className="rounded-lg border">
-          <TableSkeleton columns={7} />
+          <TableSkeleton columns={6} />
         </div>
       ) : (
         <div className="rounded-lg border">
@@ -205,10 +256,9 @@ export function TransfersPage() {
                 <TableHead>Destination</TableHead>
                 <TableHead>Study</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead>Sent</TableHead>
                 <TableHead>Duration</TableHead>
-                <TableHead>Error</TableHead>
-                <TableHead className="w-[80px]">Actions</TableHead>
+                <TableHead className="w-[160px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -216,25 +266,27 @@ export function TransfersPage() {
                 const cfg = statusConfig[t.status];
                 const StatusIcon = cfg.icon;
                 return (
-                  <TableRow key={t.id}>
+                  <TableRow key={t.id} className={t.status === "failed" ? "bg-destructive/5" : t.status === "pending" ? "bg-amber-50/50" : ""}>
                     <TableCell>
                       <div>
                         <span className="font-medium">{t.pacs_node_name ?? "Unknown"}</span>
-                        <span className="ml-1 text-xs text-muted-foreground">
-                          {t.pacs_node_ae_title ?? ""}
-                        </span>
+                        {t.pacs_node_ae_title && (
+                          <span className="ml-1 text-xs text-muted-foreground">{t.pacs_node_ae_title}</span>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Link to={`/studies/${t.orthanc_study_id}`} className="hover:underline">
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs cursor-pointer">
-                          {(t.orthanc_study_id ?? "").slice(0, 12)}…
-                        </code>
+                      <Link to={`/studies/${t.orthanc_study_id}`} className="text-primary hover:underline text-sm">
+                        {(t.orthanc_study_id ?? "").slice(0, 12)}…
                       </Link>
                     </TableCell>
                     <TableCell>
                       <Badge variant={cfg.variant} className="gap-1">
-                        <StatusIcon className="h-3 w-3" />
+                        {t.status === "pending" ? (
+                          <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                        ) : (
+                          <StatusIcon className="h-3 w-3" />
+                        )}
                         {cfg.label}
                       </Badge>
                     </TableCell>
@@ -242,47 +294,50 @@ export function TransfersPage() {
                       {formatTimestamp(t.created_at)}
                     </TableCell>
                     <TableCell className="text-sm font-mono">
-                      {formatDuration(t.created_at, t.completed_at)}
+                      {t.status === "pending" ? (
+                        <span className="text-amber-600 animate-pulse">sending...</span>
+                      ) : formatDuration(t.created_at, t.completed_at)}
                     </TableCell>
                     <TableCell>
-                      {t.error_message ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-auto px-2 py-1 gap-1 text-destructive hover:text-destructive"
-                          onClick={() => setErrorDetail({
-                            pacs: t.pacs_node_name || "Unknown",
-                            error: t.error_message!,
-                            date: t.created_at,
-                          })}
-                        >
-                          <AlertCircle className="h-3.5 w-3.5" />
-                          <span className="text-xs">View Error</span>
-                        </Button>
-                      ) : "—"}
-                    </TableCell>
-                    <TableCell>
-                      {t.status === "failed" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleRetry(t.id)}
-                          disabled={retrying === t.id}
-                          className="gap-1"
-                        >
-                          <RefreshCw className={`h-3 w-3 ${retrying === t.id ? "animate-spin" : ""}`} />
-                          Retry
-                        </Button>
-                      )}
+                      <div className="flex gap-1">
+                        {t.status === "failed" && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 gap-1 text-destructive hover:text-destructive"
+                              onClick={() => setErrorDetail(t)}
+                            >
+                              <AlertCircle className="h-3.5 w-3.5" />
+                              Error
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1"
+                              onClick={() => handleRetry(t)}
+                              disabled={retrying === t.id}
+                            >
+                              <RefreshCw className={`h-3 w-3 ${retrying === t.id ? "animate-spin" : ""}`} />
+                              Retry
+                            </Button>
+                          </>
+                        )}
+                        {t.status === "success" && (
+                          <span className="text-xs text-emerald-600 flex items-center gap-1">
+                            <CheckCircle className="h-3 w-3" /> Delivered
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
               })}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                     <ArrowRightLeft className="mx-auto mb-2 h-8 w-8 opacity-30" />
-                    {statusFilter === "all" ? "No transfers yet" : `No ${statusFilter} transfers`}
+                    {statusFilter === "all" ? "No transfers yet. Send a study from the Study Detail page." : `No ${statusFilter} transfers`}
                   </TableCell>
                 </TableRow>
               )}
@@ -290,31 +345,58 @@ export function TransfersPage() {
           </Table>
         </div>
       )}
+
       {/* Error Detail Dialog */}
       <Dialog open={!!errorDetail} onOpenChange={(open) => { if (!open) setErrorDetail(null); }}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Transfer Error Details</DialogTitle>
+            <DialogTitle>Transfer Error</DialogTitle>
+            <DialogDescription>
+              Transfer #{errorDetail?.id} to {errorDetail?.pacs_node_name || "Unknown PACS"}
+            </DialogDescription>
           </DialogHeader>
           {errorDetail && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
                   <p className="text-xs text-muted-foreground">Destination</p>
-                  <p className="font-medium">{errorDetail.pacs}</p>
+                  <p className="font-medium">{errorDetail.pacs_node_name}</p>
+                  <p className="text-xs text-muted-foreground">{errorDetail.pacs_node_ae_title}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Date</p>
-                  <p>{formatTimestamp(errorDetail.date)}</p>
+                  <p className="text-xs text-muted-foreground">Attempted</p>
+                  <p>{formatTimestamp(errorDetail.created_at)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Duration</p>
+                  <p>{formatDuration(errorDetail.created_at, errorDetail.completed_at)}</p>
                 </div>
               </div>
-              <div className="rounded-md border bg-destructive/5 p-4">
-                <p className="text-xs font-medium text-destructive mb-2">Error Message</p>
-                <pre className="text-sm whitespace-pre-wrap break-all">{errorDetail.error}</pre>
+
+              {/* Human-readable explanation */}
+              <div className="rounded-md border-l-4 border-destructive bg-destructive/5 p-4">
+                <p className="text-sm font-medium mb-1">What happened</p>
+                <p className="text-sm text-muted-foreground">
+                  {humanizeError(errorDetail.error_message || "")}
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Share this error with IT support if you need help resolving the issue.
-              </p>
+
+              {/* Raw error for IT */}
+              <details className="rounded-md border bg-muted/50 p-3">
+                <summary className="text-xs font-medium cursor-pointer text-muted-foreground">
+                  Technical details (share with IT support)
+                </summary>
+                <pre className="mt-2 text-xs whitespace-pre-wrap break-all font-mono">
+                  {errorDetail.error_message}
+                </pre>
+              </details>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setErrorDetail(null)}>Close</Button>
+                <Button onClick={() => { setErrorDetail(null); handleRetry(errorDetail); }}>
+                  <RefreshCw className="mr-2 h-4 w-4" /> Retry This Transfer
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>
