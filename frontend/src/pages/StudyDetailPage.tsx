@@ -9,7 +9,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Image as ImageIcon } from "lucide-react";
+import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Layers } from "lucide-react";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import api, { getErrorMessage } from "@/lib/api";
@@ -220,13 +220,6 @@ export function StudyDetailPage() {
     (sum, s) => sum + parseInt(s.MainDicomTags?.NumberOfSeriesRelatedInstances || "0", 10), 0
   );
 
-  // Get first instance ID per series for thumbnail preview
-  const getPreviewUrl = (s: Series) => {
-    const instances = s.Instances;
-    if (!instances?.length) return null;
-    return `/api/dicom-preview/${instances[0]}`;
-  };
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -263,11 +256,15 @@ export function StudyDetailPage() {
           </div>
         </div>
 
-        {/* Action buttons — larger */}
+        {/* Action buttons */}
         <div className="flex gap-2 shrink-0 flex-wrap justify-end">
-          <Button size="lg" onClick={() => window.open(`/ohif/viewer?StudyInstanceUIDs=${studyUid}`, '_blank')} className="gap-2">
+          <Button size="lg" onClick={toggleFullscreen} className="gap-2">
+            <Maximize className="h-4 w-4" />
+            Fullscreen
+          </Button>
+          <Button variant="outline" onClick={() => window.open(`/ohif/viewer?StudyInstanceUIDs=${studyUid}`, '_blank')} className="gap-2">
             <ExternalLink className="h-4 w-4" />
-            Open Viewer
+            New Tab
           </Button>
           <Button variant="outline" onClick={() => setSendDialogOpen(true)} className="gap-2">
             <Send className="h-4 w-4" />
@@ -302,80 +299,47 @@ export function StudyDetailPage() {
         </div>
       </div>
 
-      {/* DICOM Viewer — shown by default with fullscreen support */}
+      {/* DICOM Viewer */}
       {studyUid && (
-        <div ref={viewerContainerRef} className="relative rounded-lg border bg-black overflow-hidden">
-          <div className="absolute top-2 right-2 z-10 flex gap-1">
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-8 gap-1.5 bg-black/60 text-white hover:bg-black/80 border-0"
-              onClick={toggleFullscreen}
-            >
-              {isFullscreen ? <Minimize className="h-3.5 w-3.5" /> : <Maximize className="h-3.5 w-3.5" />}
-              {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-8 gap-1.5 bg-black/60 text-white hover:bg-black/80 border-0"
-              onClick={() => window.open(`/ohif/viewer?StudyInstanceUIDs=${studyUid}`, '_blank')}
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              New Tab
-            </Button>
-          </div>
+        <div ref={viewerContainerRef} className="rounded-lg border bg-black overflow-hidden">
           <OhifViewer studyInstanceUID={studyUid} className={isFullscreen ? "h-screen w-full" : "h-[600px] w-full"} />
         </div>
       )}
 
-      {/* Series cards with thumbnails */}
-      <div>
-        <h3 className="text-sm font-medium text-muted-foreground mb-3">
-          {series.length} Series · {totalInstances} images
-        </h3>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {series.map((s) => {
-            const imgCount = parseInt(s.MainDicomTags?.NumberOfSeriesRelatedInstances || "0", 10);
-            const previewUrl = getPreviewUrl(s);
-            return (
-              <Card key={s.ID} className="overflow-hidden hover:ring-1 hover:ring-primary/30 transition-all cursor-default">
-                {/* Thumbnail area */}
-                <div className="h-32 bg-muted/50 flex items-center justify-center border-b">
-                  {previewUrl ? (
-                    <img
-                      src={previewUrl}
-                      alt={s.MainDicomTags?.SeriesDescription || "Series preview"}
-                      className="h-full w-full object-contain bg-black"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden"); }}
-                    />
-                  ) : null}
-                  <div className={previewUrl ? "hidden" : "flex flex-col items-center gap-1 text-muted-foreground/40"}>
-                    <ImageIcon className="h-8 w-8" />
-                    <span className="text-[10px]">{imgCount} images</span>
+      {/* Series info blocks */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Layers className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">
+              {series.length} Series · {totalInstances} images
+            </CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {series.map((s) => {
+              const imgCount = s.MainDicomTags?.NumberOfSeriesRelatedInstances || "0";
+              return (
+                <div key={s.ID} className="flex items-center gap-3 rounded-lg border p-3 hover:bg-accent/30 transition-colors">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted">
+                    <span className="text-sm font-bold text-muted-foreground">#{s.MainDicomTags?.SeriesNumber || "?"}</span>
                   </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">
+                      {s.MainDicomTags?.SeriesDescription || "Untitled Series"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {s.MainDicomTags?.Manufacturer || ""} · {imgCount} images
+                    </p>
+                  </div>
+                  <ModalityBadge modality={s.MainDicomTags?.Modality || "OT"} />
                 </div>
-                <CardContent className="p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {s.MainDicomTags?.SeriesDescription || "Untitled Series"}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {s.MainDicomTags?.Manufacturer || "Unknown"} · #{s.MainDicomTags?.SeriesNumber}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <ModalityBadge modality={s.MainDicomTags?.Modality || "OT"} />
-                      <span className="text-xs font-medium text-muted-foreground">{imgCount}</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Study Metadata (collapsed by default) */}
       <Card>
