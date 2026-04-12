@@ -33,9 +33,10 @@ interface Study {
 
 const PAGE_SIZE = 25;
 
-type DatePreset = "today" | "7d" | "30d" | "all";
+type DatePreset = "today" | "7d" | "30d" | "all" | "custom";
 
-const getDateRange = (preset: DatePreset): { from: string; to: string } => {
+const getDateRange = (preset: DatePreset): { from: string; to: string } | null => {
+  if (preset === "custom") return null; // handled by custom inputs
   if (preset === "all") return { from: "", to: "" };
   const now = new Date();
   const to = now.toISOString().slice(0, 10).replace(/-/g, "");
@@ -58,6 +59,8 @@ export function StudiesPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [modFilter, setModFilter] = useState("");
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [page, setPage] = useState(1);
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -85,7 +88,9 @@ export function StudiesPage() {
     const ctrl = new AbortController();
     setLoading(true);
     setError(null);
-    const { from, to } = getDateRange(datePreset);
+    const range = getDateRange(datePreset);
+    const from = range ? range.from : customFrom.replace(/-/g, "");
+    const to = range ? range.to : customTo.replace(/-/g, "");
     const params: Record<string, string | number> = {
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
@@ -110,7 +115,7 @@ export function StudiesPage() {
       })
       .finally(() => setLoading(false));
     return () => ctrl.abort();
-  }, [debouncedSearch, modFilter, datePreset, page]);
+  }, [debouncedSearch, modFilter, datePreset, customFrom, customTo, page]);
 
   const tag = (s: Study, key: keyof Study["MainDicomTags"]) =>
     s.MainDicomTags?.[key] || "";
@@ -135,6 +140,7 @@ export function StudiesPage() {
     { key: "7d", label: "7d" },
     { key: "30d", label: "30d" },
     { key: "all", label: "All" },
+    { key: "custom", label: "Custom" },
   ];
 
   const modalities = ["CT", "MR", "US", "XR"];
@@ -168,6 +174,25 @@ export function StudiesPage() {
             </Button>
           ))}
         </div>
+
+        {/* Custom date range */}
+        {datePreset === "custom" && (
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="date"
+              value={customFrom}
+              onChange={(e) => { setCustomFrom(e.target.value); setPage(1); }}
+              className="w-[140px] h-8 text-xs"
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <Input
+              type="date"
+              value={customTo}
+              onChange={(e) => { setCustomTo(e.target.value); setPage(1); }}
+              className="w-[140px] h-8 text-xs"
+            />
+          </div>
+        )}
 
         {/* Modality chips */}
         <div className="flex gap-1">
