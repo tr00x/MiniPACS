@@ -19,7 +19,7 @@ async def list_transfers(
     request: Request,
     study_id: str = None,
     status: str = None,
-    limit: int = Query(default=25, ge=1, le=100),
+    limit: int = Query(default=25, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user),
     db: aiosqlite.Connection = Depends(get_db),
