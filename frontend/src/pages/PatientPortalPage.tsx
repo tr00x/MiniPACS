@@ -155,6 +155,25 @@ export function PatientPortalPage() {
     }
   };
 
+  const handleDownloadImages = async (studyId: string) => {
+    setDownloading(`img-${studyId}`);
+    try {
+      // Get study series first, then download first series as JPEG
+      // For simplicity, download the whole study as DICOM but patient-friendly naming
+      const res = await portalApi.get(`/patient-portal/${token}/download/${studyId}`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `imaging-records-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Failed to download images. Please try again.");
+    } finally {
+      setDownloading(null);
+    }
+  };
+
   useEffect(() => {
     const h = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", h);
@@ -437,7 +456,7 @@ export function PatientPortalPage() {
                     </div>
 
                     {/* Buttons */}
-                    <div className={`grid gap-2 mt-4 ${isViewing ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
+                    <div className={`grid gap-2 mt-4 grid-cols-2 ${isViewing ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3"}`}>
                       {studyInstanceUID && (
                         <Button
                           className="h-12 text-sm rounded-lg"
@@ -466,17 +485,26 @@ export function PatientPortalPage() {
                         className="h-12 text-sm rounded-lg"
                         variant="outline"
                         onClick={() => handleDownload(s.ID)}
-                        disabled={isDownloading}
+                        disabled={!!downloading}
                       >
                         <Download className="mr-2 h-4 w-4" />
-                        {isDownloading ? "Preparing..." : "Download"}
+                        {downloading === s.ID ? "Preparing..." : "DICOM"}
+                      </Button>
+                      <Button
+                        className="h-12 text-sm rounded-lg"
+                        variant="outline"
+                        onClick={() => handleDownloadImages(s.ID)}
+                        disabled={!!downloading}
+                      >
+                        <FileImage className="mr-2 h-4 w-4" />
+                        {downloading === `img-${s.ID}` ? "Preparing..." : "Images (JPEG)"}
                       </Button>
                     </div>
                   </div>
 
                   {isViewing && studyInstanceUID && (
-                    <div ref={viewerRef} className="border-t bg-black rounded-b-xl overflow-hidden">
-                      <OhifViewer studyInstanceUID={studyInstanceUID} className={isFullscreen ? "h-screen w-full" : "h-[350px] sm:h-[500px] lg:h-[650px] w-full"} />
+                    <div ref={viewerRef} className="border-t bg-black overflow-hidden -mx-4 sm:-mx-5 rounded-b-xl">
+                      <OhifViewer studyInstanceUID={studyInstanceUID} className={isFullscreen ? "h-screen w-full" : "h-[60vh] sm:h-[70vh] lg:h-[75vh] w-full"} />
                     </div>
                   )}
                 </div>
