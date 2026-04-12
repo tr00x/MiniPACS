@@ -13,21 +13,30 @@ router = APIRouter(prefix="/api/patients", tags=["patients"])
 async def list_patients(
     request: Request,
     search: str = None,
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user),
 ):
     await log_audit("list_patients", user_id=user["id"], ip_address=request.client.host)
-    patients = await orthanc.get_patients(limit=limit, since=offset)
+
+    # Fetch all patients expanded (manageable for a clinic-scale dataset)
+    all_patients = await orthanc.get_patients()
+
+    # Server-side search filter
     if search:
         search_lower = search.lower()
-        patients = [
-            p for p in patients
+        all_patients = [
+            p for p in all_patients
             if search_lower in str(p.get("MainDicomTags", {}).get("PatientName", "")).lower()
             or search_lower in str(p.get("MainDicomTags", {}).get("PatientID", "")).lower()
         ]
 
-    # Enrich with last study info for each patient
+    total = len(all_patients)
+
+    # Paginate BEFORE enriching — only enrich the visible page
+    page = all_patients[offset:offset + limit]
+
+    # Enrich with last study info for each patient in the page
     async def enrich_last_study(patient: dict) -> dict:
         study_ids = patient.get("Studies", [])
         if not study_ids:
@@ -54,8 +63,8 @@ async def list_patients(
             pass
         return patient
 
-    patients = list(await asyncio.gather(*[enrich_last_study(p) for p in patients]))
-    return patients
+    page = list(await asyncio.gather(*[enrich_last_study(p) for p in page]))
+    return {"items": page, "total": total}
 
 
 @router.get("/{patient_id}")
