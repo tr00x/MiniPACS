@@ -1,9 +1,10 @@
+import hashlib
 import io
 import zipfile as zipfile_mod
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import aiosqlite
 
@@ -217,7 +218,7 @@ async def verify_share_pin(
     request: Request,
     db: aiosqlite.Connection = Depends(get_db),
 ):
-    """Verify PIN for a share. Returns 200 if correct, 401 if wrong."""
+    """Verify PIN for a share. Returns 200 if correct, 401 if wrong. Sets cookie for server-side enforcement."""
     body = await request.json()
     pin = body.get("pin", "")
 
@@ -232,10 +233,20 @@ async def verify_share_pin(
     if not share.get("pin_hash"):
         return {"verified": True}
 
-    if verify_password(pin, share["pin_hash"]):
-        return {"verified": True}
+    if not verify_password(pin, share["pin_hash"]):
+        raise HTTPException(401, "Invalid PIN")
 
-    raise HTTPException(401, "Invalid PIN")
+    # Set httponly cookie for server-side PIN verification
+    token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+    response = JSONResponse({"verified": True})
+    response.set_cookie(
+        key=f"pin_{token_hash}",
+        value=token_hash,
+        max_age=1800,  # 30 minutes
+        httponly=True,
+        samesite="strict",
+    )
+    return response
 
 
 @portal_router.get("/{token}")
@@ -245,6 +256,12 @@ async def patient_portal(
     db: aiosqlite.Connection = Depends(get_db),
 ):
     share = await _validate_share(token, db)
+
+    # Server-side PIN enforcement: require cookie set by verify-pin
+    if share.get("pin_hash"):
+        token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+        if request.cookies.get(f"pin_{token_hash}") != token_hash:
+            raise HTTPException(403, "PIN verification required")
 
     # Update view tracking
     now = datetime.now(timezone.utc).isoformat()
@@ -292,6 +309,12 @@ async def patient_portal_download(
 ):
     share = await _validate_share(token, db)
 
+    # Server-side PIN enforcement
+    if share.get("pin_hash"):
+        token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+        if request.cookies.get(f"pin_{token_hash}") != token_hash:
+            raise HTTPException(403, "PIN verification required")
+
     # Verify the study belongs to the patient in this share
     try:
         patient = await orthanc.get_patient(share["orthanc_patient_id"])
@@ -324,6 +347,12 @@ async def patient_portal_download_series_images(
 ):
     """Download a single series as ZIP of JPEG images (patient portal)."""
     share = await _validate_share(token, db)
+
+    # Server-side PIN enforcement
+    if share.get("pin_hash"):
+        token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+        if request.cookies.get(f"pin_{token_hash}") != token_hash:
+            raise HTTPException(403, "PIN verification required")
 
     # Verify study belongs to patient
     try:
