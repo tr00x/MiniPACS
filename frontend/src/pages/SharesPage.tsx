@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TableSkeleton } from "@/components/TableSkeleton";
-import { Copy, Check, Ban, Share2, Plus, Pencil, CalendarClock, ChevronLeft, ChevronRight, Search, ExternalLink } from "lucide-react";
+import { Copy, Check, Ban, Share2, Plus, Pencil, CalendarClock, ChevronLeft, ChevronRight, Search, ExternalLink, Printer } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -442,16 +443,21 @@ export function SharesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Success Dialog — shows link immediately after creation */}
+      {/* Success Dialog — shows link + QR code after creation */}
       <Dialog open={!!createdLink} onOpenChange={(open) => { if (!open) setCreatedLink(null); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Portal Link Created</DialogTitle>
             <DialogDescription>
-              The link has been automatically copied to your clipboard. Send it to the patient via email, text, or print it out.
+              The link has been automatically copied to your clipboard. Send it to the patient via email, text, or let them scan the QR code.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            {createdLink && (
+              <div className="qr-print-source flex justify-center rounded-lg border bg-white p-4">
+                <QRCodeSVG value={createdLink} size={160} />
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Input
                 readOnly
@@ -475,6 +481,29 @@ export function SharesPage() {
                 Open in Browser
               </Button>
             </div>
+            <Button variant="outline" className="w-full" onClick={() => {
+              if (!createdLink) return;
+              const win = window.open("", "_blank", "width=400,height=500");
+              if (!win) return;
+              win.document.write(`<!DOCTYPE html><html><head><title>Patient Portal QR Code</title><style>body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;font-family:system-ui,sans-serif}p{margin-top:16px;font-size:12px;color:#666;max-width:300px;word-break:break-all;text-align:center}</style></head><body></body></html>`);
+              const container = win.document.body;
+              const svg = document.querySelector<SVGElement>(".qr-print-source svg");
+              if (svg) {
+                const clone = svg.cloneNode(true) as SVGElement;
+                clone.setAttribute("width", "256");
+                clone.setAttribute("height", "256");
+                container.appendChild(clone);
+              }
+              const urlP = win.document.createElement("p");
+              urlP.textContent = createdLink;
+              container.appendChild(urlP);
+              win.document.close();
+              win.focus();
+              win.print();
+            }}>
+              <Printer className="mr-2 h-4 w-4" />
+              Print QR Code
+            </Button>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreatedLink(null)}>Done</Button>
