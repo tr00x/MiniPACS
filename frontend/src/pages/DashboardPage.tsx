@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Users, FileImage, ArrowRightLeft, Eye, AlertCircle, CheckCircle, XCircle, Clock, HardDrive, Activity } from "lucide-react";
 import { CardSkeleton } from "@/components/CardSkeleton";
+import { PageError } from "@/components/page-error";
 import { StatusDot } from "@/components/ui/status-dot";
 import api from "@/lib/api";
 import { formatDicomName, formatTimestamp } from "@/lib/dicom";
@@ -131,7 +132,12 @@ export function DashboardPage() {
   };
 
   if (error) {
-    return <p className="text-sm text-destructive" role="alert">{error}</p>;
+    return (
+      <div className="space-y-4">
+        <h2 className="text-2xl font-semibold tracking-tight">Dashboard</h2>
+        <PageError message={error} onRetry={() => window.location.reload()} />
+      </div>
+    );
   }
 
   const failedCount = stats?.failed_transfers ?? 0;
