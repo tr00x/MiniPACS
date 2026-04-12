@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Download, Send, ExternalLink, ArrowLeft, Layers, Info, Copy, Check, Share2 } from "lucide-react";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
-import api from "@/lib/api";
+import api, { getErrorMessage } from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
 import { toast } from "sonner";
@@ -115,14 +115,13 @@ export function StudyDetailPage() {
     setSending(true);
     setSendError(null);
     try {
-      await api.post("/transfers", { orthanc_study_id: id, pacs_node_id: Number(selectedNode) });
+      await api.post("/transfers", { study_id: id, pacs_node_id: Number(selectedNode) });
       const nodeName = pacsNodes.find((n) => String(n.id) === selectedNode)?.name || "PACS";
       toast.success(`Study sent to ${nodeName}`);
       setSendDialogOpen(false);
       setSelectedNode("");
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setSendError(e?.response?.data?.detail ?? e?.message ?? "Failed to send study");
+      setSendError(getErrorMessage(err, "Failed to send study"));
     } finally {
       setSending(false);
     }
@@ -140,8 +139,7 @@ export function StudyDetailPage() {
       URL.revokeObjectURL(url);
       toast.success("Download started");
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to download study");
+      setError(getErrorMessage(err, "Failed to download study"));
     } finally {
       setDownloading(false);
     }
@@ -169,8 +167,7 @@ export function StudyDetailPage() {
         toast.success("Share created successfully");
       }
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to create share");
+      toast.error(getErrorMessage(err, "Failed to create share"));
     } finally {
       setSharing(false);
     }
