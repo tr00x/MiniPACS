@@ -107,14 +107,32 @@ async def get_system_health(
     except Exception:
         pass
 
-    # Last received study timestamp
+    # Last received study — find most recent NewStudy change (real DICOM receive, not internal ops)
     last_received = None
     try:
-        r = await orthanc._http().get("/changes", params={"last": ""})
-        if r.status_code == 200:
-            changes = r.json().get("Changes", [])
-            if changes:
-                last_received = changes[-1].get("Date")
+        # Walk backwards through changes to find last NewStudy
+        done = False
+        last_seq = None
+        for _ in range(5):  # max 5 pages back
+            params = {"limit": 100}
+            if last_seq is not None:
+                params["to"] = last_seq
+            r = await orthanc._http().get("/changes", params=params)
+            if r.status_code != 200:
+                break
+            data = r.json()
+            for change in reversed(data.get("Changes", [])):
+                if change.get("ChangeType") == "NewStudy":
+                    last_received = change.get("Date")
+                    done = True
+                    break
+            if done or data.get("Done", True):
+                break
+            changes_list = data.get("Changes", [])
+            if changes_list:
+                last_seq = changes_list[0].get("Seq", 0) - 1
+            else:
+                break
     except Exception:
         pass
 
