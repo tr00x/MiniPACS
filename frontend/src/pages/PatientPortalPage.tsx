@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Download, Eye, EyeOff, Shield, Phone, Mail, Calendar, User } from "lucide-react";
+import { ModalityBadge } from "@/components/ui/modality-badge";
 import axios from "axios";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
 import { formatDicomName, formatDicomDate, formatTimestamp } from "@/lib/dicom";
@@ -185,7 +185,7 @@ export function PatientPortalPage() {
     <div className="flex min-h-screen flex-col bg-gray-50">
       {/* Header */}
       <header className="border-b bg-white">
-        <div className="mx-auto max-w-4xl px-6 py-4 flex items-center justify-between">
+        <div className="mx-auto max-w-4xl px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
               <Shield className="h-5 w-5 text-primary-foreground" />
@@ -203,7 +203,7 @@ export function PatientPortalPage() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8 space-y-8">
+      <main className="mx-auto w-full max-w-4xl flex-1 px-4 sm:px-6 py-8 space-y-8">
         {/* Welcome */}
         <div>
           <h2 className="text-2xl font-bold tracking-tight">
@@ -217,7 +217,7 @@ export function PatientPortalPage() {
         {/* Patient Info */}
         <Card className="bg-white">
           <CardContent className="pt-6">
-            <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
               <div className="flex items-start gap-3">
                 <User className="mt-0.5 h-4 w-4 text-muted-foreground shrink-0" />
                 <div>
@@ -263,16 +263,14 @@ export function PatientPortalPage() {
               return (
                 <Card key={s.ID} className="bg-white overflow-hidden">
                   <CardContent className="p-0">
-                    <div className="flex items-center justify-between gap-4 p-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5">
                       <div className="space-y-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="font-medium truncate">
                             {stag(s, "StudyDescription") || "Imaging Study"}
                           </p>
                           {modality && (
-                            <Badge variant="secondary" className="shrink-0 font-mono text-xs">
-                              {modality}
-                            </Badge>
+                            <ModalityBadge modality={modality} className="shrink-0" />
                           )}
                         </div>
                         {stag(s, "InstitutionName") && (
@@ -282,9 +280,10 @@ export function PatientPortalPage() {
                           {formatDicomDate(stag(s, "StudyDate"))}
                         </p>
                       </div>
-                      <div className="flex gap-2 shrink-0">
+                      <div className="flex flex-col sm:flex-row gap-2 shrink-0">
                         {studyInstanceUID && (
                           <Button
+                            className="w-full sm:w-auto"
                             variant={isViewing ? "default" : "outline"}
                             onClick={() => setViewingStudy(isViewing ? null : s.ID)}
                           >
@@ -295,7 +294,7 @@ export function PatientPortalPage() {
                             )}
                           </Button>
                         )}
-                        <Button variant="outline" onClick={() => handleDownload(s.ID)} disabled={isDownloading}>
+                        <Button className="w-full sm:w-auto" variant="outline" onClick={() => handleDownload(s.ID)} disabled={isDownloading}>
                           <Download className="mr-2 h-4 w-4" />
                           {isDownloading ? "Downloading..." : "Download"}
                         </Button>
@@ -303,7 +302,7 @@ export function PatientPortalPage() {
                     </div>
                     {isViewing && studyInstanceUID && (
                       <div className="border-t">
-                        <OhifViewer studyInstanceUID={studyInstanceUID} className="h-[600px] w-full" />
+                        <OhifViewer studyInstanceUID={studyInstanceUID} className="h-[400px] sm:h-[600px] w-full" />
                       </div>
                     )}
                   </CardContent>
@@ -316,9 +315,9 @@ export function PatientPortalPage() {
 
       {/* Footer */}
       <footer className="border-t bg-white py-6 mt-8">
-        <div className="mx-auto max-w-4xl px-6 text-center space-y-2">
+        <div className="mx-auto max-w-4xl px-4 sm:px-6 text-center space-y-2">
           {(clinicSettings.clinic_phone || clinicSettings.clinic_email) && (
-            <div className="flex items-center justify-center gap-6 text-sm">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-6 text-sm">
               {clinicSettings.clinic_phone && (
                 <a href={`tel:${clinicSettings.clinic_phone}`} className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
                   <Phone className="h-3.5 w-3.5" /> {clinicSettings.clinic_phone}
