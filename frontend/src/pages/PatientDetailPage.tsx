@@ -555,13 +555,40 @@ Clinton Medical`
       <Dialog open={!!editShare} onOpenChange={(open) => { if (!open) { setEditShare(null); setEditShareError(null); } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Edit Share Link</DialogTitle></DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label>Expiry Date & Time</Label>
-              <Input type="datetime-local" value={editExpiry} onChange={(e) => setEditExpiry(e.target.value)} />
-              <p className="text-xs text-muted-foreground">
-                Leave empty for no expiry. Current: {editShare?.expires_at ? formatTimestamp(editShare.expires_at) : "No expiry"}
-              </p>
+          <div className="space-y-4 py-2">
+            <div className="rounded-lg bg-muted/50 p-3 text-sm space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Current expiry</span>
+                <span className="font-medium">{editShare?.expires_at ? formatTimestamp(editShare.expires_at) : "No expiry"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Views</span>
+                <span className="font-medium">{editShare?.view_count || 0}</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Set New Expiry</Label>
+              <div className="flex flex-wrap gap-2">
+                {EXPIRY_PRESETS.filter(p => p.days > 0).map((preset) => (
+                  <Button
+                    key={preset.days}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() + preset.days);
+                      setEditExpiry(d.toISOString().slice(0, 16));
+                    }}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+                <Button type="button" variant="outline" size="sm" onClick={() => setEditExpiry("")}>
+                  No expiry
+                </Button>
+              </div>
+              <Input type="datetime-local" value={editExpiry} onChange={(e) => setEditExpiry(e.target.value)} className="mt-2" />
             </div>
           </div>
           {editShareError && <p className="text-sm text-destructive" role="alert">{editShareError}</p>}
