@@ -16,6 +16,7 @@ from app.routers.viewers import router as viewers_router
 from app.routers.audit import router as audit_router
 from app.routers.users import router as users_router
 from app.routers.stats import router as stats_router
+from app.routers.reports import router as reports_router
 
 
 @asynccontextmanager
@@ -48,6 +49,7 @@ app.include_router(viewers_router)
 app.include_router(audit_router)
 app.include_router(users_router)
 app.include_router(stats_router)
+app.include_router(reports_router)
 
 
 @app.get("/api/health")

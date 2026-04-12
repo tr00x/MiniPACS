@@ -87,6 +87,17 @@ async def init_db():
                 value TEXT,
                 updated_at TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS study_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                orthanc_study_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                report_type TEXT NOT NULL DEFAULT 'text',
+                content TEXT,
+                filename TEXT,
+                created_by INTEGER REFERENCES users(id),
+                created_at TEXT DEFAULT (datetime('now'))
+            );
         """)
         await db.commit()
 
