@@ -1,18 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Download, Send, ExternalLink, ArrowLeft, Layers, Info, Copy, Check, Share2, Eye, EyeOff } from "lucide-react";
+import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Image as ImageIcon } from "lucide-react";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import api, { getErrorMessage } from "@/lib/api";
@@ -46,6 +43,7 @@ interface Series {
     NumberOfSeriesRelatedInstances?: string;
     Manufacturer?: string;
   };
+  Instances?: string[];
 }
 
 interface PacsNode {
@@ -64,6 +62,7 @@ interface Viewer {
 export function StudyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const viewerContainerRef = useRef<HTMLDivElement>(null);
   const [study, setStudy] = useState<StudyData | null>(null);
   const [series, setSeries] = useState<Series[]>([]);
   const [pacsNodes, setPacsNodes] = useState<PacsNode[]>([]);
@@ -78,8 +77,8 @@ export function StudyDetailPage() {
   const [sharing, setSharing] = useState(false);
   const [uidCopied, setUidCopied] = useState(false);
   const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
-  const [showViewer, setShowViewer] = useState(false);
   const [showMetadata, setShowMetadata] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -108,10 +107,26 @@ export function StudyDetailPage() {
     return () => ctrl.abort();
   }, [id]);
 
+  // Listen for fullscreen changes (user pressing Esc)
+  useEffect(() => {
+    const handleChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handleChange);
+    return () => document.removeEventListener("fullscreenchange", handleChange);
+  }, []);
+
   if (!id) return <p className="text-muted-foreground">Invalid study ID</p>;
 
   const stag = (key: keyof StudyData["MainDicomTags"]) => study?.MainDicomTags?.[key] || "";
   const ptag = (key: keyof NonNullable<StudyData["PatientMainDicomTags"]>) => study?.PatientMainDicomTags?.[key] || "";
+
+  const toggleFullscreen = async () => {
+    if (!viewerContainerRef.current) return;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await viewerContainerRef.current.requestFullscreen();
+    }
+  };
 
   const handleSend = async () => {
     if (!selectedNode) return;
@@ -122,10 +137,10 @@ export function StudyDetailPage() {
       const { data } = await api.post("/transfers", { study_id: id, pacs_node_id: Number(selectedNode) });
       if (data.status === "failed") {
         const raw = data.error_message || "";
-        let userMsg = "The destination PACS could not be reached. Check that the IP address, port, and AE Title are correct in PACS Nodes settings.";
-        if (raw.includes("not found")) userMsg = "This PACS node is not registered in Orthanc. Try removing and re-adding it in PACS Nodes.";
-        else if (raw.includes("timeout")) userMsg = "Connection timed out. The destination PACS may be offline or the IP/port is wrong.";
-        else if (raw.includes("refused")) userMsg = "Connection refused. The destination PACS is not accepting connections on this port.";
+        let userMsg = "The destination PACS could not be reached.";
+        if (raw.includes("not found")) userMsg = "This PACS node is not registered. Try removing and re-adding it.";
+        else if (raw.includes("timeout")) userMsg = "Connection timed out. The destination may be offline.";
+        else if (raw.includes("refused")) userMsg = "Connection refused.";
         setSendError(userMsg + (raw ? `\n\nTechnical details: ${raw}` : ""));
         setSendStatus("error");
       } else {
@@ -158,7 +173,7 @@ export function StudyDetailPage() {
       URL.revokeObjectURL(url);
       toast.success("Download started");
     } catch (err: unknown) {
-      setError(getErrorMessage(err, "Failed to download study"));
+      toast.error(getErrorMessage(err, "Failed to download study"));
     } finally {
       setDownloading(false);
     }
@@ -174,14 +189,10 @@ export function StudyDetailPage() {
         expires_at: thirtyDaysFromNow,
       });
       const token = res.data?.token ?? res.data?.share_token ?? res.data?.id ?? "";
-      const portalLink = token
-        ? `${window.location.origin}/patient-portal/${token}`
-        : "";
+      const portalLink = token ? `${window.location.origin}/patient-portal/${token}` : "";
       if (portalLink) {
         await navigator.clipboard.writeText(portalLink);
-        toast.success("Portal link copied to clipboard", {
-          description: portalLink,
-        });
+        toast.success("Portal link copied to clipboard", { description: portalLink });
       } else {
         toast.success("Share created successfully");
       }
@@ -209,9 +220,16 @@ export function StudyDetailPage() {
     (sum, s) => sum + parseInt(s.MainDicomTags?.NumberOfSeriesRelatedInstances || "0", 10), 0
   );
 
+  // Get first instance ID per series for thumbnail preview
+  const getPreviewUrl = (s: Series) => {
+    const instances = s.Instances;
+    if (!instances?.length) return null;
+    return `/api/dicom-preview/${instances[0]}`;
+  };
+
   return (
     <div className="space-y-6">
-      {/* Header Row */}
+      {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
@@ -223,7 +241,7 @@ export function StudyDetailPage() {
                 <h2 className="text-2xl font-semibold tracking-tight truncate">
                   {stag("StudyDescription") || "Untitled Study"}
                 </h2>
-                {modality && modality.split("\\").map((m) => (
+                {modality && modality.replace(/\\/g, "/").split("/").map((m) => (
                   <ModalityBadge key={m} modality={m} />
                 ))}
                 <span className="text-sm text-muted-foreground">
@@ -239,37 +257,37 @@ export function StudyDetailPage() {
                 {ptag("PatientID") && (
                   <> · MRN: <span className="font-medical-id">{ptag("PatientID")}</span></>
                 )}
+                {stag("InstitutionName") && <> · {stag("InstitutionName")}</>}
               </p>
             </div>
           </div>
         </div>
+
+        {/* Action buttons — larger */}
         <div className="flex gap-2 shrink-0 flex-wrap justify-end">
-          <Button
-            onClick={() => window.open(`/ohif/viewer?StudyInstanceUIDs=${studyUid}`, '_blank')}
-            className="gap-2"
-          >
+          <Button size="lg" onClick={() => window.open(`/ohif/viewer?StudyInstanceUIDs=${studyUid}`, '_blank')} className="gap-2">
             <ExternalLink className="h-4 w-4" />
             Open Viewer
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setSendDialogOpen(true)}>
-            <Send className="mr-2 h-4 w-4" />
+          <Button variant="outline" onClick={() => setSendDialogOpen(true)} className="gap-2">
+            <Send className="h-4 w-4" />
             Send to PACS
           </Button>
           {study?.ParentPatient && (
-            <Button variant="outline" size="sm" onClick={handleShare} disabled={sharing}>
-              <Share2 className="mr-2 h-4 w-4" />
+            <Button variant="outline" onClick={handleShare} disabled={sharing} className="gap-2">
+              <Share2 className="h-4 w-4" />
               {sharing ? "Sharing..." : "Share"}
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={handleDownload} disabled={downloading}>
-            <Download className="mr-2 h-4 w-4" />
-            {downloading ? "Downloading..." : "Download"}
+          <Button variant="outline" onClick={handleDownload} disabled={downloading} className="gap-2">
+            <Download className="h-4 w-4" />
+            {downloading ? "..." : "Download"}
           </Button>
           {viewers.map((v) => (
             <Button
               key={v.id}
               variant="outline"
-              size="sm"
+              className="gap-2"
               onClick={() => {
                 const url = (v.url_scheme ?? "")
                   .replace("{StudyInstanceUID}", studyUid)
@@ -277,72 +295,91 @@ export function StudyDetailPage() {
                 window.open(url, "_blank");
               }}
             >
-              <ExternalLink className="mr-2 h-4 w-4" />
+              <ExternalLink className="h-4 w-4" />
               {v.name}
             </Button>
           ))}
         </div>
       </div>
 
-      {/* Series Table (always visible, compact) */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Layers className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-sm font-medium">
-              Series ({series.length}) · {totalInstances} images
-            </CardTitle>
+      {/* DICOM Viewer — shown by default with fullscreen support */}
+      {studyUid && (
+        <div ref={viewerContainerRef} className="relative rounded-lg border bg-black overflow-hidden">
+          <div className="absolute top-2 right-2 z-10 flex gap-1">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-8 gap-1.5 bg-black/60 text-white hover:bg-black/80 border-0"
+              onClick={toggleFullscreen}
+            >
+              {isFullscreen ? <Minimize className="h-3.5 w-3.5" /> : <Maximize className="h-3.5 w-3.5" />}
+              {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-8 gap-1.5 bg-black/60 text-white hover:bg-black/80 border-0"
+              onClick={() => window.open(`/ohif/viewer?StudyInstanceUIDs=${studyUid}`, '_blank')}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              New Tab
+            </Button>
           </div>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50">
-                  <TableHead className="w-[60px]">#</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Modality</TableHead>
-                  <TableHead>Manufacturer</TableHead>
-                  <TableHead className="text-right">Images</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {series.map((s) => (
-                  <TableRow key={s.ID}>
-                    <TableCell className="font-mono text-sm font-medium">
-                      {s.MainDicomTags?.SeriesNumber || "—"}
-                    </TableCell>
-                    <TableCell>{s.MainDicomTags?.SeriesDescription || "—"}</TableCell>
-                    <TableCell>
+          <OhifViewer studyInstanceUID={studyUid} className={isFullscreen ? "h-screen w-full" : "h-[600px] w-full"} />
+        </div>
+      )}
+
+      {/* Series cards with thumbnails */}
+      <div>
+        <h3 className="text-sm font-medium text-muted-foreground mb-3">
+          {series.length} Series · {totalInstances} images
+        </h3>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {series.map((s) => {
+            const imgCount = parseInt(s.MainDicomTags?.NumberOfSeriesRelatedInstances || "0", 10);
+            const previewUrl = getPreviewUrl(s);
+            return (
+              <Card key={s.ID} className="overflow-hidden hover:ring-1 hover:ring-primary/30 transition-all cursor-default">
+                {/* Thumbnail area */}
+                <div className="h-32 bg-muted/50 flex items-center justify-center border-b">
+                  {previewUrl ? (
+                    <img
+                      src={previewUrl}
+                      alt={s.MainDicomTags?.SeriesDescription || "Series preview"}
+                      className="h-full w-full object-contain bg-black"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden"); }}
+                    />
+                  ) : null}
+                  <div className={previewUrl ? "hidden" : "flex flex-col items-center gap-1 text-muted-foreground/40"}>
+                    <ImageIcon className="h-8 w-8" />
+                    <span className="text-[10px]">{imgCount} images</span>
+                  </div>
+                </div>
+                <CardContent className="p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {s.MainDicomTags?.SeriesDescription || "Untitled Series"}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {s.MainDicomTags?.Manufacturer || "Unknown"} · #{s.MainDicomTags?.SeriesNumber}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <ModalityBadge modality={s.MainDicomTags?.Modality || "OT"} />
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {s.MainDicomTags?.Manufacturer || "—"}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {s.MainDicomTags?.NumberOfSeriesRelatedInstances || "0"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {series.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-16 text-center text-muted-foreground">
-                      No series in this study
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+                      <span className="text-xs font-medium text-muted-foreground">{imgCount}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Study Metadata (collapsed by default) */}
       <Card>
-        <CardHeader
-          className="cursor-pointer select-none pb-3"
-          onClick={() => setShowMetadata(!showMetadata)}
-        >
+        <CardHeader className="cursor-pointer select-none pb-3" onClick={() => setShowMetadata(!showMetadata)}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Info className="h-4 w-4 text-muted-foreground" />
@@ -382,18 +419,12 @@ export function StudyDetailPage() {
                   <dd className="mt-1">{stag("InstitutionName")}</dd>
                 </div>
               )}
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Modality</dt>
-                <dd className="mt-1">
-                  {modality ? (
-                    <div className="flex gap-1 flex-wrap">
-                      {modality.split("\\").map((m) => (
-                        <ModalityBadge key={m} modality={m} />
-                      ))}
-                    </div>
-                  ) : "—"}
-                </dd>
-              </div>
+              {stag("ReferringPhysicianName") && (
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Referring Physician</dt>
+                  <dd className="mt-1">{formatDicomName(stag("ReferringPhysicianName"))}</dd>
+                </div>
+              )}
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Accession #</dt>
                 <dd className="mt-1">
@@ -402,12 +433,6 @@ export function StudyDetailPage() {
                   ) : "—"}
                 </dd>
               </div>
-              {stag("ReferringPhysicianName") && (
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Referring Physician</dt>
-                  <dd className="mt-1">{formatDicomName(stag("ReferringPhysicianName"))}</dd>
-                </div>
-              )}
               <div>
                 <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Study UID</dt>
                 <dd className="mt-1 flex items-center gap-1">
@@ -421,44 +446,10 @@ export function StudyDetailPage() {
                   )}
                 </dd>
               </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Series</dt>
-                <dd className="mt-1 font-medium">{series.length}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Images</dt>
-                <dd className="mt-1 font-medium">{totalInstances}</dd>
-              </div>
             </dl>
           </CardContent>
         )}
       </Card>
-
-      {/* Inline DICOM Viewer (collapsed by default, only loads when expanded) */}
-      {studyUid && (
-        <Card>
-          <CardHeader
-            className="cursor-pointer select-none pb-3"
-            onClick={() => setShowViewer(!showViewer)}
-          >
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-medium">Inline DICOM Viewer</CardTitle>
-              <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground">
-                {showViewer ? (
-                  <><EyeOff className="h-3.5 w-3.5" /> Hide Viewer</>
-                ) : (
-                  <><Eye className="h-3.5 w-3.5" /> Show Inline Viewer</>
-                )}
-              </Button>
-            </div>
-          </CardHeader>
-          {showViewer && (
-            <CardContent className="p-0">
-              <OhifViewer studyInstanceUID={studyUid} className="h-[600px] w-full rounded-b-lg border-0" />
-            </CardContent>
-          )}
-        </Card>
-      )}
 
       {/* Send Dialog */}
       <Dialog open={sendDialogOpen} onOpenChange={(open) => { if (!open) closeSendDialog(); else setSendDialogOpen(true); }}>
@@ -466,12 +457,10 @@ export function StudyDetailPage() {
           <DialogHeader>
             <DialogTitle>Send Study to PACS</DialogTitle>
           </DialogHeader>
-
-          {/* Study info */}
           <div className="rounded-md bg-muted p-3 space-y-1">
             <p className="text-sm font-medium">{stag("StudyDescription") || "Study"}</p>
             <p className="text-xs text-muted-foreground">
-              {formatDicomName(ptag("PatientName"))} · {formatDicomDate(stag("StudyDate"))} · {series.length} series, {series.reduce((sum, s) => sum + parseInt(s.MainDicomTags?.NumberOfSeriesRelatedInstances || "0", 10), 0)} images
+              {formatDicomName(ptag("PatientName"))} · {formatDicomDate(stag("StudyDate"))} · {series.length} series, {totalInstances} images
             </p>
           </div>
 
@@ -492,7 +481,7 @@ export function StudyDetailPage() {
                   </SelectContent>
                 </Select>
                 {pacsNodes.length === 0 && (
-                  <p className="text-xs text-muted-foreground">No PACS nodes configured. Add one in Settings &rarr; PACS Nodes.</p>
+                  <p className="text-xs text-muted-foreground">No PACS nodes configured.</p>
                 )}
               </div>
               <DialogFooter>
@@ -507,8 +496,7 @@ export function StudyDetailPage() {
           {sendStatus === "sending" && (
             <div className="py-6 text-center space-y-3">
               <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              <p className="text-sm font-medium">Sending to {pacsNodes.find(n => String(n.id) === selectedNode)?.name}...</p>
-              <p className="text-xs text-muted-foreground">This may take a moment depending on the study size.</p>
+              <p className="text-sm font-medium">Sending...</p>
             </div>
           )}
 
@@ -518,9 +506,6 @@ export function StudyDetailPage() {
                 <Check className="h-6 w-6 text-emerald-500" />
               </div>
               <p className="text-sm font-medium">Study sent successfully</p>
-              <p className="text-xs text-muted-foreground">
-                Sent to {pacsNodes.find(n => String(n.id) === selectedNode)?.name}. Check the Transfers page for status.
-              </p>
               <DialogFooter className="justify-center">
                 <Button onClick={closeSendDialog}>Done</Button>
               </DialogFooter>
@@ -544,7 +529,7 @@ export function StudyDetailPage() {
                 </div>
                 {techDetails && (
                   <details className="rounded-md border bg-muted/50 p-3">
-                    <summary className="text-xs font-medium cursor-pointer text-muted-foreground">Technical details (for IT support)</summary>
+                    <summary className="text-xs font-medium cursor-pointer text-muted-foreground">Technical details</summary>
                     <pre className="mt-2 text-xs whitespace-pre-wrap break-all text-destructive">{techDetails}</pre>
                   </details>
                 )}
