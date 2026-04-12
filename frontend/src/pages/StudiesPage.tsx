@@ -11,6 +11,7 @@ import api from "@/lib/api";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import { TableSkeleton } from "@/components/TableSkeleton";
+import { PageError } from "@/components/page-error";
 
 interface Study {
   ID: string;
@@ -121,7 +122,7 @@ export function StudiesPage() {
     return (
       <div className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight">Worklist</h2>
-        <p className="text-destructive" role="alert">Error: {error}</p>
+        <PageError message={error} onRetry={() => window.location.reload()} />
       </div>
     );
   }

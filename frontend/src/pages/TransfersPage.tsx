@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { TableSkeleton } from "@/components/TableSkeleton";
+import { PageError } from "@/components/page-error";
 import { RefreshCw, ArrowRightLeft, CheckCircle, XCircle, Clock, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -207,7 +208,7 @@ export function TransfersPage() {
     return (
       <div className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight">Transfers</h2>
-        <p className="text-destructive" role="alert">Error: {error}</p>
+        <PageError message={error} onRetry={() => window.location.reload()} />
       </div>
     );
   }

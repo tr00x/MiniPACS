@@ -16,6 +16,7 @@ import { Plus, Trash2, ShieldOff, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
+import { PageError } from "@/components/page-error";
 import { formatTimestamp } from "@/lib/dicom";
 
 interface User {
@@ -202,7 +203,7 @@ export function SettingsPage() {
     return (
       <div className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight">Settings</h2>
-        <p className="text-destructive" role="alert">Error: {error}</p>
+        <PageError message={error} onRetry={() => window.location.reload()} />
       </div>
     );
   }

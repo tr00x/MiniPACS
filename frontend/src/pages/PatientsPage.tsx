@@ -6,6 +6,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { TableSkeleton } from "@/components/TableSkeleton";
+import { PageError } from "@/components/page-error";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from "lucide-react";
 import api from "@/lib/api";
@@ -123,7 +124,7 @@ export function PatientsPage() {
     return (
       <div className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight">Patients</h2>
-        <p className="text-destructive" role="alert">Error: {error}</p>
+        <PageError message={error} onRetry={() => window.location.reload()} />
       </div>
     );
   }
