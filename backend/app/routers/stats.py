@@ -62,3 +62,58 @@ async def get_stats(
         "failed_transfers": failed_transfers,
         "unviewed_shares": unviewed_shares,
     }
+
+
+def _format_storage_size(dicom_size: int) -> str:
+    """Format bytes into human-readable storage size."""
+    if dicom_size < 1024:
+        return f"{dicom_size}B"
+    elif dicom_size < 1024 ** 2:
+        return f"{dicom_size / 1024:.1f}KB"
+    elif dicom_size < 1024 ** 3:
+        return f"{dicom_size / (1024 ** 2):.1f}MB"
+    else:
+        return f"{dicom_size / (1024 ** 3):.1f}GB"
+
+
+@router.get("/system-health")
+async def get_system_health(
+    user: dict = Depends(get_current_user),
+):
+    # Orthanc system info — /system for version+uptime, /statistics for storage
+    orthanc_info = {"status": "offline"}
+    try:
+        r_sys = await orthanc._http().get("/system")
+        if r_sys.status_code == 200:
+            sys_data = r_sys.json()
+            orthanc_info = {
+                "status": "online",
+                "version": sys_data.get("Version", "unknown"),
+                "storage_size": "0B",
+                "uptime": sys_data.get("Uptime", 0),
+            }
+            # Get storage size from /statistics
+            r_stat = await orthanc._http().get("/statistics")
+            if r_stat.status_code == 200:
+                stat_data = r_stat.json()
+                orthanc_info["storage_size"] = _format_storage_size(
+                    stat_data.get("TotalDiskSize", 0)
+                )
+    except Exception:
+        pass
+
+    # Last received study timestamp
+    last_received = None
+    try:
+        r = await orthanc._http().get("/changes", params={"last": ""})
+        if r.status_code == 200:
+            changes = r.json().get("Changes", [])
+            if changes:
+                last_received = changes[-1].get("Date")
+    except Exception:
+        pass
+
+    return {
+        "orthanc": orthanc_info,
+        "last_received": last_received,
+    }
