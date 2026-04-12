@@ -8,6 +8,8 @@ import io
 import zipfile
 from pathlib import Path
 
+import os
+
 import httpx
 import pydicom
 from pydicom.dataset import Dataset, FileDataset
@@ -15,8 +17,20 @@ from pydicom.uid import generate_uid, ExplicitVRLittleEndian
 from pydicom.sequence import Sequence
 import numpy as np
 
-ORTHANC_URL = "http://127.0.0.1:48923"
-ORTHANC_AUTH = ("orthanc", "orthanc")
+# Load from .env file if present
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
+ORTHANC_URL = os.environ.get("ORTHANC_URL", "http://127.0.0.1:48923")
+ORTHANC_AUTH = (
+    os.environ.get("ORTHANC_USERNAME", "orthanc"),
+    os.environ.get("ORTHANC_PASSWORD", "orthanc"),
+)
 CLINIC_NAME = "Clinton Medical"
 
 # Realistic patient data for a US solo clinic
