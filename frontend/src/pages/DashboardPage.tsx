@@ -180,7 +180,7 @@ export function DashboardPage() {
         ) : (
           <>
             <Link to="/patients" className="block">
-              <Card className="transition-colors hover:bg-accent/50">
+              <Card className="transition-colors hover:bg-accent/50 h-full">
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div>
@@ -196,7 +196,7 @@ export function DashboardPage() {
             </Link>
 
             <Link to="/studies" className="block">
-              <Card className="transition-colors hover:bg-accent/50">
+              <Card className="transition-colors hover:bg-accent/50 h-full">
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div>
@@ -213,7 +213,7 @@ export function DashboardPage() {
             </Link>
 
             <Link to="/transfers" className="block">
-              <Card className={`transition-colors hover:bg-accent/50 ${failedCount > 0 ? "border-destructive/50" : ""}`}>
+              <Card className={`transition-colors hover:bg-accent/50 h-full ${failedCount > 0 ? "border-destructive/50" : ""}`}>
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div>
@@ -234,7 +234,7 @@ export function DashboardPage() {
             </Link>
 
             <Link to="/shares" className="block">
-              <Card className="transition-colors hover:bg-accent/50">
+              <Card className="transition-colors hover:bg-accent/50 h-full">
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div>

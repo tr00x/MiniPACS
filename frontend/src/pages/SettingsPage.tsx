@@ -161,7 +161,7 @@ export function SettingsPage() {
       url_scheme: viewerForm.url_scheme,
       icon: viewerForm.icon || null,
       sort_order: Number(viewerForm.sort_order) || 0,
-      is_enabled: true,
+      is_enabled: 1,
       description: viewerForm.description || "",
       icon_key: viewerForm.icon_key || "",
     };
@@ -175,7 +175,7 @@ export function SettingsPage() {
       }
       toast.success(viewerEditingId ? "Viewer updated" : "Viewer added");
       setViewerDialogOpen(false);
-      setViewerForm({ name: "", url_scheme: "", icon: "", sort_order: "0" });
+      setViewerForm({ name: "", url_scheme: "", icon: "", sort_order: "0", description: "", icon_key: "" });
       setViewerEditingId(null);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };

@@ -1,0 +1,63 @@
+services:
+  orthanc:
+    image: orthancteam/orthanc
+    restart: unless-stopped
+    volumes:
+      - orthanc-data:/var/lib/orthanc/db
+      - ./orthanc/orthanc-docker.json:/etc/orthanc/orthanc.json:ro
+    environment:
+      ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
+      ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"
+      ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USERNAME:-orthanc}":"${ORTHANC_PASSWORD}"}'
+      DICOM_WEB_PLUGIN_ENABLED: "true"
+      TRANSFERS_PLUGIN_ENABLED: "true"
+    ports:
+      - "48923:8042"  # Orthanc HTTP API (for Vite dev proxy)
+      - "48924:4242"  # DICOM C-STORE/C-ECHO
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; s=socket.create_connection(('localhost',8042),2); s.close()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    volumes:
+      - minipacs-db:/app/data
+    environment:
+      SECRET_KEY: "${SECRET_KEY}"
+      ORTHANC_URL: "http://orthanc:8042"
+      ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
+      ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"
+      DATABASE_URL: "sqlite+aiosqlite:///./data/minipacs.db"
+      DATABASE_PATH: "/app/data/minipacs.db"
+      CORS_ORIGINS: '["https://localhost:${HTTPS_PORT:-48921}","http://localhost:${HTTP_PORT:-48920}","http://localhost:48925"]'
+      AUTO_LOGOUT_MINUTES: "${AUTO_LOGOUT_MINUTES:-15}"
+      DEFAULT_SHARE_EXPIRY_DAYS: "${DEFAULT_SHARE_EXPIRY_DAYS:-30}"
+    ports:
+      - "48922:8000"  # Expose for Vite dev proxy
+    depends_on:
+      orthanc:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-48920}:80"
+      - "${HTTPS_PORT:-48921}:443"
+    environment:
+      ORTHANC_BASIC_AUTH: "${ORTHANC_BASIC_AUTH}"
+      HTTPS_PORT: "${HTTPS_PORT:-48921}"
+    depends_on:
+      - backend
+      - orthanc
+
+volumes:
+  orthanc-data:
+  minipacs-db:

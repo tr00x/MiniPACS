@@ -1,0 +1,13 @@
+orthanc-data/
+orthanc-tls/
+graphify-out/
+docs/
+.claude/
+.git/
+*.md
+backend/.venv/
+backend/__pycache__/
+backend/*.db
+backend/.env
+frontend/node_modules/
+ohif-source/

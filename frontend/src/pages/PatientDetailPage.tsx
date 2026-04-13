@@ -50,6 +50,7 @@ interface Share {
   last_viewed_at: string | null;
   created_at: string;
   expires_at: string | null;
+  pin_hash?: string | null;
 }
 
 interface Transfer {
@@ -512,7 +513,7 @@ Clinton Medical`
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">PIN</span>
                 <span className="font-medium text-xs">
-                  {(editShare as Record<string, unknown>)?.pin_hash
+                  {editShare?.pin_hash
                     ? <span className="flex items-center gap-1"><Lock className="h-3 w-3" /> Protected</span>
                     : "Not set"}
                 </span>
@@ -634,7 +635,7 @@ Clinton Medical`
                         <span className="text-xs text-muted-foreground">
                           {s.view_count > 0 ? `${s.view_count} views` : "Not viewed"}
                         </span>
-                        {(s as Record<string, unknown>).pin_hash && (
+                        {s.pin_hash && (
                           <span className="text-xs text-muted-foreground flex items-center gap-0.5" title="PIN protected">
                             <Lock className="h-3 w-3" />
                             <span>PIN protected</span>
