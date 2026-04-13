@@ -21,3 +21,7 @@ ohif-dist/
 orthanc/orthanc-runtime.json
 orthanc-data/
 nginx/nginx-runtime.conf
+CLAUDE.md
+.claude/
+docs/superpowers/
+graphify-out/

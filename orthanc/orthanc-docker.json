@@ -1,0 +1,48 @@
+{
+  "Name": "MiniPACS",
+
+  "StorageDirectory": "/var/lib/orthanc/db",
+  "IndexDirectory": "/var/lib/orthanc/db",
+  "StorageCompression": true,
+  "MaximumStorageSize": 0,
+  "MaximumPatientCount": 0,
+
+  "DicomServerEnabled": true,
+  "DicomAet": "MINIPACS",
+  "DicomPort": 4242,
+  "DefaultEncoding": "Latin1",
+  "DicomAssociationCloseDelay": 5,
+  "DicomScuTimeout": 30,
+
+  "HttpServerEnabled": true,
+  "HttpPort": 8042,
+  "RemoteAccessAllowed": true,
+  "AuthenticationEnabled": true,
+  "RegisteredUsers": {},
+
+  "DicomModalitiesInDatabase": true,
+  "DicomModalities": {},
+
+  "OverwriteInstances": false,
+  "StableAge": 60,
+  "LimitFindResults": 0,
+  "LimitFindInstances": 0,
+  "KeepAlive": true,
+  "HttpTimeout": 60,
+
+  "DicomWeb": {
+    "Enable": true,
+    "Root": "/dicom-web/",
+    "EnableWado": true,
+    "WadoRoot": "/wado",
+    "Host": "localhost",
+    "Ssl": false,
+    "StudiesMetadata": "MainDicomTags",
+    "SeriesMetadata": "Full"
+  },
+
+  "Transfers": {
+    "PeerConnectivityTimeout": 15,
+    "MaxHttpRetries": 3
+  }
+}

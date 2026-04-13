@@ -1,7 +1,8 @@
+import os
 import aiosqlite
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "minipacs.db"
+DB_PATH = Path(os.environ.get("DATABASE_PATH", Path(__file__).parent.parent / "minipacs.db"))
 
 
 async def get_db():

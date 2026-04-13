@@ -9,6 +9,7 @@
   <a href="#screenshots">Screenshots</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#quick-start">Quick Start</a> ·
+  <a href="#development">Development</a> ·
   <a href="#deployment">Production Deployment</a> ·
   <a href="#license">License</a>
 </p>
@@ -45,56 +46,33 @@ Solo and small clinics pay $150–$2,000/month for cloud PACS solutions that are
 - Fullscreen viewer mode with keyboard controls
 - Support for all modalities: CT, MR, US, XR, DX, MG, NM, PT, RF, XA
 - Series-level download in DICOM or JPEG format
-- Multi-modality study support with color-coded badges
 
 ### Worklist & Study Management
 - Server-side search, filtering, and pagination
 - Filter by modality, date range (presets + custom), patient name
-- Two-line rich table rows with institution, referring physician, accession number
 - Click any study to view details, series breakdown, and launch viewer
 
 ### Patient Portal
 - Secure share links with configurable expiry (7/14/30/90 days)
 - Optional PIN protection with server-side enforcement (httponly cookies)
-- QR code generation for easy sharing — printable or scannable
+- QR code generation for easy sharing
 - Email integration — pre-filled mailto with study details and portal link
-- Mobile-first responsive design — works on any device
-- Patient-friendly JPEG download option (no DICOM knowledge needed)
+- Mobile-first responsive design
+- Patient-friendly JPEG download option
 
 ### PACS Transfers
 - Send studies to other PACS nodes via DICOM C-STORE
 - C-ECHO connectivity testing before sending
 - Real-time transfer status tracking with auto-refresh
 - Retry failed transfers with human-readable error messages
-- Transfer history with resolved study descriptions
-
-### Radiology Reports
-- Attach text or PDF reports to any study
-- Inline PDF viewer with fullscreen overlay
-- Download reports directly
-- Reports linked to studies for complete clinical workflow
-
-### External Viewers
-- Pre-configured desktop viewer integration (OsiriX, Horos, RadiAnt, 3D Slicer)
-- Cloud viewer support (PostDICOM, MedDream)
-- Custom URL scheme support — add any DICOM viewer
-- Enable/disable viewers with one click
-- Real favicon icons from official viewer sites
 
 ### Security & Compliance
 - JWT authentication with token versioning and instant revocation
 - Session timeout with 60-second warning modal (HIPAA requirement)
-- Immutable audit log with CSV export — every action logged
-- SQLite-based rate limiting on login attempts
+- Immutable audit log with CSV export
+- Rate limiting on login attempts
 - Content Security Policy, HSTS, X-Frame-Options headers
 - DICOMweb access restricted to clinic LAN only
-- Credentials via `.env` — zero hardcoded secrets
-
-### Admin Dashboard
-- System health monitoring — PACS server status, storage, last received study
-- Patient/study/transfer/share statistics at a glance
-- Recent transfers and active shares feed
-- Collapsible sidebar with dark/light mode toggle
 
 ---
 
@@ -142,45 +120,49 @@ Solo and small clinics pay $150–$2,000/month for cloud PACS solutions that are
 
 ```
 [MRI / CT / X-ray Equipment]
-        │ DICOM C-STORE
+        │ DICOM C-STORE (:48924)
         ▼
-[Orthanc PACS Server]  ◄── Docker container, persistent storage
-        │ REST API + DICOMweb
-        ▼
-[FastAPI Backend]  ◄── Python, JWT auth, audit logging, SQLite
-        │ JSON REST API
-        ▼
-[React Frontend + OHIF Viewer]  ◄── TypeScript, Tailwind, shadcn/ui
-        │
-[nginx Reverse Proxy]  ◄── HTTPS, security headers, CSP
-    /         → React (static build)
-    /api/     → FastAPI
-    /dicom-web/ → Orthanc DICOMweb (LAN only)
-    /ohif/    → OHIF Viewer (static build)
+┌─── Docker Compose ──────────────────────────────┐
+│                                                  │
+│  [Orthanc PACS]         internals: 8042 / 4242   │
+│       │ REST + DICOMweb                          │
+│       ▼                                          │
+│  [FastAPI Backend]      internal: 8000            │
+│       │ JSON API                                 │
+│       ▼                                          │
+│  [nginx + React + OHIF] :48920 HTTP → :48921 HTTPS│
+│       /         → React SPA                      │
+│       /api/     → FastAPI                        │
+│       /dicom-web/ → Orthanc DICOMweb             │
+│       /ohif/    → OHIF Viewer                    │
+│                                                  │
+└──────────────────────────────────────────────────┘
 ```
 
-### Tech Stack
+### Three containers
 
-| Component | Technology |
-|-----------|-----------|
-| **PACS Server** | Orthanc 1.12 (Docker) |
-| **Backend** | Python 3.14, FastAPI, aiosqlite, httpx |
-| **Frontend** | React 18, TypeScript, Tailwind CSS v4, shadcn/ui |
-| **Viewer** | OHIF Viewer 3.x (DICOMweb) |
-| **Proxy** | nginx (HTTPS, TLS 1.2+) |
-| **Database** | SQLite (application state) |
-| **Auth** | JWT + bcrypt, token versioning |
+| Container | Image | Purpose |
+|-----------|-------|---------|
+| `orthanc` | `orthancteam/orthanc` | PACS server — DICOM storage, DICOMweb API |
+| `backend` | Custom (python:3.12-slim) | FastAPI — auth, API, business logic, SQLite |
+| `frontend` | Custom (node build → nginx:alpine) | nginx reverse proxy + React SPA + OHIF Viewer |
 
-### Ports
+### Ports exposed to host
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| nginx HTTPS | 48921 | Entry point (production) |
-| nginx HTTP | 48920 | Redirect to HTTPS |
-| FastAPI | 48922 | Backend API |
-| Orthanc HTTP | 48923 | REST API + DICOMweb |
-| Orthanc DICOM | 48924 | C-STORE / C-ECHO |
-| Vite Dev | 48925 | Development server |
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| **48921** | HTTPS | **Main entry point** — portal, API, viewer |
+| 48920 | HTTP | Redirects to HTTPS |
+| 48922 | HTTP | Backend API (for development only) |
+| 48923 | HTTP | Orthanc HTTP API (for development only) |
+| 48924 | DICOM | C-STORE / C-ECHO from imaging equipment |
+
+### Data persistence (Docker volumes)
+
+| Volume | Path in container | Contents |
+|--------|-------------------|----------|
+| `orthanc-data` | `/var/lib/orthanc/db` | DICOM images + Orthanc index |
+| `minipacs-db` | `/app/data` | SQLite database (users, shares, audit, settings) |
 
 ---
 
@@ -188,117 +170,155 @@ Solo and small clinics pay $150–$2,000/month for cloud PACS solutions that are
 
 ### Prerequisites
 
-- **Docker** — for Orthanc PACS server
-- **Python 3.12+** — for FastAPI backend
-- **Node.js 18+** — for React frontend
-- **nginx** — for production reverse proxy
+- **Docker** and **Docker Compose** (Docker Desktop or standalone)
 
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/minipacs.git
-cd minipacs
-cp backend/.env.example backend/.env
-# Edit backend/.env — set strong SECRET_KEY and ORTHANC_PASSWORD
+git clone https://github.com/tr00x/MiniPACS.git
+cd MiniPACS
+
+# Create .env from template
+cp .env.docker .env
 ```
 
-### 2. Start Orthanc PACS
+Edit `.env` — set all values:
 
-```bash
-./scripts/start-orthanc.sh
+```env
+SECRET_KEY=<generate: python3 -c "import secrets; print(secrets.token_urlsafe(32))">
+ORTHANC_USERNAME=orthanc
+ORTHANC_PASSWORD=<strong password>
+# Generate: printf 'orthanc:<your password>' | base64
+ORTHANC_BASIC_AUTH=<base64 of username:password>
 ```
 
-### 3. Set up backend
+### 2. Build and start
 
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m app.create_user  # Create admin account
-uvicorn app.main:app --host 0.0.0.0 --port 48922 --reload
+docker compose build
+docker compose up -d
 ```
 
-### 4. Set up frontend
+### 3. Create admin user
 
 ```bash
+docker exec minipacs-backend-1 python3 -c "
+import asyncio, bcrypt, aiosqlite
+async def create():
+    db = await aiosqlite.connect('/app/data/minipacs.db')
+    h = bcrypt.hashpw(b'YOUR_PASSWORD', bcrypt.gensalt()).decode()
+    await db.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', ('admin', h))
+    await db.commit()
+    await db.close()
+asyncio.run(create())
+"
+```
+
+### 4. Load demo data (optional)
+
+```bash
+docker exec minipacs-backend-1 pip install pydicom numpy -q
+docker exec minipacs-backend-1 python3 seed_demo.py
+```
+
+This creates 12 patients, 18 studies, and 125 DICOM images.
+
+### 5. Open in browser
+
+```
+https://localhost:48921
+```
+
+Accept the self-signed certificate warning — this is expected for local development.
+
+### Common commands
+
+```bash
+docker compose up -d          # Start all services
+docker compose down           # Stop all services
+docker compose logs -f        # Stream all logs
+docker compose logs backend   # Backend logs only
+docker compose ps             # Check container status
+docker compose build          # Rebuild after code changes
+docker compose restart backend # Restart single service
+```
+
+---
+
+## Development
+
+For active frontend or backend development, you may want hot-reload instead of rebuilding Docker images on every change.
+
+### Option A: Full Docker (recommended for testing)
+
+Everything runs in Docker. To see your changes:
+
+```bash
+docker compose build          # Rebuild images
+docker compose up -d          # Restart
+```
+
+### Option B: Hybrid — Docker backend + Vite frontend (for UI development)
+
+Keep Orthanc and backend in Docker, run frontend locally with hot-reload:
+
+```bash
+# 1. Docker services are already running (docker compose up -d)
+
+# 2. Run Vite dev server
 cd frontend
 npm install
 npm run dev
 ```
 
-### 5. Open in browser
+Open `http://localhost:48925` — Vite proxies API calls to Docker backend on `:48922`.
 
-```
-http://localhost:48925
-```
+> **Note:** Port 48925 is the Vite dev server with hot-reload.
+> Port 48921 is the production nginx with pre-built static files.
+> They serve the same app, but 48925 updates instantly when you edit code.
 
-### 6. Load demo data (optional)
+### Option C: Fully native (no Docker)
 
 ```bash
+# 1. Start Orthanc via Docker
+./scripts/start-orthanc.sh
+
+# 2. Backend
 cd backend
-python seed_demo.py  # 12 patients, 18 studies, 125 images
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m app.create_user
+uvicorn app.main:app --host 127.0.0.1 --port 48922 --reload
+
+# 3. Frontend
+cd frontend
+npm install && npm run dev
+
+# 4. (Optional) nginx for HTTPS
+./scripts/generate-certs.sh
+./scripts/start-all.sh
 ```
 
 ---
 
-## Production Deployment
+## Configuration
 
-### Deployment checklist
+### Environment variables (.env)
 
-- [ ] **TLS certificates** — Let's Encrypt (`certbot`) or purchased certificate
-  ```bash
-  sudo certbot --nginx -d pacs.yourclinic.com
-  ```
-  Update `nginx/nginx.conf` with real cert paths.
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SECRET_KEY` | Yes | — | JWT signing key. Generate a random 32+ char string |
+| `ORTHANC_USERNAME` | No | `orthanc` | Orthanc HTTP basic auth username |
+| `ORTHANC_PASSWORD` | Yes | — | Orthanc HTTP basic auth password |
+| `ORTHANC_BASIC_AUTH` | Yes | — | Base64 of `username:password` for nginx proxy |
+| `HTTP_PORT` | No | `48920` | HTTP port (redirects to HTTPS) |
+| `HTTPS_PORT` | No | `48921` | HTTPS port (main entry point) |
+| `AUTO_LOGOUT_MINUTES` | No | `15` | Session inactivity timeout |
+| `DEFAULT_SHARE_EXPIRY_DAYS` | No | `30` | Default patient share link expiry |
 
-- [ ] **Firewall rules** — Only expose necessary ports
-  ```bash
-  # Allow HTTPS (web portal) and DICOM (equipment) only
-  sudo ufw allow 48921/tcp  # HTTPS portal
-  sudo ufw allow 48924/tcp  # DICOM from equipment
-  # Bind FastAPI and Orthanc HTTP to localhost only
-  ```
+### DICOM equipment setup
 
-- [ ] **systemd services** — Auto-start on boot
-  ```bash
-  # Create service files for:
-  # - minipacs-backend.service (uvicorn)
-  # - minipacs-orthanc.service (docker container)
-  # - nginx (usually already a service)
-  sudo systemctl enable minipacs-backend minipacs-orthanc nginx
-  ```
-
-- [ ] **Backups** — Daily automated backups
-  ```bash
-  # Add to crontab:
-  0 2 * * * cp /path/to/minipacs.db /backup/minipacs-$(date +\%Y\%m\%d).db
-  0 3 * * * rsync -a /path/to/orthanc-data/ /backup/orthanc-data/
-  ```
-
-- [ ] **Production .env** — Strong passwords, real domain
-  ```bash
-  SECRET_KEY=<generate with: python -c "import secrets; print(secrets.token_urlsafe(32))">
-  ORTHANC_PASSWORD=<strong random password>
-  CORS_ORIGINS=["https://pacs.yourclinic.com"]
-  ```
-
-- [ ] **Frontend build** — Create production bundle
-  ```bash
-  cd frontend && npm run build
-  # Static files served by nginx from frontend/dist/
-  ```
-
-- [ ] **OHIF build** — White-label viewer with clinic branding
-  ```bash
-  cd ohif-source && yarn build
-  cp -r platform/app/dist/* ../ohif-dist/
-  cp ../ohif-config/minipacs.js ../ohif-dist/app-config.js
-  ```
-
-### DICOM Equipment Setup
-
-Configure your imaging equipment (MRI, CT, X-ray) to send studies to:
+Configure your imaging equipment to send studies to:
 
 | Parameter | Value |
 |-----------|-------|
@@ -309,38 +329,74 @@ Configure your imaging equipment (MRI, CT, X-ray) to send studies to:
 
 ---
 
+## Production Deployment
+
+### Checklist
+
+- [ ] **Strong passwords** in `.env` — SECRET_KEY, ORTHANC_PASSWORD
+- [ ] **Real TLS certificates** — mount via Docker volume to replace self-signed certs
+  ```bash
+  # In docker-compose.yml, add to frontend volumes:
+  - /etc/letsencrypt/live/pacs.clinic.com/fullchain.pem:/etc/ssl/minipacs/cert.pem:ro
+  - /etc/letsencrypt/live/pacs.clinic.com/privkey.pem:/etc/ssl/minipacs/key.pem:ro
+  ```
+- [ ] **Firewall** — only expose ports 48921 (HTTPS) and 48924 (DICOM)
+- [ ] **Backups** — schedule Docker volume backups
+  ```bash
+  # SQLite backup
+  docker exec minipacs-backend-1 cp /app/data/minipacs.db /app/data/backup.db
+  docker cp minipacs-backend-1:/app/data/backup.db ./backups/
+
+  # Orthanc DICOM data
+  docker run --rm -v minipacs_orthanc-data:/data -v ./backups:/backup \
+    alpine tar czf /backup/orthanc-$(date +%Y%m%d).tar.gz /data
+  ```
+- [ ] **CORS origins** — update to your domain in `.env` or docker-compose.yml
+- [ ] **Remove dev ports** — remove `48922:8000` and `48923:8042` mappings
+
+---
+
 ## Project Structure
 
 ```
 minipacs/
+├── docker-compose.yml            # Full stack orchestration
+├── .env.docker                   # Environment template
+├── .env                          # Your configuration (git-ignored)
+│
 ├── backend/
+│   ├── Dockerfile                # python:3.12-slim + FastAPI
 │   ├── app/
-│   │   ├── main.py              # FastAPI application
-│   │   ├── config.py            # Settings (pydantic-settings)
-│   │   ├── database.py          # SQLite schema + migrations
-│   │   ├── services/
-│   │   │   ├── orthanc.py       # Orthanc API client
-│   │   │   └── auth.py          # JWT + bcrypt
-│   │   ├── routers/             # 12 API routers (~50 endpoints)
-│   │   ├── models/              # Pydantic request/response models
-│   │   └── middleware/
-│   │       └── audit.py         # Immutable audit logging
-│   ├── seed_demo.py             # Demo data generator
-│   └── .env.example             # Environment template
+│   │   ├── main.py               # FastAPI app, lifespan, routers
+│   │   ├── config.py             # pydantic-settings
+│   │   ├── database.py           # SQLite schema + migrations
+│   │   ├── services/orthanc.py   # Orthanc API client (httpx)
+│   │   ├── routers/              # 12 routers (~50 endpoints)
+│   │   └── middleware/audit.py   # Immutable audit logging
+│   └── seed_demo.py              # Demo data generator
+│
 ├── frontend/
+│   ├── Dockerfile                # node build → nginx:alpine
 │   └── src/
-│       ├── pages/               # 13 page components
-│       ├── components/          # Shared UI components
-│       └── lib/                 # API client, auth, DICOM utils
+│       ├── pages/                # 13 page components
+│       ├── components/           # shadcn/ui + custom components
+│       └── lib/                  # API client, auth, DICOM utils
+│
 ├── orthanc/
-│   └── orthanc.json             # PACS configuration template
+│   ├── orthanc.json              # Native Orthanc config (non-Docker)
+│   └── orthanc-docker.json       # Docker Orthanc config
+│
 ├── nginx/
-│   └── nginx.conf               # Reverse proxy + security headers
-├── scripts/
-│   ├── start-orthanc.sh         # Docker Orthanc launcher
-│   └── start-all.sh             # Full stack launcher
-└── ohif-config/
-    └── minipacs.js              # OHIF viewer configuration
+│   ├── nginx.conf                # Native nginx config
+│   └── nginx-docker.conf         # Docker nginx config (container names)
+│
+├── ohif-dist/                    # Pre-built OHIF Viewer
+├── ohif-config/minipacs.js       # OHIF white-label config
+│
+└── scripts/
+    ├── start-all.sh              # Native full-stack launcher
+    ├── start-orthanc.sh          # Docker Orthanc launcher
+    └── generate-certs.sh         # Self-signed TLS cert generator
 ```
 
 ---
@@ -351,12 +407,12 @@ minipacs/
 |---------------|--------|-------------|
 | `/api/auth` | 4 | Login, logout, refresh, me |
 | `/api/patients` | 2 | List (paginated), detail with studies |
-| `/api/studies` | 5 | List (filtered), detail, download, series download |
+| `/api/studies` | 5 | List (filtered), detail, download, series |
 | `/api/transfers` | 3 | Send, retry, history |
 | `/api/shares` | 4 | Create, update, revoke, list |
 | `/api/pacs-nodes` | 5 | CRUD + C-ECHO test |
 | `/api/reports` | 3 | Create, list, delete |
-| `/api/settings` | 3 | Get, update, public |
+| `/api/settings` | 3 | Get, update, public (no auth) |
 | `/api/viewers` | 4 | CRUD for external viewers |
 | `/api/users` | 4 | CRUD + token revocation |
 | `/api/audit-log` | 1 | Filtered, paginated log |

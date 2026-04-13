@@ -12,7 +12,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Minimize, Layers, Lock, Shuffle, Mail, FileText, Plus, Trash2 } from "lucide-react";
+import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Layers, Lock, Shuffle, Mail, FileText, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { QRCodeSVG } from "qrcode.react";
@@ -79,7 +79,6 @@ export function StudyDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string>("");
-  const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -163,7 +162,6 @@ export function StudyDetailPage() {
 
   const handleSend = async () => {
     if (!selectedNode) return;
-    setSending(true);
     setSendError(null);
     setSendStatus("sending");
     try {
@@ -183,7 +181,7 @@ export function StudyDetailPage() {
       setSendError(getErrorMessage(err, "Failed to send study"));
       setSendStatus("error");
     } finally {
-      setSending(false);
+      // sendStatus handles UI state
     }
   };
 

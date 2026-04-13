@@ -430,7 +430,6 @@ export function PatientPortalPage() {
               const studyInstanceUID = stag(s, "StudyInstanceUID");
               const isViewing = viewingStudy === s.ID;
               const modality = stag(s, "ModalitiesInStudy");
-              const isDownloading = downloading === s.ID;
               return (
                 <div key={s.ID} className="rounded-xl border bg-card overflow-hidden shadow-sm">
                   <div className="p-4 sm:p-5">
