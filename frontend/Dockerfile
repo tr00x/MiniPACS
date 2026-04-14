@@ -19,8 +19,9 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # Copy OHIF viewer (pre-built)
 COPY ohif-dist/ /usr/share/nginx/ohif/
 
-# Copy nginx template
-COPY nginx/nginx-docker.conf /etc/nginx/templates/nginx.conf.template
+# Copy nginx templates (dev with TLS, prod HTTP-only for CF Tunnel)
+COPY nginx/nginx-docker.conf /etc/nginx/templates/nginx-dev.conf.template
+COPY nginx/nginx-prod.conf /etc/nginx/templates/nginx-prod.conf.template
 
 # Self-signed certs generated at build time (override with real certs via volume)
 RUN mkdir -p /etc/ssl/minipacs && \
@@ -35,4 +36,4 @@ RUN rm -f /etc/nginx/conf.d/default.conf
 EXPOSE 80 443
 
 # envsubst replaces $ORTHANC_BASIC_AUTH and $HTTPS_PORT in nginx config at startup
-CMD ["/bin/sh", "-c", "envsubst '${ORTHANC_BASIC_AUTH} ${HTTPS_PORT}' < /etc/nginx/templates/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "TEMPLATE=${NGINX_TEMPLATE:-nginx-dev}; envsubst '${ORTHANC_BASIC_AUTH} ${HTTPS_PORT}' < /etc/nginx/templates/${TEMPLATE}.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"]

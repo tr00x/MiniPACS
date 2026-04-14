@@ -1,0 +1,69 @@
+services:
+  orthanc:
+    image: orthancteam/orthanc
+    restart: unless-stopped
+    volumes:
+      - orthanc-data:/var/lib/orthanc/db
+      - ./orthanc/orthanc-docker.json:/etc/orthanc/orthanc.json:ro
+    environment:
+      ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
+      ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"
+      ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USERNAME:-orthanc}":"${ORTHANC_PASSWORD}"}'
+      DICOM_WEB_PLUGIN_ENABLED: "true"
+      TRANSFERS_PLUGIN_ENABLED: "true"
+    ports:
+      - "48924:4242"  # DICOM C-STORE/C-ECHO (LAN + internet via port forward)
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; s=socket.create_connection(('localhost',8042),2); s.close()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    volumes:
+      - minipacs-db:/app/data
+    environment:
+      SECRET_KEY: "${SECRET_KEY}"
+      ORTHANC_URL: "http://orthanc:8042"
+      ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
+      ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"
+      DATABASE_URL: "sqlite+aiosqlite:///./data/minipacs.db"
+      DATABASE_PATH: "/app/data/minipacs.db"
+      CORS_ORIGINS: '["https://${DOMAIN}","http://${DOMAIN}","http://localhost"]'
+      AUTO_LOGOUT_MINUTES: "${AUTO_LOGOUT_MINUTES:-15}"
+      DEFAULT_SHARE_EXPIRY_DAYS: "${DEFAULT_SHARE_EXPIRY_DAYS:-30}"
+    depends_on:
+      orthanc:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"  # HTTP only — CF Tunnel connects here
+    environment:
+      ORTHANC_BASIC_AUTH: "${ORTHANC_BASIC_AUTH}"
+      HTTPS_PORT: "443"
+      NGINX_TEMPLATE: "nginx-prod"
+    depends_on:
+      - backend
+      - orthanc
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: "${CF_TUNNEL_TOKEN}"
+    depends_on:
+      - frontend
+
+volumes:
+  orthanc-data:
+  minipacs-db:
