@@ -1,0 +1,20 @@
+/* MiniPACS Branding Overrides */
+
+/* Hide "OHIF Viewer is for investigational use only" banner */
+[data-cy="investigational-use"],
+.ohif-scrollbar > div:last-child > div[class*="bg-primary-dark"],
+div[class*="investigational"],
+.bottom-0.left-0.z-50 {
+  display: none !important;
+}
+
+/* Hide "Learn more about OHIF Viewer" link */
+a[href*="ohif.org"],
+a[href*="docs.ohif.org"] {
+  display: none !important;
+}
+
+/* Hide "Confirm and hide" button area for investigational dialog */
+[data-cy="confirm-and-hide"] {
+  display: none !important;
+}
