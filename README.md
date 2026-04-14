@@ -116,46 +116,69 @@ Solo and small clinics pay $150–$2,000/month for cloud PACS solutions that are
 
 ---
 
+## Zero Cost Infrastructure
+
+MiniPACS is designed to run on hardware you already own. No cloud subscriptions, no per-study fees, no vendor lock-in.
+
+| What you need | What it costs |
+|---------------|---------------|
+| Any Windows PC in your clinic | **$0** — use existing hardware |
+| Docker (runs inside WSL2 Ubuntu) | **Free** |
+| Cloudflare Tunnel for HTTPS access | **Free** (included in free CF plan) |
+| Domain name | **Free subdomain** on your existing domain, or ~$10/yr |
+| SSL/TLS certificates | **Free** — Cloudflare handles it |
+| DICOM storage | **Your own disk** — 2 TB SSD recommended |
+| Backups | **Automated** — built-in cron script |
+
+**Compare:** cloud PACS solutions charge $150–$2,000/month. MiniPACS: **$0/month**.
+
+---
+
 ## Architecture
 
 ```
-[MRI / CT / X-ray Equipment]
-        │ DICOM C-STORE (:48924)
-        ▼
-┌─── Docker Compose ──────────────────────────────┐
-│                                                  │
-│  [Orthanc PACS]         internals: 8042 / 4242   │
-│       │ REST + DICOMweb                          │
-│       ▼                                          │
-│  [FastAPI Backend]      internal: 8000            │
-│       │ JSON API                                 │
-│       ▼                                          │
-│  [nginx + React + OHIF] :48920 HTTP → :48921 HTTPS│
-│       /         → React SPA                      │
-│       /api/     → FastAPI                        │
-│       /dicom-web/ → Orthanc DICOMweb             │
-│       /ohif/    → OHIF Viewer                    │
-│                                                  │
-└──────────────────────────────────────────────────┘
+                    Internet                              Clinic LAN
+                       │                                      │
+         ┌─────────────┴──────────────┐          ┌───────────┴──────────┐
+         │                            │          │                      │
+   [Doctors/Patients]          [Other clinics]   │  [MRI / CT / X-ray]  │
+         │                       │               │         │            │
+         │ HTTPS                 │ C-STORE       │         │ C-STORE    │
+         ▼                       │               │         ▼            │
+   [Cloudflare]                  │               │   LAN IP:48924       │
+         │ CF Tunnel             │               │         │            │
+         ▼                       ▼               │         │            │
+┌─── Docker Compose (on clinic PC) ──────────────┼─────────┤            │
+│                                                │         │            │
+│  [cloudflared] ──► [nginx]  ◄──────────────────┼─────────┘            │
+│                      │  React SPA              │                      │
+│                      │  /api/ ──► [FastAPI]     │                      │
+│                      │  /ohif/ ── OHIF Viewer  │                      │
+│                      │  /dicom-web/ ──┐        │                      │
+│                                       ▼        │                      │
+│                                [Orthanc PACS]◄─┼── port 48924 ◄──────┘
+│                                   │            │
+│                              [2 TB SSD]        │
+└────────────────────────────────────────────────┘
 ```
 
-### Three containers
+### Four containers
 
 | Container | Image | Purpose |
 |-----------|-------|---------|
 | `orthanc` | `orthancteam/orthanc` | PACS server — DICOM storage, DICOMweb API |
-| `backend` | Custom (python:3.12-slim) | FastAPI — auth, API, business logic, SQLite |
-| `frontend` | Custom (node build → nginx:alpine) | nginx reverse proxy + React SPA + OHIF Viewer |
+| `backend` | python:3.12-slim + FastAPI | Auth, API, business logic, SQLite |
+| `frontend` | node build → nginx:alpine | Reverse proxy + React SPA + OHIF Viewer |
+| `cloudflared` | cloudflare/cloudflared | Tunnel — secure HTTPS without open ports |
 
-### Ports exposed to host
+### Ports
 
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| **48921** | HTTPS | **Main entry point** — portal, API, viewer |
-| 48920 | HTTP | Redirects to HTTPS |
-| 48922 | HTTP | Backend API (for development only) |
-| 48923 | HTTP | Orthanc HTTP API (for development only) |
-| 48924 | DICOM | C-STORE / C-ECHO from imaging equipment |
+| Port | Protocol | Exposed to | Purpose |
+|------|----------|------------|---------|
+| 48924 | DICOM | LAN + internet (port forward) | C-STORE / C-ECHO from equipment |
+| 8080 | HTTP | localhost only | nginx → Cloudflare Tunnel |
+
+> **No HTTP/HTTPS ports are exposed to the internet.** Cloudflare Tunnel handles all web traffic. Only DICOM port 48924 needs a port forward on the router.
 
 ### Data persistence (Docker volumes)
 
@@ -171,76 +194,59 @@ Solo and small clinics pay $150–$2,000/month for cloud PACS solutions that are
 ### Prerequisites
 
 - **Docker** and **Docker Compose** (Docker Desktop or standalone)
+- **Cloudflare account** (free) with a domain — for production HTTPS access
 
-### 1. Clone and configure
+### Production deploy (one command)
 
 ```bash
 git clone https://github.com/tr00x/MiniPACS.git
 cd MiniPACS
-
-# Create .env from template
-cp .env.docker .env
+./scripts/setup.sh
 ```
 
-Edit `.env` — set all values:
+The setup script will:
+1. Generate strong passwords and secrets automatically
+2. Ask for your domain and Cloudflare Tunnel token
+3. Build all Docker images
+4. Create your admin account
+5. Install daily backup cron job
+6. Start everything
 
-```env
-SECRET_KEY=<generate: python3 -c "import secrets; print(secrets.token_urlsafe(32))">
-ORTHANC_USERNAME=orthanc
-ORTHANC_PASSWORD=<strong password>
-# Generate: printf 'orthanc:<your password>' | base64
-ORTHANC_BASIC_AUTH=<base64 of username:password>
-```
+That's it. Open `https://your-domain.com` and log in.
 
-### 2. Build and start
+### Local dev (self-signed TLS)
 
 ```bash
+git clone https://github.com/tr00x/MiniPACS.git
+cd MiniPACS
+cp .env.docker .env        # Edit .env with your passwords
 docker compose build
 docker compose up -d
 ```
 
-### 3. Create admin user
+Open `https://localhost:48921` (accept self-signed cert warning).
 
-```bash
-docker exec minipacs-backend-1 python3 -c "
-import asyncio, bcrypt, aiosqlite
-async def create():
-    db = await aiosqlite.connect('/app/data/minipacs.db')
-    h = bcrypt.hashpw(b'YOUR_PASSWORD', bcrypt.gensalt()).decode()
-    await db.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', ('admin', h))
-    await db.commit()
-    await db.close()
-asyncio.run(create())
-"
-```
-
-### 4. Load demo data (optional)
+### Load demo data (optional)
 
 ```bash
 docker exec minipacs-backend-1 pip install pydicom numpy -q
 docker exec minipacs-backend-1 python3 seed_demo.py
 ```
 
-This creates 12 patients, 18 studies, and 125 DICOM images.
-
-### 5. Open in browser
-
-```
-https://localhost:48921
-```
-
-Accept the self-signed certificate warning — this is expected for local development.
+Creates 12 patients, 18 studies, 125 DICOM images.
 
 ### Common commands
 
 ```bash
-docker compose up -d          # Start all services
-docker compose down           # Stop all services
-docker compose logs -f        # Stream all logs
-docker compose logs backend   # Backend logs only
-docker compose ps             # Check container status
+# Production
+docker compose -f docker-compose.prod.yml up -d      # Start
+docker compose -f docker-compose.prod.yml down        # Stop
+docker compose -f docker-compose.prod.yml logs -f     # Logs
+
+# Development
+docker compose up -d          # Start (dev mode with TLS)
+docker compose down           # Stop
 docker compose build          # Rebuild after code changes
-docker compose restart backend # Restart single service
 ```
 
 ---
@@ -305,14 +311,16 @@ npm install && npm run dev
 
 ### Environment variables (.env)
 
+All generated automatically by `setup.sh`. Manual reference:
+
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SECRET_KEY` | Yes | — | JWT signing key. Generate a random 32+ char string |
+| `SECRET_KEY` | Yes | — | JWT signing key (auto-generated) |
 | `ORTHANC_USERNAME` | No | `orthanc` | Orthanc HTTP basic auth username |
-| `ORTHANC_PASSWORD` | Yes | — | Orthanc HTTP basic auth password |
-| `ORTHANC_BASIC_AUTH` | Yes | — | Base64 of `username:password` for nginx proxy |
-| `HTTP_PORT` | No | `48920` | HTTP port (redirects to HTTPS) |
-| `HTTPS_PORT` | No | `48921` | HTTPS port (main entry point) |
+| `ORTHANC_PASSWORD` | Yes | — | Orthanc HTTP basic auth password (auto-generated) |
+| `ORTHANC_BASIC_AUTH` | Yes | — | Base64 of `username:password` (auto-generated) |
+| `DOMAIN` | Yes | — | Your domain (e.g. `pacs.clinic.com`) |
+| `CF_TUNNEL_TOKEN` | Yes | — | Cloudflare Tunnel token |
 | `AUTO_LOGOUT_MINUTES` | No | `15` | Session inactivity timeout |
 | `DEFAULT_SHARE_EXPIRY_DAYS` | No | `30` | Default patient share link expiry |
 
@@ -331,28 +339,56 @@ Configure your imaging equipment to send studies to:
 
 ## Production Deployment
 
-### Checklist
+### What `setup.sh` handles for you
 
-- [ ] **Strong passwords** in `.env` — SECRET_KEY, ORTHANC_PASSWORD
-- [ ] **Real TLS certificates** — mount via Docker volume to replace self-signed certs
-  ```bash
-  # In docker-compose.yml, add to frontend volumes:
-  - /etc/letsencrypt/live/pacs.clinic.com/fullchain.pem:/etc/ssl/minipacs/cert.pem:ro
-  - /etc/letsencrypt/live/pacs.clinic.com/privkey.pem:/etc/ssl/minipacs/key.pem:ro
-  ```
-- [ ] **Firewall** — only expose ports 48921 (HTTPS) and 48924 (DICOM)
-- [ ] **Backups** — schedule Docker volume backups
-  ```bash
-  # SQLite backup
-  docker exec minipacs-backend-1 cp /app/data/minipacs.db /app/data/backup.db
-  docker cp minipacs-backend-1:/app/data/backup.db ./backups/
+- [x] Strong passwords — auto-generated SECRET_KEY, ORTHANC_PASSWORD
+- [x] TLS certificates — Cloudflare Tunnel provides HTTPS (no certs to manage)
+- [x] No open ports — only DICOM 48924 needs port forward on router
+- [x] Admin user creation — interactive prompt during setup
+- [x] Daily backups — cron job at 2am, 30-day retention
+- [x] CORS origins — auto-configured from your domain
 
-  # Orthanc DICOM data
-  docker run --rm -v minipacs_orthanc-data:/data -v ./backups:/backup \
-    alpine tar czf /backup/orthanc-$(date +%Y%m%d).tar.gz /data
-  ```
-- [ ] **CORS origins** — update to your domain in `.env` or docker-compose.yml
-- [ ] **Remove dev ports** — remove `48922:8000` and `48923:8042` mappings
+### Cloudflare Tunnel setup
+
+1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels
+2. Create a tunnel, copy the token
+3. Set the tunnel's public hostname to your domain (e.g. `pacs.clinic.com`)
+4. Point it to `http://localhost:8080`
+5. Paste the token when `setup.sh` asks
+
+### Router configuration
+
+Only one port forward needed:
+
+```
+Public IP : 48924  →  Server LAN IP : 48924  (TCP)
+```
+
+This allows imaging equipment and other clinics to send DICOM studies.
+
+### Backups
+
+Built-in `scripts/backup.sh` runs daily via cron:
+- **SQLite** — safe online backup using `sqlite3.backup()`
+- **Orthanc DICOM data** — compressed tar.gz from Docker volume
+- **30-day rotation** — old backups auto-deleted
+- **Logs** — `backups/backup.log`
+
+Manual backup:
+```bash
+./scripts/backup.sh
+```
+
+### Storage planning
+
+| Modality | Size per study | Daily volume (5-20 studies) |
+|----------|---------------|----------------------------|
+| MRI | 50–500 MB | 250 MB – 10 GB |
+| CT | 100–800 MB | 500 MB – 16 GB |
+| X-ray | 10–30 MB | 50 – 600 MB |
+| Ultrasound | 5–50 MB | 25 – 1000 MB |
+
+**Recommendation:** 2 TB SSD minimum, plan for ~500 GB – 1.5 TB per year.
 
 ---
 
@@ -383,17 +419,20 @@ minipacs/
 │       └── lib/                  # API client, auth, DICOM utils
 │
 ├── orthanc/
-│   ├── orthanc.json              # Native Orthanc config (non-Docker)
+│   ├── orthanc.json              # Native Orthanc config
 │   └── orthanc-docker.json       # Docker Orthanc config
 │
 ├── nginx/
 │   ├── nginx.conf                # Native nginx config
-│   └── nginx-docker.conf         # Docker nginx config (container names)
+│   ├── nginx-docker.conf         # Docker nginx (dev, with TLS)
+│   └── nginx-prod.conf           # Docker nginx (prod, HTTP for CF Tunnel)
 │
 ├── ohif-dist/                    # Pre-built OHIF Viewer
 ├── ohif-config/minipacs.js       # OHIF white-label config
 │
 └── scripts/
+    ├── setup.sh                  # One-command production setup
+    ├── backup.sh                 # Automated daily backups
     ├── start-all.sh              # Native full-stack launcher
     ├── start-orthanc.sh          # Docker Orthanc launcher
     └── generate-certs.sh         # Self-signed TLS cert generator
