@@ -29,8 +29,11 @@ async def create_user(
             (body.username, hash_password(body.password)),
         )
         await db.commit()
-        await log_audit("create_user", "user", str(cursor.lastrowid), user_id=user["id"], ip_address=request.client.host)
-        return {"id": cursor.lastrowid}
+        new_id = cursor.lastrowid
+        await log_audit("create_user", "user", str(new_id), user_id=user["id"], ip_address=request.client.host)
+        row = await db.execute("SELECT id, username, token_version, created_at, last_login FROM users WHERE id = ?", (new_id,))
+        new_user = await row.fetchone()
+        return dict(new_user)
     except Exception:
         raise HTTPException(409, "Username already exists")
 
