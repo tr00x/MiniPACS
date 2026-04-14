@@ -28,6 +28,82 @@ def _http() -> httpx.AsyncClient:
     return _client
 
 
+async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
+    """Server-side patient search and pagination via Orthanc /tools/find."""
+    query = {}
+    if search:
+        query["PatientName"] = f"*{search}*"
+    try:
+        resp = await _http().post("/tools/find", json={
+            "Level": "Patient",
+            "Query": query,
+            "Expand": True,
+            "Limit": limit,
+            "Since": offset,
+        })
+        resp.raise_for_status()
+        items = resp.json()
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise Exception(f"PACS server unreachable: {exc}") from exc
+
+    # Get total count (without limit) for pagination
+    try:
+        count_resp = await _http().post("/tools/find", json={
+            "Level": "Patient",
+            "Query": query,
+            "Expand": False,
+        })
+        count_resp.raise_for_status()
+        total = len(count_resp.json())
+    except Exception:
+        total = len(items)
+
+    return items, total
+
+
+async def find_studies(search: str = "", modality: str = "", date_from: str = "", date_to: str = "", limit: int = 25, offset: int = 0):
+    """Server-side study search and pagination via Orthanc /tools/find."""
+    query = {}
+    if search:
+        query["PatientName"] = f"*{search}*"
+    if modality:
+        query["ModalitiesInStudy"] = modality.split(",")[0].strip()
+    if date_from and date_to:
+        query["StudyDate"] = f"{date_from}-{date_to}"
+    elif date_from:
+        query["StudyDate"] = f"{date_from}-"
+    elif date_to:
+        query["StudyDate"] = f"-{date_to}"
+
+    try:
+        resp = await _http().post("/tools/find", json={
+            "Level": "Study",
+            "Query": query,
+            "Expand": True,
+            "Limit": limit,
+            "Since": offset,
+        })
+        resp.raise_for_status()
+        items = resp.json()
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise Exception(f"PACS server unreachable: {exc}") from exc
+
+    # Get total count
+    try:
+        count_resp = await _http().post("/tools/find", json={
+            "Level": "Study",
+            "Query": query,
+            "Expand": False,
+        })
+        count_resp.raise_for_status()
+        total = len(count_resp.json())
+    except Exception:
+        total = len(items)
+
+    items = await _enrich_study_modalities(items)
+    return items, total
+
+
 async def get_patients(limit: int | None = None, since: int | None = None):
     params = {"expand": ""}
     if limit is not None:

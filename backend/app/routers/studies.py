@@ -24,50 +24,14 @@ async def list_studies(
 ):
     await log_audit("list_studies", user_id=user["id"], ip_address=request.client.host)
 
-    # Fetch all studies expanded (with modality enrichment from orthanc service)
     try:
-        all_studies = await orthanc.get_studies()
+        page, total = await orthanc.find_studies(
+            search=search, modality=modality,
+            date_from=date_from, date_to=date_to,
+            limit=limit, offset=offset,
+        )
     except Exception as exc:
         raise HTTPException(502, f"PACS server unavailable: {exc}") from exc
-
-    # Filter by search (patient name, study description, patient ID)
-    if search:
-        search_lower = search.lower()
-        all_studies = [
-            s for s in all_studies
-            if search_lower in s.get("PatientMainDicomTags", {}).get("PatientName", "").lower()
-            or search_lower in s.get("MainDicomTags", {}).get("StudyDescription", "").lower()
-            or search_lower in s.get("PatientMainDicomTags", {}).get("PatientID", "").lower()
-        ]
-
-    # Filter by modality (comma-separated, e.g. "CT,MR")
-    if modality:
-        mod_set = set(m.strip().upper() for m in modality.split(",") if m.strip())
-        all_studies = [
-            s for s in all_studies
-            if mod_set & set(s.get("MainDicomTags", {}).get("ModalitiesInStudy", "").replace("\\", "/").split("/"))
-        ]
-
-    # Filter by date range (YYYYMMDD format)
-    if date_from:
-        all_studies = [
-            s for s in all_studies
-            if s.get("MainDicomTags", {}).get("StudyDate", "") >= date_from
-        ]
-    if date_to:
-        all_studies = [
-            s for s in all_studies
-            if s.get("MainDicomTags", {}).get("StudyDate", "") <= date_to
-        ]
-
-    # Sort by StudyDate descending (most recent first)
-    all_studies.sort(
-        key=lambda s: s.get("MainDicomTags", {}).get("StudyDate", ""),
-        reverse=True,
-    )
-
-    total = len(all_studies)
-    page = all_studies[offset:offset + limit]
 
     return {"items": page, "total": total}
 

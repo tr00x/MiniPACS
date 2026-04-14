@@ -19,25 +19,10 @@ async def list_patients(
 ):
     await log_audit("list_patients", user_id=user["id"], ip_address=request.client.host)
 
-    # Fetch all patients expanded (manageable for a clinic-scale dataset)
     try:
-        all_patients = await orthanc.get_patients()
+        page, total = await orthanc.find_patients(search=search or "", limit=limit, offset=offset)
     except Exception as exc:
         raise HTTPException(502, f"PACS server unavailable: {exc}") from exc
-
-    # Server-side search filter
-    if search:
-        search_lower = search.lower()
-        all_patients = [
-            p for p in all_patients
-            if search_lower in str(p.get("MainDicomTags", {}).get("PatientName", "")).lower()
-            or search_lower in str(p.get("MainDicomTags", {}).get("PatientID", "")).lower()
-        ]
-
-    total = len(all_patients)
-
-    # Paginate BEFORE enriching — only enrich the visible page
-    page = all_patients[offset:offset + limit]
 
     # Enrich with last study info for each patient in the page
     async def enrich_last_study(patient: dict) -> dict:
@@ -48,7 +33,6 @@ async def list_patients(
             last_study = await orthanc.get_study(study_ids[-1])
             if last_study:
                 tags = last_study.get("MainDicomTags", {})
-                # Enrich modality from series if missing
                 if not tags.get("ModalitiesInStudy"):
                     series_ids = last_study.get("Series", [])
                     if series_ids:
