@@ -20,7 +20,8 @@ COPY --from=build /app/dist /usr/share/nginx/html
 COPY ohif-dist/ /usr/share/nginx/ohif/
 COPY ohif-config/minipacs.js /usr/share/nginx/ohif/app-config.js
 COPY ohif-config/minipacs-brand.css /usr/share/nginx/ohif/minipacs-brand.css
-RUN sed -i 's|</head>|<link href="/ohif/minipacs-brand.css" rel="stylesheet"></head>|' /usr/share/nginx/ohif/index.html
+RUN sed -i 's|</head>|<link href="/ohif/minipacs-brand.css" rel="stylesheet"></head>|' /usr/share/nginx/ohif/index.html && \
+    sed -i 's|<head>|<head><script>window.__filename="";window.__dirname="";globalThis.__filename="";globalThis.__dirname="";</script>|' /usr/share/nginx/ohif/index.html
 
 # Copy nginx templates (dev with TLS, prod HTTP-only for CF Tunnel)
 COPY nginx/nginx-docker.conf /etc/nginx/templates/nginx-dev.conf.template

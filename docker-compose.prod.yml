@@ -61,6 +61,8 @@ services:
     command: tunnel run
     environment:
       TUNNEL_TOKEN: "${CF_TUNNEL_TOKEN}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - frontend
 
