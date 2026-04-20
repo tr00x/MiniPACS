@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useStudies } from "@/hooks/queries";
+import { useStudies, usePrefetchStudyFull, usePrefetchPatientFull } from "@/hooks/queries";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
 import { TableSkeleton } from "@/components/TableSkeleton";
@@ -50,6 +50,8 @@ const getDateRange = (preset: DatePreset): { from: string; to: string } | null =
 
 export function StudiesPage() {
   const navigate = useNavigate();
+  const prefetchStudy = usePrefetchStudyFull();
+  const prefetchPatient = usePrefetchPatientFull();
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [modFilter, setModFilter] = useState("");
@@ -236,6 +238,7 @@ export function StudiesPage() {
                     key={s.ID}
                     className="cursor-pointer hover:bg-accent/50"
                     onClick={() => navigate(`/studies/${s.ID}`)}
+                    onMouseEnter={() => prefetchStudy(s.ID)}
                   >
                     <TableCell>
                       <span className="font-medium">{formatDicomDate(tag(s, "StudyDate"))}</span>
@@ -247,6 +250,10 @@ export function StudiesPage() {
                           onClick={(e) => {
                             e.stopPropagation();
                             navigate(`/patients/${s.ParentPatient}`);
+                          }}
+                          onMouseEnter={(e) => {
+                            e.stopPropagation();
+                            prefetchPatient(s.ParentPatient);
                           }}
                         >
                           {formatDicomName(ptag(s, "PatientName"))}

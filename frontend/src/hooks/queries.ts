@@ -147,6 +147,35 @@ export function useReports(studyId: string | undefined) {
   });
 }
 
+// ---------- Prefetch helpers (hover-to-warm) ----------
+// When user hovers a row, kick off the detail fetch. By the time the click
+// lands (100-300ms reaction), the backend cache is warm and the page paints
+// instantly. Uses staleTime so repeated hovers in the same second don't spam.
+
+export function usePrefetchStudyFull() {
+  const qc = useQueryClient();
+  return (id: string) => {
+    if (!id) return;
+    qc.prefetchQuery({
+      queryKey: qk.study(id),
+      queryFn: () => get<unknown>(`/studies/${id}/full`),
+      staleTime: 30_000,
+    });
+  };
+}
+
+export function usePrefetchPatientFull() {
+  const qc = useQueryClient();
+  return (id: string) => {
+    if (!id) return;
+    qc.prefetchQuery({
+      queryKey: qk.patient(id),
+      queryFn: () => get<unknown>(`/patients/${id}/full`),
+      staleTime: 30_000,
+    });
+  };
+}
+
 // ---------- Invalidation helpers ----------
 // All invalidations here use PREFIX match (default react-query behavior): e.g.
 // invalidate.studies() busts ["studies"], ["studies",{limit:50,...}] and so on.
