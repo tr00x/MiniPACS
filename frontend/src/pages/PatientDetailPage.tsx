@@ -92,23 +92,15 @@ export function PatientDetailPage() {
     setLoading(true);
     setError(null);
 
-    Promise.all([
-      api.get(`/patients/${id}`, { signal: ctrl.signal }),
-      api.get("/shares", { params: { patient_id: id }, signal: ctrl.signal }),
-    ])
-      .then(async ([patientRes, sharesRes]) => {
-        setPatient(patientRes.data.patient);
-        const patientStudies: Study[] = patientRes.data.studies;
-        setStudies(patientStudies);
-        setShares(sharesRes.data);
-        const studyIds = patientStudies.map((s: Study) => s.ID);
-        const transferResults = await Promise.all(
-          studyIds.map((sid: string) =>
-            api.get("/transfers", { params: { study_id: sid }, signal: ctrl.signal })
-              .catch(() => ({ data: [] }))
-          )
-        );
-        setTransfers(transferResults.flatMap((r) => r.data.items ?? r.data));
+    // Single aggregate call — backend returns patient + studies + shares
+    // + ALL transfers in one shot. Replaces the old 1+1+N fan-out.
+    api
+      .get(`/patients/${id}/full`, { signal: ctrl.signal })
+      .then(({ data }) => {
+        setPatient(data.patient);
+        setStudies(data.studies);
+        setShares(Array.isArray(data.shares) ? data.shares : []);
+        setTransfers(Array.isArray(data.transfers) ? data.transfers : []);
       })
       .catch((err) => {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {

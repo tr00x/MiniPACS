@@ -116,18 +116,15 @@ export function StudyDetailPage() {
     setLoading(true);
     setError(null);
 
-    Promise.all([
-      api.get(`/studies/${id}`, { signal: ctrl.signal }),
-      api.get("/pacs-nodes", { signal: ctrl.signal }),
-      api.get("/viewers", { signal: ctrl.signal }),
-    ])
-      .then(([studyRes, nodesRes, viewersRes]) => {
-        setStudy(studyRes.data.study);
-        setSeries(studyRes.data.series);
-        setPacsNodes(nodesRes.data);
-        setViewers(viewersRes.data.filter((v: Viewer) => v.is_enabled));
-        // Fetch reports for this study
-        api.get("/reports", { params: { study_id: id } }).then(({ data }) => setReports(data)).catch(() => {});
+    // Single aggregate — study + series + pacs_nodes + viewers + reports.
+    api
+      .get(`/studies/${id}/full`, { signal: ctrl.signal })
+      .then(({ data }) => {
+        setStudy(data.study);
+        setSeries(data.series);
+        setPacsNodes(data.pacs_nodes);
+        setViewers(data.viewers); // backend already filters is_enabled
+        setReports(data.reports);
       })
       .catch((err) => {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {

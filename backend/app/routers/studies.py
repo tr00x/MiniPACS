@@ -1,9 +1,12 @@
+import asyncio
 import io
 import zipfile as zipfile_mod
 
+import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from app.database import get_db
 from app.routers.auth import get_current_user
 from app.services import orthanc
 from app.middleware.audit import log_audit
@@ -63,6 +66,70 @@ async def get_study(
         if not tags.get("NumberOfSeriesRelatedInstances"):
             tags["NumberOfSeriesRelatedInstances"] = str(len(s.get("Instances", [])))
     return {"study": study, "series": series}
+
+
+@router.get("/{study_id}/full")
+async def get_study_full(
+    study_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """One-shot bundle for StudyDetailPage.
+
+    Collapses 4 separate calls (study, pacs-nodes, viewers, reports) that the
+    Study detail UI needs on open into one round-trip.
+    """
+    study, series = await asyncio.gather(
+        orthanc.get_study(study_id),
+        orthanc.get_study_series(study_id),
+    )
+    if study is None:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    await log_audit("view_study", "study", study_id, user_id=user["id"], ip_address=request.client.host)
+
+    # Derive ModalitiesInStudy from series if missing (reuse existing logic).
+    study_tags = study.get("MainDicomTags", {})
+    if not study_tags.get("ModalitiesInStudy"):
+        modalities = {s.get("MainDicomTags", {}).get("Modality") for s in series}
+        modalities.discard(None)
+        if modalities:
+            study_tags["ModalitiesInStudy"] = "/".join(sorted(modalities))
+    for s in series:
+        tags = s.get("MainDicomTags", {})
+        if not tags.get("NumberOfSeriesRelatedInstances"):
+            tags["NumberOfSeriesRelatedInstances"] = str(len(s.get("Instances", [])))
+
+    # PACS nodes, viewers, reports — all from SQLite, sequential on one
+    # connection is fine (these are sub-millisecond).
+    cur = await db.execute(
+        "SELECT id, name, ae_title, ip, port, description, is_active, last_echo_at "
+        "FROM pacs_nodes ORDER BY name"
+    )
+    pacs_nodes = [dict(r) for r in await cur.fetchall()]
+
+    cur = await db.execute(
+        "SELECT id, name, icon, url_scheme, is_enabled, sort_order "
+        "FROM external_viewers WHERE is_enabled = 1 ORDER BY sort_order, name"
+    )
+    viewers = [dict(r) for r in await cur.fetchall()]
+
+    cur = await db.execute(
+        "SELECT id, orthanc_study_id, title, report_type, content, filename, "
+        "created_by, created_at "
+        "FROM study_reports WHERE orthanc_study_id = ? ORDER BY created_at DESC",
+        (study_id,),
+    )
+    reports = [dict(r) for r in await cur.fetchall()]
+
+    return {
+        "study": study,
+        "series": series,
+        "pacs_nodes": pacs_nodes,
+        "viewers": viewers,
+        "reports": reports,
+    }
 
 
 @router.get("/{study_id}/series/{series_id}")
