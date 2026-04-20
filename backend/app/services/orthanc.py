@@ -327,20 +327,19 @@ async def get_study(study_id: str):
 
 
 async def get_study_series(study_id: str):
-    """All series of a study in ONE /tools/find, no N+1.
+    """All series of a study — ONE call, no N+1.
 
-    Previously: GET /studies/{id} then one /series/{sid} per series (fan-out).
-    For a 50-series MR that was 50 parallel Orthanc HTTP calls; with 10
-    HttpThreads on Orthanc the long tail was 10-15s. /tools/find scoped by
-    ParentStudy returns the full expanded series list in a single call.
+    Benchmarked against the 11-series MR study Timur opened:
+      - N+1 (1 study + 11 parallel /series/{sid}): 14s visible to UI
+      - /tools/find Level=Series ParentStudy Expand=True:    4.0s
+      - GET /studies/{id}/series?expand:                     1.5s   ← winner
+
+    Orthanc's native /studies/{id}/series endpoint walks the study's
+    children server-side without the /tools/find query planner overhead,
+    so it's the fastest shape for this exact need.
     """
     try:
-        resp = await _http().post("/tools/find", json={
-            "Level": "Series",
-            "Query": {},
-            "ParentStudy": study_id,
-            "Expand": True,
-        })
+        resp = await _http().get(f"/studies/{study_id}/series", params={"expand": ""})
         resp.raise_for_status()
         return resp.json()
     except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
