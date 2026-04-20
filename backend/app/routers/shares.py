@@ -73,7 +73,7 @@ async def create_share(
 
     await log_audit(
         "create_share", "share", str(share_id),
-        user_id=user["id"], ip_address=request.client.host,
+        user_id=user["id"], ip_address=request.client.host, wait=True,
     )
 
     cursor = await db.execute("SELECT * FROM patient_shares WHERE id = ?", (share_id,))
@@ -121,7 +121,7 @@ async def update_share(
 
     await log_audit(
         "update_share", "share", str(share_id),
-        user_id=user["id"], ip_address=request.client.host,
+        user_id=user["id"], ip_address=request.client.host, wait=True,
     )
 
     cursor = await db.execute("SELECT * FROM patient_shares WHERE id = ?", (share_id,))
@@ -150,7 +150,7 @@ async def revoke_share(
 
     await log_audit(
         "revoke_share", "share", str(share_id),
-        user_id=user["id"], ip_address=request.client.host,
+        user_id=user["id"], ip_address=request.client.host, wait=True,
     )
 
     return {"message": "Share revoked"}
@@ -283,7 +283,7 @@ async def patient_portal(
 
     await log_audit(
         "patient_portal_view", "share", str(share["id"]),
-        patient_token=token, ip_address=request.client.host,
+        patient_token=token, ip_address=request.client.host, wait=True,
     )
 
     # Fetch patient data and studies from Orthanc
@@ -331,7 +331,7 @@ async def patient_portal_download(
 
     await log_audit(
         "patient_portal_download", "study", study_id,
-        patient_token=token, ip_address=request.client.host,
+        patient_token=token, ip_address=request.client.host, wait=True,
     )
 
     return StreamingResponse(
@@ -374,7 +374,7 @@ async def patient_portal_download_series_images(
 
     await log_audit(
         "patient_portal_download_images", "series", series_id,
-        patient_token=token, ip_address=request.client.host,
+        patient_token=token, ip_address=request.client.host, wait=True,
     )
 
     series_data = await orthanc.get_series(series_id)

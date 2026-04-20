@@ -111,8 +111,11 @@ async def _db_counts(db: aiosqlite.Connection):
 
 async def _recent_transfers(db: aiosqlite.Connection):
     cur = await db.execute(
-        "SELECT id, orthanc_study_id, pacs_node_name, pacs_node_ae_title, status, created_at "
-        "FROM transfer_log ORDER BY created_at DESC LIMIT 5"
+        "SELECT t.id, t.orthanc_study_id, "
+        "n.name AS pacs_node_name, n.ae_title AS pacs_node_ae_title, "
+        "t.status, t.created_at "
+        "FROM transfer_log t LEFT JOIN pacs_nodes n ON n.id = t.pacs_node_id "
+        "ORDER BY t.created_at DESC LIMIT 5"
     )
     rows = await cur.fetchall()
     return [dict(r) for r in rows]

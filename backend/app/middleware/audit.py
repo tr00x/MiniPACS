@@ -8,6 +8,10 @@ from app.database import DB_PATH
 
 _log = logging.getLogger(__name__)
 
+# Hold strong refs to in-flight background audit writes so the GC doesn't
+# collect them mid-commit (CPython emits a RuntimeWarning when this happens).
+_pending_bg_tasks: set[asyncio.Task] = set()
+
 
 async def _write_audit(
     action: str,
@@ -55,4 +59,6 @@ async def log_audit(
         except Exception:
             _log.exception("audit write failed for action=%s", action)
 
-    asyncio.create_task(_bg())
+    task = asyncio.create_task(_bg())
+    _pending_bg_tasks.add(task)
+    task.add_done_callback(_pending_bg_tasks.discard)

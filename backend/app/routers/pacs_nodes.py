@@ -55,7 +55,7 @@ async def create_pacs_node(
 
     await log_audit(
         "create_pacs_node", "pacs_node", str(node_id),
-        user_id=user["id"], ip_address=request.client.host,
+        user_id=user["id"], ip_address=request.client.host, wait=True,
     )
 
     cursor = await db.execute("SELECT * FROM pacs_nodes WHERE id = ?", (node_id,))
@@ -113,7 +113,7 @@ async def update_pacs_node(
 
     await log_audit(
         "update_pacs_node", "pacs_node", str(node_id),
-        user_id=user["id"], ip_address=request.client.host,
+        user_id=user["id"], ip_address=request.client.host, wait=True,
     )
 
     cursor = await db.execute("SELECT * FROM pacs_nodes WHERE id = ?", (node_id,))
@@ -146,7 +146,7 @@ async def delete_pacs_node(
 
     await log_audit(
         "delete_pacs_node", "pacs_node", str(node_id),
-        user_id=user["id"], ip_address=request.client.host,
+        user_id=user["id"], ip_address=request.client.host, wait=True,
     )
 
 
@@ -174,7 +174,7 @@ async def echo_pacs_node(
 
     await log_audit(
         "echo_pacs_node", "pacs_node", str(node_id),
-        user_id=user["id"], ip_address=request.client.host,
+        user_id=user["id"], ip_address=request.client.host, wait=True,
     )
 
     return {"success": success, "node_id": node_id, "modality": modality}

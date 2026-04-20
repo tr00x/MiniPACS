@@ -109,7 +109,7 @@ async def create_transfer(
 
     await log_audit(
         "create_transfer", "transfer", str(transfer_id),
-        user_id=user["id"], ip_address=request.client.host,
+        user_id=user["id"], ip_address=request.client.host, wait=True,
     )
 
     # Return the created transfer with PACS node info
@@ -184,7 +184,7 @@ async def retry_transfer(
 
     await log_audit(
         "retry_transfer", "transfer", str(transfer_id),
-        user_id=user["id"], ip_address=request.client.host,
+        user_id=user["id"], ip_address=request.client.host, wait=True,
     )
 
     cursor = await db.execute(

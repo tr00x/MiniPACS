@@ -58,7 +58,7 @@ async def login(body: LoginRequest, request: Request, db: aiosqlite.Connection =
     cursor = await db.execute("SELECT * FROM users WHERE username = ?", (body.username,))
     user = await cursor.fetchone()
     if not user or not verify_password(body.password, user["password_hash"]):
-        await log_audit("login_failed", ip_address=ip)
+        await log_audit("login_failed", ip_address=ip, wait=True)
         raise HTTPException(401, "Invalid credentials")
 
     user = dict(user)
@@ -80,8 +80,13 @@ async def login(body: LoginRequest, request: Request, db: aiosqlite.Connection =
     )
 
 
+import asyncio as _asyncio
+
+# Hold strong refs so GC can't collect the warmup task mid-flight.
+_warmup_tasks: set = set()
+
+
 def _schedule_post_login_warmup():
-    import asyncio
     from app.services import orthanc as _orthanc
 
     async def _warm():
@@ -93,7 +98,9 @@ def _schedule_post_login_warmup():
         except Exception:
             pass
 
-    asyncio.create_task(_warm())
+    task = _asyncio.create_task(_warm())
+    _warmup_tasks.add(task)
+    task.add_done_callback(_warmup_tasks.discard)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -126,7 +133,7 @@ async def logout(
         (user["id"],),
     )
     await db.commit()
-    await log_audit("logout", user_id=user["id"], ip_address=request.client.host)
+    await log_audit("logout", user_id=user["id"], ip_address=request.client.host, wait=True)
     return {"status": "ok"}
 
 

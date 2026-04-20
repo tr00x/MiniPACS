@@ -14,7 +14,13 @@ _STUDIES_CACHE_TTL = 8.0
 _studies_cache: dict[tuple, tuple[float, list, int]] = {}
 _PATIENTS_CACHE_TTL = 8.0
 _patients_cache: dict[tuple, tuple[float, list, int]] = {}
-_STUDIES_CACHE_MAX = 32
+_STUDIES_CACHE_MAX = 32  # simple FIFO bound; small enough that lookup cost is trivial
+
+# Per-filter total cache — avoids counting all studies again on every page flip.
+# Keyed by filter tuple (no pagination params), so page 2/3/... all reuse the
+# total computed on first page. TTL matches the studies_cache.
+_studies_total_cache: dict[tuple, tuple[float, int]] = {}
+_patients_total_cache: dict[tuple, tuple[float, int]] = {}
 
 
 def _cache_get(cache: dict, key: tuple, ttl: float):
@@ -34,6 +40,8 @@ def invalidate_study_caches():
     """Call when studies change (C-STORE received, study deleted) to bust caches."""
     _studies_cache.clear()
     _patients_cache.clear()
+    _studies_total_cache.clear()
+    _patients_total_cache.clear()
 
 
 async def init_client():
@@ -80,10 +88,15 @@ async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
     except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
         raise Exception(f"PACS server unreachable: {exc}") from exc
 
-    # Avoid second full-scan when we clearly know total from first page.
+    filter_key = (search,)
+    total: int | None = None
     if offset == 0 and len(items) < limit:
         total = len(items)
-    elif offset == 0:
+    else:
+        hit = _patients_total_cache.get(filter_key)
+        if hit and time.time() - hit[0] < _PATIENTS_CACHE_TTL:
+            total = hit[1]
+    if total is None:
         try:
             count_resp = await _http().post("/tools/find", json={
                 "Level": "Patient",
@@ -93,9 +106,8 @@ async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
             count_resp.raise_for_status()
             total = len(count_resp.json())
         except Exception:
-            total = len(items)
-    else:
-        total = offset + len(items) + (limit if len(items) == limit else 0)
+            total = offset + len(items)
+    _patients_total_cache[filter_key] = (time.time(), total)
 
     _cache_put(_patients_cache, key, items, total)
     return items, total
@@ -136,11 +148,18 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
     except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
         raise Exception(f"PACS server unreachable: {exc}") from exc
 
-    # Total count: only fetch when we actually need it (first page or explicit total probe).
-    # For every other page we can infer from items length plus offset — avoids a second full scan.
+    # Total count — issued once per (filter) tuple and cached so subsequent
+    # pages do not lie to the pagination UI. Only skipped when the first page
+    # already contains everything.
+    filter_key = (search, modality, date_from, date_to)
+    total: int | None = None
     if offset == 0 and len(items) < limit:
         total = len(items)
-    elif offset == 0:
+    else:
+        hit = _studies_total_cache.get(filter_key)
+        if hit and time.time() - hit[0] < _STUDIES_CACHE_TTL:
+            total = hit[1]
+    if total is None:
         try:
             count_resp = await _http().post("/tools/find", json={
                 "Level": "Study",
@@ -150,10 +169,8 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
             count_resp.raise_for_status()
             total = len(count_resp.json())
         except Exception:
-            total = len(items)
-    else:
-        # Subsequent pages — we already know total from first page; approximate.
-        total = offset + len(items) + (limit if len(items) == limit else 0)
+            total = offset + len(items)
+    _studies_total_cache[filter_key] = (time.time(), total)
 
     items = _propagate_modalities(items)
     _cache_put(_studies_cache, key, items, total)
@@ -183,19 +200,41 @@ async def get_patient(patient_id: str):
 
 
 async def get_patient_studies(patient_id: str):
-    """All studies for a patient — single /tools/find call, no N+1."""
-    try:
-        resp = await _http().post("/tools/find", json={
-            "Level": "Study",
-            "Query": {"PatientID": ""},  # wildcard, filtered below by ParentPatient
-            "Expand": True,
-            "RequestedTags": ["ModalitiesInStudy"],
-        })
-        resp.raise_for_status()
-        all_studies = resp.json()
-    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-        raise Exception(f"PACS server unreachable: {exc}") from exc
-    studies = [s for s in all_studies if s.get("ParentPatient") == patient_id]
+    """All studies for a patient — scoped /tools/find, no N+1, no truncation.
+
+    Uses the patient's real DICOM PatientID tag to scope the search inside
+    Orthanc, so LimitFindResults (which caps global queries at 1000) cannot
+    hide later studies for patients with deep histories.
+    """
+    patient = await get_patient(patient_id)
+    if patient is None:
+        return []
+    dicom_patient_id = (patient.get("MainDicomTags") or {}).get("PatientID")
+
+    if dicom_patient_id:
+        try:
+            resp = await _http().post("/tools/find", json={
+                "Level": "Study",
+                "Query": {"PatientID": dicom_patient_id},
+                "Expand": True,
+                "RequestedTags": ["ModalitiesInStudy"],
+            })
+            resp.raise_for_status()
+            studies = resp.json()
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            raise Exception(f"PACS server unreachable: {exc}") from exc
+    else:
+        # Fallback: fetch each study individually via the parent patient's Studies[].
+        # Still bounded by the patient's own study count, no global cap involved.
+        study_ids = patient.get("Studies", [])
+
+        async def fetch(sid: str):
+            r = await _http().get(f"/studies/{sid}")
+            r.raise_for_status()
+            return r.json()
+
+        studies = list(await asyncio.gather(*[fetch(sid) for sid in study_ids]))
+
     return _propagate_modalities(studies)
 
 

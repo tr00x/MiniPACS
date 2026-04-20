@@ -40,7 +40,7 @@ async def create_viewer(
         resource_type="viewer",
         resource_id=str(viewer_id),
         user_id=user["id"],
-        ip_address=request.client.host if request.client else None,
+        ip_address=request.client.host if request.client else None, wait=True,
     )
     cur = await db.execute("SELECT * FROM external_viewers WHERE id = ?", (viewer_id,))
     return dict(await cur.fetchone())
@@ -84,7 +84,7 @@ async def update_viewer(
         resource_type="viewer",
         resource_id=str(viewer_id),
         user_id=user["id"],
-        ip_address=request.client.host if request.client else None,
+        ip_address=request.client.host if request.client else None, wait=True,
     )
     cur = await db.execute("SELECT * FROM external_viewers WHERE id = ?", (viewer_id,))
     return dict(await cur.fetchone())
@@ -109,6 +109,6 @@ async def delete_viewer(
         resource_type="viewer",
         resource_id=str(viewer_id),
         user_id=user["id"],
-        ip_address=request.client.host if request.client else None,
+        ip_address=request.client.host if request.client else None, wait=True,
     )
     return {"status": "deleted"}
