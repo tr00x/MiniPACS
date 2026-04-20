@@ -9,7 +9,7 @@ import { TableSkeleton } from "@/components/TableSkeleton";
 import { PageError } from "@/components/page-error";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
 import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ExternalLink } from "lucide-react";
-import { usePatients } from "@/hooks/queries";
+import { usePatients, usePrefetchPatientFull, usePrefetchStudyFull } from "@/hooks/queries";
 import { formatDicomName, formatDicomDate, calculateAge } from "@/lib/dicom";
 
 const PAGE_SIZE = 50;
@@ -35,6 +35,8 @@ type SortDir = "asc" | "desc";
 
 export function PatientsPage() {
   const navigate = useNavigate();
+  const prefetchPatient = usePrefetchPatientFull();
+  const prefetchStudy = usePrefetchStudyFull();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -165,7 +167,12 @@ export function PatientsPage() {
                   const modality = lastStudy?.ModalitiesInStudy || "";
                   const lastStudyId = p.Studies?.[p.Studies.length - 1];
                   return (
-                    <TableRow key={p.ID} className="cursor-pointer hover:bg-accent/50" onClick={() => navigate(`/patients/${p.ID}`)}>
+                    <TableRow
+                      key={p.ID}
+                      className="cursor-pointer hover:bg-accent/50"
+                      onClick={() => navigate(`/patients/${p.ID}`)}
+                      onMouseEnter={() => prefetchPatient(p.ID)}
+                    >
                       <TableCell>
                         <div>
                           <span className="font-medium">{formatDicomName(rawName)}</span>
@@ -216,6 +223,7 @@ export function PatientsPage() {
                             size="sm"
                             className="h-8 gap-1 text-xs"
                             onClick={(e) => { e.stopPropagation(); navigate(`/studies/${lastStudyId}`); }}
+                            onMouseEnter={(e) => { e.stopPropagation(); prefetchStudy(lastStudyId); }}
                             title="Open last study"
                           >
                             <ExternalLink className="h-3 w-3" />
