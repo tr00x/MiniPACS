@@ -10,10 +10,12 @@ COPY seed_demo.py .
 
 EXPOSE 8000
 
-# 2 workers with uvloop+httptools. Single worker serialized all request
-# handling on one event loop, so a burst of OHIF metadata calls blocked
-# worklist/dashboard traffic. 2 workers give us headroom for concurrent
-# UI + viewer usage. The 8s in-memory cache becomes per-worker — still
-# acceptable, TTL bridges the gap. `uvicorn[standard]` already pulls in
-# uvloop + httptools (in requirements.txt).
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--loop", "uvloop", "--http", "httptools"]
+# Single worker + uvloop + httptools. Previously tried --workers 2 for
+# parallelism, but each worker carried its OWN in-memory cache
+# (_studies_cache, _patients_cache, _cache) — so users got routed
+# round-robin between a warm and a cold worker, producing random
+# 10-30s tail latency on supposedly-cached endpoints. uvloop alone
+# gives us ~2x the throughput of asyncio default loop, which is
+# enough headroom for concurrent UI + OHIF metadata bursts. A shared
+# cache (Redis) is the proper fix for multi-worker, deferred.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--loop", "uvloop", "--http", "httptools"]
