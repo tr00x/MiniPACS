@@ -93,10 +93,13 @@ async def get_patient_full(
     # Fire audit in background — view action, doesn't need durability.
     await log_audit("view_patient", "patient", patient_id, user_id=user["id"], ip_address=request.client.host)
 
-    # Shares for this patient
+    # Shares for this patient. We return has_pin as a boolean instead of the
+    # bcrypt digest — the browser never needs the actual hash, and shipping it
+    # would be a pointless PHI-adjacent leak.
     cur = await db.execute(
         "SELECT id, orthanc_patient_id, token, is_active, view_count, created_at, "
-        "expires_at, first_viewed_at, last_viewed_at "
+        "expires_at, first_viewed_at, last_viewed_at, "
+        "(pin_hash IS NOT NULL AND pin_hash != '') AS has_pin "
         "FROM patient_shares WHERE orthanc_patient_id = ? ORDER BY created_at DESC",
         (patient_id,),
     )
