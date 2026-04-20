@@ -106,6 +106,17 @@ async def init_db():
                 created_by INTEGER REFERENCES users(id),
                 created_at TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE INDEX IF NOT EXISTS idx_study_reports_sid
+                ON study_reports(orthanc_study_id);
+            CREATE INDEX IF NOT EXISTS idx_patient_shares_pid
+                ON patient_shares(orthanc_patient_id);
+            CREATE INDEX IF NOT EXISTS idx_transfer_log_sid
+                ON transfer_log(orthanc_study_id);
+            CREATE INDEX IF NOT EXISTS idx_audit_log_user_time
+                ON audit_log(user_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_audit_log_time
+                ON audit_log(timestamp);
         """)
         await db.commit()
 

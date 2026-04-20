@@ -71,6 +71,12 @@ async def init_client():
         # HttpThreadsCount=50 upper bound.
         limits=httpx.Limits(max_connections=100, max_keepalive_connections=50, keepalive_expiry=60),
     )
+    # Prewarm: open one keepalive connection + BasicAuth handshake so the
+    # first user request doesn't pay TCP+auth setup (~50-150ms saved on cold).
+    try:
+        await _client.get("/system", timeout=5.0)
+    except Exception as exc:
+        _log.warning("Orthanc prewarm GET /system failed: %s (continuing)", exc)
 
 
 async def close_client():
