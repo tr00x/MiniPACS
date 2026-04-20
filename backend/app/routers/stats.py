@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends
 import aiosqlite
@@ -7,13 +8,22 @@ from app.services import orthanc
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
+# Dashboard values don't need to be fresh to the second — cache for 15s.
+_STATS_TTL = 15.0
+_stats_cache: dict[str, tuple[float, dict]] = {}
+_HEALTH_TTL = 15.0
+_health_cache: dict[str, tuple[float, dict]] = {}
+
 
 @router.get("")
 async def get_stats(
     user: dict = Depends(get_current_user),
     db: aiosqlite.Connection = Depends(get_db),
 ):
-    # Get patient and study counts from Orthanc
+    cached = _stats_cache.get("all")
+    if cached and time.time() - cached[0] < _STATS_TTL:
+        return cached[1]
+
     patients_total = 0
     studies_total = 0
     studies_today = 0
@@ -24,7 +34,6 @@ async def get_stats(
             patients_total = data.get("CountPatients", 0)
             studies_total = data.get("CountStudies", 0)
 
-        # Studies today - get today's studies from Orthanc
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
         r2 = await orthanc._http().post("/tools/find", json={
             "Level": "Study",
@@ -35,7 +44,6 @@ async def get_stats(
     except Exception:
         pass
 
-    # Transfer stats from SQLite
     now = datetime.now(timezone.utc)
     week_ago = (now - timedelta(days=7)).isoformat()
 
@@ -54,7 +62,7 @@ async def get_stats(
     )
     unviewed_shares = (await cursor.fetchone())[0]
 
-    return {
+    result = {
         "patients_total": patients_total,
         "studies_total": studies_total,
         "studies_today": studies_today,
@@ -62,6 +70,8 @@ async def get_stats(
         "failed_transfers": failed_transfers,
         "unviewed_shares": unviewed_shares,
     }
+    _stats_cache["all"] = (time.time(), result)
+    return result
 
 
 def _format_storage_size(dicom_size) -> str:
@@ -84,6 +94,10 @@ def _format_storage_size(dicom_size) -> str:
 async def get_system_health(
     user: dict = Depends(get_current_user),
 ):
+    cached = _health_cache.get("all")
+    if cached and time.time() - cached[0] < _HEALTH_TTL:
+        return cached[1]
+
     orthanc_info = {"status": "offline"}
     try:
         r_sys = await orthanc._http().get("/system")
@@ -136,7 +150,9 @@ async def get_system_health(
     except Exception:
         pass
 
-    return {
+    result = {
         "orthanc": orthanc_info,
         "last_received": last_received,
     }
+    _health_cache["all"] = (time.time(), result)
+    return result
