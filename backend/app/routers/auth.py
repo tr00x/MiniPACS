@@ -67,12 +67,33 @@ async def login(body: LoginRequest, request: Request, db: aiosqlite.Connection =
         (datetime.now(timezone.utc).isoformat(), user["id"]),
     )
     await db.commit()
-    await log_audit("login", user_id=user["id"], ip_address=ip)
+    await log_audit("login", user_id=user["id"], ip_address=ip, wait=True)
+
+    # Warm up Orthanc SQLite cache in the background so the first worklist/dashboard
+    # query after this login lands on a hot index. The user's browser is still
+    # rendering the post-login redirect while this runs — it does not block login.
+    _schedule_post_login_warmup()
 
     return TokenResponse(
         access_token=create_access_token(user["id"], user["token_version"]),
         refresh_token=create_refresh_token(user["id"], user["token_version"]),
     )
+
+
+def _schedule_post_login_warmup():
+    import asyncio
+    from app.services import orthanc as _orthanc
+
+    async def _warm():
+        try:
+            # Populate the backend study cache (fills page cache + in-memory TTL
+            # simultaneously). Failures are silent — warmup is best-effort.
+            await _orthanc.find_studies(limit=50, offset=0)
+            await _orthanc.find_patients(limit=100, offset=0)
+        except Exception:
+            pass
+
+    asyncio.create_task(_warm())
 
 
 @router.post("/refresh", response_model=TokenResponse)
