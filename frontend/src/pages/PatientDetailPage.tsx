@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
+import { usePatientFull, useInvalidate } from "@/hooks/queries";
 import { formatDicomName, formatDicomDate, formatTimestamp, calculateAge, getShareStatus, EXPIRY_PRESETS } from "@/lib/dicom";
 
 interface PatientData {
@@ -63,12 +64,16 @@ interface Transfer {
 
 export function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [patient, setPatient] = useState<PatientData | null>(null);
-  const [studies, setStudies] = useState<Study[]>([]);
-  const [shares, setShares] = useState<Share[]>([]);
-  const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const patientFullQuery = usePatientFull(id);
+  const patient: PatientData | null = (patientFullQuery.data?.patient as PatientData) ?? null;
+  const studies: Study[] = (patientFullQuery.data?.studies as Study[]) ?? [];
+  const shares: Share[] = (patientFullQuery.data?.shares as Share[]) ?? [];
+  const transfers: Transfer[] = (patientFullQuery.data?.transfers as Transfer[]) ?? [];
+  const loading = patientFullQuery.isLoading;
+  const error = patientFullQuery.error
+    ? ((patientFullQuery.error as any)?.response?.data?.detail ?? (patientFullQuery.error as any)?.message ?? "Failed to load patient")
+    : null;
+  const invalidate = useInvalidate();
   const [copiedToken, setCopiedToken] = useState<number | null>(null);
 
   // Share dialog — 3-step flow
@@ -86,31 +91,7 @@ export function PatientDetailPage() {
   const [revokingShare, setRevokingShare] = useState<number | null>(null);
   const [transfersOpen, setTransfersOpen] = useState(false);
 
-  useEffect(() => {
-    if (!id) return;
-    const ctrl = new AbortController();
-    setLoading(true);
-    setError(null);
-
-    // Single aggregate call — backend returns patient + studies + shares
-    // + ALL transfers in one shot. Replaces the old 1+1+N fan-out.
-    api
-      .get(`/patients/${id}/full`, { signal: ctrl.signal })
-      .then(({ data }) => {
-        setPatient(data.patient);
-        setStudies(data.studies);
-        setShares(Array.isArray(data.shares) ? data.shares : []);
-        setTransfers(Array.isArray(data.transfers) ? data.transfers : []);
-      })
-      .catch((err) => {
-        if (err.name !== "CanceledError" && err.name !== "AbortError") {
-          setError(err?.response?.data?.detail ?? err.message ?? "Failed to load patient");
-        }
-      })
-      .finally(() => setLoading(false));
-
-    return () => ctrl.abort();
-  }, [id]);
+  // Data loaded via usePatientFull above.
 
   if (!id) {
     return <p className="text-muted-foreground">Invalid patient ID</p>;
@@ -153,9 +134,7 @@ export function PatientDetailPage() {
       const token = data?.token ?? data?.share_token ?? data?.id ?? "";
       setShareLink(token ? `${window.location.origin}/patient-portal/${token}` : "");
       setShareStep("result");
-      // Refresh shares list
-      const sharesRes = await api.get("/shares", { params: { patient_id: id } });
-      setShares(sharesRes.data.items ?? sharesRes.data);
+      if (id) invalidate.patient(id);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to create share");
@@ -178,7 +157,7 @@ export function PatientDetailPage() {
       await api.put(`/shares/${editShare.id}`, {
         expires_at: editExpiry ? new Date(editExpiry).toISOString() : null,
       });
-      setShares(shares.map((s) => s.id === editShare.id ? { ...s, expires_at: editExpiry ? new Date(editExpiry).toISOString() : null } : s));
+      if (id) invalidate.patient(id);
       setEditShare(null);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -192,10 +171,10 @@ export function PatientDetailPage() {
     setRevokingShare(shareId);
     try {
       await api.delete(`/shares/${shareId}`);
-      setShares(shares.map((s) => s.id === shareId ? { ...s, is_active: 0 } : s));
+      if (id) invalidate.patient(id);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to revoke share");
+      toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to revoke share");
     } finally {
       setRevokingShare(null);
     }

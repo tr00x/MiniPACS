@@ -20,6 +20,7 @@ import { EXPIRY_PRESETS } from "@/lib/dicom";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import api, { getErrorMessage } from "@/lib/api";
+import { useStudyFull, useInvalidate } from "@/hooks/queries";
 import { PageLoader } from "@/components/PageLoader";
 import { formatDicomName, formatDicomDate, VIEWER_LOGOS } from "@/lib/dicom";
 import { toast } from "sonner";
@@ -71,12 +72,18 @@ export function StudyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const viewerContainerRef = useRef<HTMLDivElement>(null);
-  const [study, setStudy] = useState<StudyData | null>(null);
-  const [series, setSeries] = useState<Series[]>([]);
-  const [pacsNodes, setPacsNodes] = useState<PacsNode[]>([]);
-  const [viewers, setViewers] = useState<Viewer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const studyFullQuery = useStudyFull(id);
+  const invalidate = useInvalidate();
+  const study: StudyData | null = (studyFullQuery.data?.study as StudyData) ?? null;
+  const series: Series[] = (studyFullQuery.data?.series as Series[]) ?? [];
+  const pacsNodes: PacsNode[] = (studyFullQuery.data?.pacs_nodes as PacsNode[]) ?? [];
+  const viewers: Viewer[] = (studyFullQuery.data?.viewers as Viewer[]) ?? [];
+  const reports: Array<{ id: number; title: string; report_type: string; content: string; filename: string | null; created_by_username: string | null; created_at: string; }> =
+    (studyFullQuery.data?.reports as any) ?? [];
+  const loading = studyFullQuery.isLoading;
+  const error = studyFullQuery.error
+    ? ((studyFullQuery.error as any)?.response?.data?.detail ?? (studyFullQuery.error as any)?.message ?? "Failed to load study")
+    : null;
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string>("");
   const [sendError, setSendError] = useState<string | null>(null);
@@ -96,11 +103,7 @@ export function StudyDetailPage() {
   const [sharePin, setSharePin] = useState("");
   // Download dialog
   const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
-  // Reports
-  const [reports, setReports] = useState<Array<{
-    id: number; title: string; report_type: string; content: string;
-    filename: string | null; created_by_username: string | null; created_at: string;
-  }>>([]);
+  // reports state moved to studyFullQuery above
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [reportType, setReportType] = useState<"text" | "pdf">("text");
   const [reportTitle, setReportTitle] = useState("");
@@ -110,31 +113,7 @@ export function StudyDetailPage() {
   const [viewingReport, setViewingReport] = useState<number | null>(null);
   const [pdfViewUrl, setPdfViewUrl] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!id) return;
-    const ctrl = new AbortController();
-    setLoading(true);
-    setError(null);
-
-    // Single aggregate — study + series + pacs_nodes + viewers + reports.
-    api
-      .get(`/studies/${id}/full`, { signal: ctrl.signal })
-      .then(({ data }) => {
-        setStudy(data.study);
-        setSeries(data.series);
-        setPacsNodes(data.pacs_nodes);
-        setViewers(data.viewers); // backend already filters is_enabled
-        setReports(data.reports);
-      })
-      .catch((err) => {
-        if (err.name !== "CanceledError" && err.name !== "AbortError") {
-          setError(err?.response?.data?.detail ?? err.message ?? "Failed to load study");
-        }
-      })
-      .finally(() => setLoading(false));
-
-    return () => ctrl.abort();
-  }, [id]);
+  // Data loaded via useStudyFull above; no mount-time fetch needed.
 
   // Listen for fullscreen changes (user pressing Esc)
   useEffect(() => {
@@ -308,8 +287,7 @@ export function StudyDetailPage() {
         content,
         filename,
       });
-      const { data } = await api.get("/reports", { params: { study_id: id } });
-      setReports(data);
+      if (id) invalidate.study(id);
       setReportDialogOpen(false);
       setReportTitle("");
       setReportContent("");
@@ -581,7 +559,7 @@ export function StudyDetailPage() {
                         {viewingReport === r.id ? "Hide" : "View"}
                       </Button>
                       <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={async () => {
-                        try { await api.delete(`/reports/${r.id}`); setReports(reports.filter(rr => rr.id !== r.id)); toast.success("Report deleted"); } catch { toast.error("Failed to delete"); }
+                        try { await api.delete(`/reports/${r.id}`); if (id) invalidate.study(id); toast.success("Report deleted"); } catch { toast.error("Failed to delete"); }
                       }}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
