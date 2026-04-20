@@ -80,10 +80,13 @@ async def get_study_full(
     Collapses 4 separate calls (study, pacs-nodes, viewers, reports) that the
     Study detail UI needs on open into one round-trip.
     """
-    study, series = await asyncio.gather(
-        orthanc.get_study(study_id),
-        orthanc.get_study_series(study_id),
-    )
+    try:
+        study, series = await asyncio.gather(
+            orthanc.get_study(study_id),
+            orthanc.get_study_series(study_id),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"PACS server unavailable: {exc}") from exc
     if study is None:
         raise HTTPException(status_code=404, detail="Study not found")
 

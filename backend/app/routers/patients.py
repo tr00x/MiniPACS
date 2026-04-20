@@ -83,10 +83,13 @@ async def get_patient_full(
     with a single round-trip. Transfers for every study of this patient are
     fetched in one SQLite IN(...) query.
     """
-    patient, studies = await asyncio.gather(
-        orthanc.get_patient(patient_id),
-        orthanc.get_patient_studies(patient_id),
-    )
+    try:
+        patient, studies = await asyncio.gather(
+            orthanc.get_patient(patient_id),
+            orthanc.get_patient_studies(patient_id),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"PACS server unavailable: {exc}") from exc
     if patient is None:
         raise HTTPException(status_code=404, detail="Patient not found")
 

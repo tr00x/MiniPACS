@@ -30,10 +30,23 @@ def _cache_get(cache: dict, key: tuple, ttl: float):
     return None
 
 
+def _cache_get_stale(cache: dict, key: tuple):
+    """Return whatever is in cache regardless of TTL — used as stale-while-error
+    fallback so a transient Orthanc stall doesn't produce a 502 in the UI."""
+    hit = cache.get(key)
+    if hit:
+        return hit[1:]
+    return None
+
+
 def _cache_put(cache: dict, key: tuple, *values):
     cache[key] = (time.time(),) + values
     if len(cache) > _STUDIES_CACHE_MAX:
         cache.pop(next(iter(cache)))
+
+
+import logging as _logging
+_log = _logging.getLogger(__name__)
 
 
 def invalidate_study_caches():
@@ -89,7 +102,15 @@ async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
         })
         resp.raise_for_status()
         items = resp.json()
-    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+    except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
+        # Stale-while-error: if Orthanc is slow or timing out, return the last
+        # known good cache entry for this key (past TTL) so the UI keeps
+        # rendering rows instead of flashing a 502. The prewarm cron will
+        # restore live data on the next tick.
+        stale = _cache_get_stale(_patients_cache, key)
+        if stale is not None:
+            _log.warning("find_patients: serving stale cache (Orthanc error: %s)", exc)
+            return stale
         raise Exception(f"PACS server unreachable: {exc}") from exc
 
     filter_key = (search,)
@@ -149,7 +170,13 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
         })
         resp.raise_for_status()
         items = resp.json()
-    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+    except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
+        # Stale-while-error — same rationale as find_patients: never 502 the UI
+        # just because Orthanc is briefly cold.
+        stale = _cache_get_stale(_studies_cache, key)
+        if stale is not None:
+            _log.warning("find_studies: serving stale cache (Orthanc error: %s)", exc)
+            return stale
         raise Exception(f"PACS server unreachable: {exc}") from exc
 
     # Total count — issued once per (filter) tuple and cached so subsequent
@@ -209,6 +236,10 @@ async def get_patient_studies(patient_id: str):
     Uses the patient's real DICOM PatientID tag to scope the search inside
     Orthanc, so LimitFindResults (which caps global queries at 1000) cannot
     hide later studies for patients with deep histories.
+
+    On Orthanc timeout/error we return the empty list and let the caller keep
+    serving the patient record. Better to show "0 studies, try again" than to
+    500 the whole patient-detail page.
     """
     patient = await get_patient(patient_id)
     if patient is None:
@@ -225,8 +256,9 @@ async def get_patient_studies(patient_id: str):
             })
             resp.raise_for_status()
             studies = resp.json()
-        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-            raise Exception(f"PACS server unreachable: {exc}") from exc
+        except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
+            _log.warning("get_patient_studies: Orthanc error for %s — returning []: %s", patient_id, exc)
+            studies = []
     else:
         # Fallback: fetch each study individually via the parent patient's Studies[].
         # Still bounded by the patient's own study count, no global cap involved.
@@ -237,7 +269,11 @@ async def get_patient_studies(patient_id: str):
             r.raise_for_status()
             return r.json()
 
-        studies = list(await asyncio.gather(*[fetch(sid) for sid in study_ids]))
+        try:
+            studies = list(await asyncio.gather(*[fetch(sid) for sid in study_ids]))
+        except Exception as exc:
+            _log.warning("get_patient_studies fallback: Orthanc error for %s — returning []: %s", patient_id, exc)
+            studies = []
 
     return _propagate_modalities(studies)
 
