@@ -41,7 +41,7 @@ export function useDashboard() {
         unviewed_shares: number;
       };
       system_health: {
-        orthanc: { status: "online" | "offline"; version?: string; storage_size?: string; dicom_aet?: string; count_instances?: number };
+        orthanc: { status: "online" | "offline"; version?: string; storage_size?: string; dicom_aet?: string; count_studies?: number; count_instances?: number };
         last_received: string | null;
       };
       recent_transfers: any[];

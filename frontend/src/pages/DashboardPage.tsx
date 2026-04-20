@@ -8,27 +8,6 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { useDashboard } from "@/hooks/queries";
 import { formatDicomName, formatTimestamp } from "@/lib/dicom";
 
-interface ApiStats {
-  patients_total: number;
-  studies_total: number;
-  studies_today: number;
-  transfers_week: number;
-  failed_transfers: number;
-  unviewed_shares: number;
-}
-
-interface SystemHealth {
-  orthanc: {
-    status: "online" | "offline";
-    version?: string;
-    storage_size?: string;
-    dicom_aet?: string;
-    count_studies?: number;
-    count_instances?: number;
-  };
-  last_received: string | null;
-}
-
 interface Transfer {
   id: number;
   orthanc_study_id: string;
