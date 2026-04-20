@@ -100,6 +100,7 @@ export function DashboardPage() {
   }
 
   const failedCount = stats?.failed_transfers ?? 0;
+  const healthKnown = !!health?.orthanc; // `health` is null during initial load
   const orthancStatus = health?.orthanc?.status ?? "offline";
 
   return (
@@ -108,10 +109,16 @@ export function DashboardPage() {
       <Card className="bg-muted/30">
         <CardContent className="flex items-center gap-6 py-3 px-4">
           <div className="flex items-center gap-2">
-            <StatusDot status={orthancStatus === "online" ? "online" : "offline"} />
+            <StatusDot status={!healthKnown ? "offline" : orthancStatus === "online" ? "online" : "offline"} />
             <span className="text-sm font-medium">PACS Server</span>
           </div>
-          {orthancStatus === "online" && health?.orthanc && (
+          {!healthKnown && (
+            <>
+              <div className="h-4 w-px bg-border" />
+              <span className="text-xs text-muted-foreground">Checking…</span>
+            </>
+          )}
+          {healthKnown && orthancStatus === "online" && health?.orthanc && (
             <>
               <div className="h-4 w-px bg-border" />
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -128,7 +135,7 @@ export function DashboardPage() {
               </div>
             </>
           )}
-          {orthancStatus === "offline" && (
+          {healthKnown && orthancStatus === "offline" && (
             <>
               <div className="h-4 w-px bg-border" />
               <span className="text-xs text-destructive">PACS server unreachable</span>

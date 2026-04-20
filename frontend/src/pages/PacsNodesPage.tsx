@@ -78,8 +78,9 @@ export function PacsNodesPage() {
   const [deleting, setDeleting] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
 
-  // Data loaded via usePacsNodes above. Mutations call invalidate.pacsNodes() to refetch.
-  const refetchNodes = () => invalidate.pacsNodes();
+  // Data loaded via usePacsNodes above. Mutations call
+  // invalidate.afterPacsNodeChange() to ripple into study.pacs_nodes, transfers,
+  // and dashboard caches.
 
   const openAdd = () => {
     setEditingId(null);
@@ -113,7 +114,7 @@ export function PacsNodesPage() {
         await api.post("/pacs-nodes", payload);
       }
       setDialogOpen(false);
-      refetchNodes();
+      invalidate.afterPacsNodeChange();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       setDialogError(e?.response?.data?.detail ?? e?.message ?? "Failed to save node");
@@ -128,7 +129,7 @@ export function PacsNodesPage() {
     try {
       await api.delete(`/pacs-nodes/${deleteTarget}`);
       setDeleteTarget(null);
-      refetchNodes();
+      invalidate.afterPacsNodeChange();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to delete node");
@@ -142,7 +143,7 @@ export function PacsNodesPage() {
     setTogglingId(n.id);
     try {
       await api.put(`/pacs-nodes/${n.id}`, { is_active: !n.is_active });
-      refetchNodes();
+      invalidate.afterPacsNodeChange();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to update node");
@@ -157,7 +158,7 @@ export function PacsNodesPage() {
       const { data } = await api.post(`/pacs-nodes/${id}/echo`);
       setEchoResults((prev) => ({ ...prev, [id]: data.success }));
       // Refresh nodes to get updated last_echo_at
-      refetchNodes();
+      invalidate.afterPacsNodeChange();
     } catch {
       setEchoResults((prev) => ({ ...prev, [id]: false }));
     }

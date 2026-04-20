@@ -94,6 +94,10 @@ export function StudiesPage() {
   const studies: Study[] = (studiesQuery.data?.items as Study[]) ?? [];
   const total: number = studiesQuery.data?.total ?? 0;
   const loading = studiesQuery.isLoading;
+  // isFetching is true on any refetch (pagination, filter change with placeholder)
+  // while isLoading is true only when there's no data yet. Use fetching for a
+  // subtle "loading…" hint above the table without flashing the full skeleton.
+  const fetching = studiesQuery.isFetching && !studiesQuery.isLoading;
   const error = studiesQuery.error
     ? ((studiesQuery.error as any)?.response?.data?.detail ?? (studiesQuery.error as any)?.message ?? "Failed to load studies")
     : null;
@@ -210,7 +214,7 @@ export function StudiesPage() {
           <TableSkeleton columns={6} />
         </div>
       ) : (
-        <div className="rounded-lg border">
+        <div className={`rounded-lg border transition-opacity ${fetching ? "opacity-60" : ""}`}>
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50">
