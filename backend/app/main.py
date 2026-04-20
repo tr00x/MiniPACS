@@ -18,6 +18,7 @@ from app.routers.audit import router as audit_router
 from app.routers.users import router as users_router
 from app.routers.stats import router as stats_router
 from app.routers.reports import router as reports_router
+from app.routers.dashboard import router as dashboard_router
 
 
 @asynccontextmanager
@@ -51,6 +52,7 @@ _CACHEABLE_PATHS = (
     "/api/pacs-nodes",
     "/api/viewers",
     "/api/settings",
+    "/api/dashboard",
 )
 
 
@@ -82,6 +84,7 @@ app.include_router(audit_router)
 app.include_router(users_router)
 app.include_router(stats_router)
 app.include_router(reports_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/api/health")

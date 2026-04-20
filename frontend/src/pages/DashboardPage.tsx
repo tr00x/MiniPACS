@@ -86,37 +86,26 @@ export function DashboardPage() {
     const ctrl = new AbortController();
     const { signal } = ctrl;
 
-    // Fetch stats and system health in parallel
-    Promise.all([
-      api.get<ApiStats>("/stats", { signal }),
-      api.get<SystemHealth>("/stats/system-health", { signal }).catch(() => ({
-        data: { orthanc: { status: "offline" as const }, last_received: null },
-      })),
-    ])
-      .then(([statsRes, healthRes]) => {
-        setStats(statsRes.data);
-        setHealth(healthRes.data);
+    // Single aggregate endpoint — the backend fans out to Orthanc/SQLite
+    // concurrently and collapses what used to be 5 sequential round-trips.
+    api
+      .get("/dashboard", { signal })
+      .then(({ data }) => {
+        setStats(data.stats);
+        setHealth(data.system_health);
+        setTransfers(Array.isArray(data.recent_transfers) ? data.recent_transfers : []);
+        setShares(Array.isArray(data.active_shares) ? data.active_shares : []);
+        setPatients(Array.isArray(data.patients) ? data.patients : []);
       })
       .catch((err) => {
-        if (err.name !== "CanceledError") setError(err?.response?.data?.detail ?? err.message);
+        if (err.name !== "CanceledError" && err.name !== "AbortError") {
+          setError(err?.response?.data?.detail ?? err.message);
+        }
       })
-      .finally(() => setStatsLoading(false));
-
-    Promise.all([
-      api.get("/transfers", { params: { limit: 5 }, signal }),
-      api.get("/shares", { signal }),
-      api.get("/patients", { params: { limit: 100 }, signal }),
-    ])
-      .then(([t, s, p]) => {
-        const transferItems = t.data.items ?? t.data;
-        setTransfers(Array.isArray(transferItems) ? transferItems.slice(0, 5) : []);
-        const sharesData = s.data.items ?? s.data;
-        setShares((Array.isArray(sharesData) ? sharesData : []).filter((sh: Share) => sh.is_active).slice(0, 5));
-        const patientItems = p.data.items ?? p.data;
-        setPatients(Array.isArray(patientItems) ? patientItems : []);
-      })
-      .catch(() => {})
-      .finally(() => setListsLoading(false));
+      .finally(() => {
+        setStatsLoading(false);
+        setListsLoading(false);
+      });
 
     return () => ctrl.abort();
   }, []);
