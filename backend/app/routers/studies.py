@@ -1,5 +1,6 @@
 import asyncio
 import io
+import time
 import zipfile as zipfile_mod
 
 import aiosqlite
@@ -12,6 +13,14 @@ from app.services import orthanc
 from app.middleware.audit import log_audit
 
 router = APIRouter(prefix="/api/studies", tags=["studies"])
+
+# TTL cache for /api/studies/{id}/full. Per-study bundle (series list, pacs
+# nodes, viewers, reports) rarely changes second-to-second; Orthanc series
+# metadata takes ~1.5s on a 11+ series study, so caching the aggregate
+# response makes back-navigation instant. Keyed by study_id; bounded to 64
+# entries FIFO so memory stays under 50 MB on worst case.
+_STUDY_FULL_TTL = 15.0
+_study_full_cache: dict[str, tuple[float, dict]] = {}
 
 
 @router.get("")
@@ -78,8 +87,16 @@ async def get_study_full(
     """One-shot bundle for StudyDetailPage.
 
     Collapses 4 separate calls (study, pacs-nodes, viewers, reports) that the
-    Study detail UI needs on open into one round-trip.
+    Study detail UI needs on open into one round-trip. 15s TTL cache on the
+    whole payload — re-opening the same study (back-nav, tab switch) is
+    served instantly.
     """
+    cached = _study_full_cache.get(study_id)
+    if cached and time.time() - cached[0] < _STUDY_FULL_TTL:
+        # Still audit the view (fire-and-forget)
+        await log_audit("view_study", "study", study_id, user_id=user["id"], ip_address=request.client.host)
+        return cached[1]
+
     try:
         study, series = await asyncio.gather(
             orthanc.get_study(study_id),
@@ -127,13 +144,17 @@ async def get_study_full(
     )
     reports = [dict(r) for r in await cur.fetchall()]
 
-    return {
+    result = {
         "study": study,
         "series": series,
         "pacs_nodes": pacs_nodes,
         "viewers": viewers,
         "reports": reports,
     }
+    _study_full_cache[study_id] = (time.time(), result)
+    if len(_study_full_cache) > 64:
+        _study_full_cache.pop(next(iter(_study_full_cache)))
+    return result
 
 
 @router.get("/{study_id}/series/{series_id}")
