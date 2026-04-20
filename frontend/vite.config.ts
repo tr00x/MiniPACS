@@ -73,6 +73,27 @@ export default defineConfig({
       deleteOriginFile: false,
     }),
   ],
+  build: {
+    // Split hefty third-party code into long-cache chunks so the app-only
+    // chunk stays small and redeploys invalidate only the thin slice that
+    // actually changed.
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes("node_modules")) {
+            if (id.includes("react-router") || id.includes("/react-dom/") || /\/node_modules\/react\//.test(id)) {
+              return "react-vendor";
+            }
+            if (id.includes("@tanstack")) return "query-vendor";
+            if (id.includes("@radix-ui")) return "radix-vendor";
+            if (id.includes("lucide-react")) return "icons-vendor";
+          }
+        },
+      },
+    },
+    // Hard cap so a stray heavy import doesn't silently bloat the main chunk.
+    chunkSizeWarningLimit: 600,
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
