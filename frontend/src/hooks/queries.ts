@@ -1,5 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { UseQueryOptions } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, skipToken } from "@tanstack/react-query";
 import api from "@/lib/api";
 
 // ---------- Query keys ----------
@@ -49,6 +48,10 @@ export function useDashboard() {
       active_shares: any[];
       patients: any[];
     }>("/dashboard"),
+    // Dashboard shows live Orthanc status and recent transfers — poll every 15s
+    // so a radiologist sees PACS going offline without navigating away.
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -69,15 +72,16 @@ export function useStudies(params: {
 
 export function useStudyFull(id: string | undefined) {
   return useQuery({
-    queryKey: id ? qk.study(id) : ["study", "__disabled__"],
-    queryFn: () => get<{
-      study: any;
-      series: any[];
-      pacs_nodes: any[];
-      viewers: any[];
-      reports: any[];
-    }>(`/studies/${id}/full`),
-    enabled: !!id,
+    queryKey: qk.study(id ?? ""),
+    queryFn: id
+      ? () => get<{
+          study: any;
+          series: any[];
+          pacs_nodes: any[];
+          viewers: any[];
+          reports: any[];
+        }>(`/studies/${id}/full`)
+      : skipToken,
   });
 }
 
@@ -91,14 +95,15 @@ export function usePatients(params: { search?: string; limit?: number; offset?: 
 
 export function usePatientFull(id: string | undefined) {
   return useQuery({
-    queryKey: id ? qk.patient(id) : ["patient", "__disabled__"],
-    queryFn: () => get<{
-      patient: any;
-      studies: any[];
-      shares: any[];
-      transfers: any[];
-    }>(`/patients/${id}/full`),
-    enabled: !!id,
+    queryKey: qk.patient(id ?? ""),
+    queryFn: id
+      ? () => get<{
+          patient: any;
+          studies: any[];
+          shares: any[];
+          transfers: any[];
+        }>(`/patients/${id}/full`)
+      : skipToken,
   });
 }
 
@@ -134,16 +139,20 @@ export function useShares(params: { patient_id?: string } = {}) {
 
 export function useReports(studyId: string | undefined) {
   return useQuery({
-    queryKey: studyId ? qk.reports(studyId) : ["reports", "__disabled__"],
-    queryFn: () => get<any[]>("/reports", { study_id: studyId }),
-    enabled: !!studyId,
+    queryKey: qk.reports(studyId ?? ""),
+    queryFn: studyId
+      ? () => get<any[]>("/reports", { study_id: studyId })
+      : skipToken,
   });
 }
 
 // ---------- Invalidation helpers ----------
+// All invalidations here use PREFIX match (default react-query behavior): e.g.
+// invalidate.studies() busts ["studies"], ["studies",{limit:50,...}] and so on.
+// If you need an exact match, use qc directly with { exact: true }.
 export function useInvalidate() {
   const qc = useQueryClient();
-  return {
+  const invalidate = {
     dashboard: () => qc.invalidateQueries({ queryKey: ["dashboard"] }),
     studies: () => qc.invalidateQueries({ queryKey: ["studies"] }),
     study: (id: string) => qc.invalidateQueries({ queryKey: ["study", id] }),
@@ -156,8 +165,29 @@ export function useInvalidate() {
     transfers: () => qc.invalidateQueries({ queryKey: ["transfers"] }),
     shares: () => qc.invalidateQueries({ queryKey: ["shares"] }),
     reports: (studyId: string) => qc.invalidateQueries({ queryKey: qk.reports(studyId) }),
+
+    // --- Convenience bundles for common mutation flows ---
+    // Share create/edit/revoke touches: patient.shares, patient.transfers,
+    // dashboard.active_shares, dashboard.stats.unviewed_shares, and the
+    // standalone shares list.
+    afterShareChange: (patientId?: string) => {
+      if (patientId) qc.invalidateQueries({ queryKey: ["patient", patientId] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["shares"] });
+    },
+    // Any change to PACS nodes ripples into study/full (Send-to-PACS menu),
+    // transfers (node name column), and dashboard.recent_transfers.
+    afterPacsNodeChange: () => {
+      qc.invalidateQueries({ queryKey: qk.pacsNodes() });
+      qc.invalidateQueries({ queryKey: ["study"] });
+      qc.invalidateQueries({ queryKey: ["transfers"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    // WARNING: refetches EVERY active query. Use only from the Settings page
+    // "Reload everything" button, never inside a per-mutation handler.
     all: () => qc.invalidateQueries(),
-  };
+  } as const;
+  return invalidate;
 }
 
 // Re-export for convenience so pages can `import { useMutation } from "@/hooks/queries"`

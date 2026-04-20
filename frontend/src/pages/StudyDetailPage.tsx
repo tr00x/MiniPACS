@@ -211,6 +211,7 @@ export function StudyDetailPage() {
       const portalLink = token ? `${window.location.origin}/patient-portal/${token}` : "";
       setShareLink(portalLink);
       setShareStep("result");
+      invalidate.afterShareChange(study.ParentPatient);
     } catch (err: unknown) {
       toast.error(getErrorMessage(err, "Failed to create share"));
     } finally {

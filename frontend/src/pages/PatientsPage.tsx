@@ -40,7 +40,7 @@ export function PatientsPage() {
   const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounce search into a separate state so the React Query key stays stable
   // while the user is typing.
@@ -60,6 +60,7 @@ export function PatientsPage() {
   const patients: Patient[] = (patientsQuery.data?.items as Patient[]) ?? [];
   const total: number = patientsQuery.data?.total ?? 0;
   const loading = patientsQuery.isLoading;
+  const fetching = patientsQuery.isFetching && !patientsQuery.isLoading;
   const error = patientsQuery.error
     ? ((patientsQuery.error as any)?.response?.data?.detail ?? (patientsQuery.error as any)?.message ?? "Failed to load patients")
     : null;
@@ -139,7 +140,7 @@ export function PatientsPage() {
         <div className="rounded-lg border"><TableSkeleton columns={6} /></div>
       ) : (
         <>
-          <div className="rounded-lg border">
+          <div className={`rounded-lg border transition-opacity ${fetching ? "opacity-60" : ""}`}>
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50">

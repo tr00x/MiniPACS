@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -134,7 +134,7 @@ export function PatientDetailPage() {
       const token = data?.token ?? data?.share_token ?? data?.id ?? "";
       setShareLink(token ? `${window.location.origin}/patient-portal/${token}` : "");
       setShareStep("result");
-      if (id) invalidate.patient(id);
+      invalidate.afterShareChange(id);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to create share");
@@ -157,7 +157,7 @@ export function PatientDetailPage() {
       await api.put(`/shares/${editShare.id}`, {
         expires_at: editExpiry ? new Date(editExpiry).toISOString() : null,
       });
-      if (id) invalidate.patient(id);
+      invalidate.afterShareChange(id);
       setEditShare(null);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
@@ -171,7 +171,7 @@ export function PatientDetailPage() {
     setRevokingShare(shareId);
     try {
       await api.delete(`/shares/${shareId}`);
-      if (id) invalidate.patient(id);
+      invalidate.afterShareChange(id);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to revoke share");
