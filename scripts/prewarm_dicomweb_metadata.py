@@ -28,21 +28,20 @@ CONCURRENCY = int(os.environ.get("PREWARM_CONCURRENCY", "3"))
 # 3 in parallel keeps the box responsive for live users.
 
 
-async def list_studies(client: httpx.AsyncClient) -> list[str]:
-    # Orthanc /studies returns the full ID list without params.
-    resp = await client.get("/studies")
+async def list_study_uids(client: httpx.AsyncClient) -> list[str]:
+    """Fetch all StudyInstanceUIDs via QIDO-RS in one go — avoids the
+    N+1 of /studies (Orthanc IDs) followed by /studies/{id} (for UID)."""
+    resp = await client.get(
+        "/dicom-web/studies",
+        params={"limit": 100000, "includefield": "0020000D"},
+    )
     resp.raise_for_status()
-    return resp.json()
-
-
-async def study_uid(client: httpx.AsyncClient, sid: str) -> str | None:
-    try:
-        r = await client.get(f"/studies/{sid}")
-        r.raise_for_status()
-        return r.json()["MainDicomTags"].get("StudyInstanceUID")
-    except Exception as exc:
-        print(f"  ! skip {sid}: {exc}", file=sys.stderr)
-        return None
+    out: list[str] = []
+    for entry in resp.json():
+        uid = entry.get("0020000D", {}).get("Value", [None])[0]
+        if uid:
+            out.append(uid)
+    return out
 
 
 async def warm_one(client: httpx.AsyncClient, uid: str, sem: asyncio.Semaphore, idx: int, total: int):
@@ -53,37 +52,28 @@ async def warm_one(client: httpx.AsyncClient, uid: str, sem: asyncio.Semaphore, 
             dt = time.monotonic() - t0
             size_kb = len(r.content) / 1024
             status = "OK " if r.status_code == 200 else f"{r.status_code}"
-            print(f"[{idx:>5}/{total}] {status} {dt:>6.2f}s {size_kb:>7.1f}KB {uid}")
+            print(f"[{idx:>5}/{total}] {status} {dt:>6.2f}s {size_kb:>7.1f}KB {uid}", flush=True)
         except Exception as exc:
             dt = time.monotonic() - t0
-            print(f"[{idx:>5}/{total}] ERR {dt:>6.2f}s              {uid}: {exc}", file=sys.stderr)
+            print(f"[{idx:>5}/{total}] ERR {dt:>6.2f}s              {uid}: {exc}", file=sys.stderr, flush=True)
 
 
 async def main():
     async with httpx.AsyncClient(
         base_url=ORTHANC_URL,
         auth=(ORTHANC_USER, ORTHANC_PASS),
-        timeout=httpx.Timeout(60.0, connect=5.0),
+        timeout=httpx.Timeout(300.0, connect=5.0),
         limits=httpx.Limits(max_connections=CONCURRENCY * 2, max_keepalive_connections=CONCURRENCY * 2),
     ) as c:
-        print(f"listing studies from {ORTHANC_URL} ...")
-        sids = await list_studies(c)
-        print(f"found {len(sids)} studies, resolving UIDs ...")
-
-        uid_sem = asyncio.Semaphore(8)
-
-        async def resolve(sid):
-            async with uid_sem:
-                return await study_uid(c, sid)
-
-        uids = [u for u in await asyncio.gather(*(resolve(s) for s in sids)) if u]
-        print(f"resolved {len(uids)} UIDs, warming metadata cache (concurrency={CONCURRENCY}) ...")
+        print(f"listing study UIDs from {ORTHANC_URL} via QIDO-RS ...", flush=True)
+        uids = await list_study_uids(c)
+        print(f"got {len(uids)} UIDs, warming metadata cache (concurrency={CONCURRENCY}) ...", flush=True)
 
         sem = asyncio.Semaphore(CONCURRENCY)
         t0 = time.monotonic()
         await asyncio.gather(*(warm_one(c, u, sem, i + 1, len(uids)) for i, u in enumerate(uids)))
         total = time.monotonic() - t0
-        print(f"done — {len(uids)} studies in {total/60:.1f} min")
+        print(f"done — {len(uids)} studies in {total/60:.1f} min", flush=True)
 
 
 if __name__ == "__main__":
