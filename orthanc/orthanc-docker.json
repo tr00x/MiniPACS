@@ -51,8 +51,8 @@
     "StudiesMetadata": "Full",
     "//-series-": "Series metadata served from the SQLite index — no file reads. Per-series request at 295-instance MR was 22s with 'Full' because Orthanc opened every DICOM file; MainDicomTags makes it ~50ms.",
     "SeriesMetadata": "MainDicomTags",
-    "//-cache-": "Cache the computed metadata list per series so we only rebuild it when the series changes.",
-    "SeriesMetadataCacheSize": 200
+    "//-cache-": "Cache the computed metadata list per series. Raised from 200 to 5000 — warm-second-open stays instant across a working set of ~5000 series (~50 MB RAM budget, well within 7.6GB).",
+    "SeriesMetadataCacheSize": 5000
   },
 
   "Transfers": {
