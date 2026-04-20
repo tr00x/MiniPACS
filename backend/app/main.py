@@ -40,18 +40,27 @@ app.add_middleware(
 )
 
 
-# Short browser-side cache on read-heavy list endpoints.
-# Worklist, patients, dashboard stats are viewed by several users at once and
-# refetched on every client-side navigation. 5s private cache collapses those
-# into a single network trip without risking staleness (backend cache is 8-15s,
-# so max end-to-end staleness is still within the backend TTL).
-_CACHEABLE_PATHS = (
-    "/api/studies",
-    "/api/patients",
-    "/api/stats",
+# Browser-side cache policy on read-heavy endpoints.
+#
+# Two tiers, because not everything is safe to cache the same way:
+#  - NON_PHI_PATHS: configuration-shaped data (viewers, settings, pacs-nodes).
+#    Safe to cache with max-age — if an admin changes it, 5s of staleness is
+#    fine. `Vary: Authorization` ensures a different session does not pick up
+#    another user's cached copy on a shared browser.
+#  - PHI_PATHS: patient/study/dashboard data. We never emit max-age here —
+#    the backend in-memory cache already collapses bursts, and browser-side
+#    caching of PHI on a shared workstation would let a logout-then-login
+#    cycle reveal the previous user's patient list via Back button.
+#    We do set `no-store` to make the intent explicit.
+_NON_PHI_PATHS = (
     "/api/pacs-nodes",
     "/api/viewers",
     "/api/settings",
+)
+_PHI_PATHS = (
+    "/api/studies",
+    "/api/patients",
+    "/api/stats",
     "/api/dashboard",
 )
 
@@ -59,13 +68,16 @@ _CACHEABLE_PATHS = (
 class BrowserCacheHeaders(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        if (
-            request.method == "GET"
-            and 200 <= response.status_code < 300
-            and any(request.url.path.startswith(p) for p in _CACHEABLE_PATHS)
-            and "cache-control" not in (h.lower() for h in response.headers)
-        ):
+        if request.method != "GET" or not (200 <= response.status_code < 300):
+            return response
+        if "cache-control" in (h.lower() for h in response.headers):
+            return response
+        path = request.url.path
+        if any(path.startswith(p) for p in _NON_PHI_PATHS):
             response.headers["Cache-Control"] = "private, max-age=5"
+            response.headers["Vary"] = "Authorization"
+        elif any(path.startswith(p) for p in _PHI_PATHS):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
 

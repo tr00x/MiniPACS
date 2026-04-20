@@ -30,7 +30,7 @@ async def create_user(
         )
         await db.commit()
         new_id = cursor.lastrowid
-        await log_audit("create_user", "user", str(new_id), user_id=user["id"], ip_address=request.client.host)
+        await log_audit("create_user", "user", str(new_id), user_id=user["id"], ip_address=request.client.host, wait=True)
         row = await db.execute("SELECT id, username, token_version, created_at, last_login FROM users WHERE id = ?", (new_id,))
         new_user = await row.fetchone()
         return dict(new_user)
@@ -49,7 +49,7 @@ async def delete_user(
         raise HTTPException(400, "Cannot delete yourself")
     await db.execute("DELETE FROM users WHERE id = ?", (target_id,))
     await db.commit()
-    await log_audit("delete_user", "user", str(target_id), user_id=user["id"], ip_address=request.client.host)
+    await log_audit("delete_user", "user", str(target_id), user_id=user["id"], ip_address=request.client.host, wait=True)
     return {"status": "ok"}
 
 
@@ -62,5 +62,5 @@ async def revoke_tokens(
 ):
     await db.execute("UPDATE users SET token_version = token_version + 1 WHERE id = ?", (target_id,))
     await db.commit()
-    await log_audit("revoke_tokens", "user", str(target_id), user_id=user["id"], ip_address=request.client.host)
+    await log_audit("revoke_tokens", "user", str(target_id), user_id=user["id"], ip_address=request.client.host, wait=True)
     return {"status": "ok"}

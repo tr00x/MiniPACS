@@ -62,6 +62,6 @@ async def put_settings(
         action="settings.update",
         resource_type="settings",
         user_id=user["id"],
-        ip_address=request.client.host if request.client else None,
+        ip_address=request.client.host if request.client else None, wait=True,
     )
     return {"status": "ok"}
