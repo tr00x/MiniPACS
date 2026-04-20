@@ -327,17 +327,25 @@ async def get_study(study_id: str):
 
 
 async def get_study_series(study_id: str):
-    study = await get_study(study_id)
-    if study is None:
+    """All series of a study in ONE /tools/find, no N+1.
+
+    Previously: GET /studies/{id} then one /series/{sid} per series (fan-out).
+    For a 50-series MR that was 50 parallel Orthanc HTTP calls; with 10
+    HttpThreads on Orthanc the long tail was 10-15s. /tools/find scoped by
+    ParentStudy returns the full expanded series list in a single call.
+    """
+    try:
+        resp = await _http().post("/tools/find", json={
+            "Level": "Series",
+            "Query": {},
+            "ParentStudy": study_id,
+            "Expand": True,
+        })
+        resp.raise_for_status()
+        return resp.json()
+    except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
+        _log.warning("get_study_series: Orthanc error for %s — []: %s", study_id, exc)
         return []
-    series_ids = study.get("Series", [])
-
-    async def fetch_series(sid: str):
-        r = await _http().get(f"/series/{sid}")
-        r.raise_for_status()
-        return r.json()
-
-    return await asyncio.gather(*[fetch_series(sid) for sid in series_ids])
 
 
 async def get_series(series_id: str):
