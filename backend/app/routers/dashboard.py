@@ -62,6 +62,7 @@ async def _system_health():
             r_stat = await orthanc._http().get("/statistics")
             if r_stat.status_code == 200:
                 stat_data = r_stat.json()
+                orthanc_info["count_studies"] = stat_data.get("CountStudies", 0)
                 orthanc_info["count_instances"] = stat_data.get("CountInstances", 0)
                 total = stat_data.get("TotalDiskSize", 0)
                 try:
