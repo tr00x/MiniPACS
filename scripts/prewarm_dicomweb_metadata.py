@@ -29,18 +29,28 @@ CONCURRENCY = int(os.environ.get("PREWARM_CONCURRENCY", "3"))
 
 
 async def list_study_uids(client: httpx.AsyncClient) -> list[str]:
-    """Fetch all StudyInstanceUIDs via QIDO-RS in one go — avoids the
-    N+1 of /studies (Orthanc IDs) followed by /studies/{id} (for UID)."""
-    resp = await client.get(
-        "/dicom-web/studies",
-        params={"limit": 100000, "includefield": "0020000D"},
-    )
-    resp.raise_for_status()
+    """Fetch all StudyInstanceUIDs via QIDO-RS — paginated because
+    Orthanc caps a single response at LimitFindResults (default 1000)."""
     out: list[str] = []
-    for entry in resp.json():
-        uid = entry.get("0020000D", {}).get("Value", [None])[0]
-        if uid:
-            out.append(uid)
+    offset = 0
+    page = 1000
+    while True:
+        resp = await client.get(
+            "/dicom-web/studies",
+            params={"limit": page, "offset": offset, "includefield": "0020000D"},
+        )
+        resp.raise_for_status()
+        batch = resp.json()
+        if not batch:
+            break
+        for entry in batch:
+            uid = entry.get("0020000D", {}).get("Value", [None])[0]
+            if uid:
+                out.append(uid)
+        print(f"  fetched {len(out)} UIDs so far ...", flush=True)
+        if len(batch) < page:
+            break
+        offset += page
     return out
 
 
