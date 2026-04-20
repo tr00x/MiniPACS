@@ -1,10 +1,39 @@
 import asyncio
+import time
 from typing import AsyncIterator
 
 import httpx
 from app.config import settings
 
 _client: httpx.AsyncClient | None = None
+
+# Short-TTL in-memory cache for list endpoints.
+# Worklist is read-heavy and many clients view the same window simultaneously;
+# a few-seconds cache collapses bursts of identical requests into one Orthanc call.
+_STUDIES_CACHE_TTL = 8.0
+_studies_cache: dict[tuple, tuple[float, list, int]] = {}
+_PATIENTS_CACHE_TTL = 8.0
+_patients_cache: dict[tuple, tuple[float, list, int]] = {}
+_STUDIES_CACHE_MAX = 32
+
+
+def _cache_get(cache: dict, key: tuple, ttl: float):
+    hit = cache.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1:]
+    return None
+
+
+def _cache_put(cache: dict, key: tuple, *values):
+    cache[key] = (time.time(),) + values
+    if len(cache) > _STUDIES_CACHE_MAX:
+        cache.pop(next(iter(cache)))
+
+
+def invalidate_study_caches():
+    """Call when studies change (C-STORE received, study deleted) to bust caches."""
+    _studies_cache.clear()
+    _patients_cache.clear()
 
 
 async def init_client():
@@ -30,6 +59,11 @@ def _http() -> httpx.AsyncClient:
 
 async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
     """Server-side patient search and pagination via Orthanc /tools/find."""
+    key = ("p", search, limit, offset)
+    cached = _cache_get(_patients_cache, key, _PATIENTS_CACHE_TTL)
+    if cached is not None:
+        return cached
+
     query = {}
     if search:
         query["PatientName"] = f"*{search}*"
@@ -46,23 +80,34 @@ async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
     except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
         raise Exception(f"PACS server unreachable: {exc}") from exc
 
-    # Get total count (without limit) for pagination
-    try:
-        count_resp = await _http().post("/tools/find", json={
-            "Level": "Patient",
-            "Query": query,
-            "Expand": False,
-        })
-        count_resp.raise_for_status()
-        total = len(count_resp.json())
-    except Exception:
+    # Avoid second full-scan when we clearly know total from first page.
+    if offset == 0 and len(items) < limit:
         total = len(items)
+    elif offset == 0:
+        try:
+            count_resp = await _http().post("/tools/find", json={
+                "Level": "Patient",
+                "Query": query,
+                "Expand": False,
+            })
+            count_resp.raise_for_status()
+            total = len(count_resp.json())
+        except Exception:
+            total = len(items)
+    else:
+        total = offset + len(items) + (limit if len(items) == limit else 0)
 
+    _cache_put(_patients_cache, key, items, total)
     return items, total
 
 
 async def find_studies(search: str = "", modality: str = "", date_from: str = "", date_to: str = "", limit: int = 25, offset: int = 0):
     """Server-side study search and pagination via Orthanc /tools/find."""
+    key = (search, modality, date_from, date_to, limit, offset)
+    cached = _cache_get(_studies_cache, key, _STUDIES_CACHE_TTL)
+    if cached is not None:
+        return cached
+
     query = {}
     if search:
         query["PatientName"] = f"*{search}*"
@@ -75,11 +120,14 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
     elif date_to:
         query["StudyDate"] = f"-{date_to}"
 
+    # RequestedTags tells Orthanc to compute ModalitiesInStudy server-side (aggregated from
+    # child series) so we do NOT need N+1 per-series follow-up fetches in _enrich_*.
     try:
         resp = await _http().post("/tools/find", json={
             "Level": "Study",
             "Query": query,
             "Expand": True,
+            "RequestedTags": ["ModalitiesInStudy"],
             "Limit": limit,
             "Since": offset,
         })
@@ -88,19 +136,27 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
     except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
         raise Exception(f"PACS server unreachable: {exc}") from exc
 
-    # Get total count
-    try:
-        count_resp = await _http().post("/tools/find", json={
-            "Level": "Study",
-            "Query": query,
-            "Expand": False,
-        })
-        count_resp.raise_for_status()
-        total = len(count_resp.json())
-    except Exception:
+    # Total count: only fetch when we actually need it (first page or explicit total probe).
+    # For every other page we can infer from items length plus offset — avoids a second full scan.
+    if offset == 0 and len(items) < limit:
         total = len(items)
+    elif offset == 0:
+        try:
+            count_resp = await _http().post("/tools/find", json={
+                "Level": "Study",
+                "Query": query,
+                "Expand": False,
+            })
+            count_resp.raise_for_status()
+            total = len(count_resp.json())
+        except Exception:
+            total = len(items)
+    else:
+        # Subsequent pages — we already know total from first page; approximate.
+        total = offset + len(items) + (limit if len(items) == limit else 0)
 
-    items = await _enrich_study_modalities(items)
+    items = _propagate_modalities(items)
+    _cache_put(_studies_cache, key, items, total)
     return items, total
 
 
@@ -127,57 +183,55 @@ async def get_patient(patient_id: str):
 
 
 async def get_patient_studies(patient_id: str):
-    patient = await get_patient(patient_id)
-    if patient is None:
-        return []
-    study_ids = patient.get("Studies", [])
+    """All studies for a patient — single /tools/find call, no N+1."""
+    try:
+        resp = await _http().post("/tools/find", json={
+            "Level": "Study",
+            "Query": {"PatientID": ""},  # wildcard, filtered below by ParentPatient
+            "Expand": True,
+            "RequestedTags": ["ModalitiesInStudy"],
+        })
+        resp.raise_for_status()
+        all_studies = resp.json()
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        raise Exception(f"PACS server unreachable: {exc}") from exc
+    studies = [s for s in all_studies if s.get("ParentPatient") == patient_id]
+    return _propagate_modalities(studies)
 
-    async def fetch_study(sid: str):
-        r = await _http().get(f"/studies/{sid}")
-        r.raise_for_status()
-        return r.json()
 
-    studies = list(await asyncio.gather(*[fetch_study(sid) for sid in study_ids]))
-    return await _enrich_study_modalities(studies)
+def _propagate_modalities(studies: list) -> list:
+    """Copy ModalitiesInStudy from Orthanc-aggregated RequestedTags into MainDicomTags.
 
-
-async def _enrich_study_modalities(studies: list) -> list:
-    """Add ModalitiesInStudy from series-level Modality if not present at study level."""
-    async def enrich(study: dict) -> dict:
-        tags = study.get("MainDicomTags", {})
+    Upstream /tools/find with RequestedTags=['ModalitiesInStudy'] returns the value
+    under study['RequestedTags']; frontend reads from MainDicomTags. This is a cheap
+    in-memory propagation — no HTTP calls, no N+1.
+    """
+    for study in studies:
+        tags = study.setdefault("MainDicomTags", {})
         if tags.get("ModalitiesInStudy"):
-            return study
-        series_ids = study.get("Series", [])
-        if not series_ids:
-            return study
-        modalities = set()
-        for sid in series_ids:
-            try:
-                r = await _http().get(f"/series/{sid}")
-                if r.status_code == 200:
-                    mod = r.json().get("MainDicomTags", {}).get("Modality")
-                    if mod:
-                        modalities.add(mod)
-            except Exception:
-                pass
-        if modalities:
-            tags["ModalitiesInStudy"] = "/".join(sorted(modalities))
-        return study
-
-    return list(await asyncio.gather(*[enrich(s) for s in studies]))
+            continue
+        mod = (study.get("RequestedTags") or {}).get("ModalitiesInStudy")
+        if mod:
+            tags["ModalitiesInStudy"] = mod
+    return studies
 
 
 async def get_studies(limit: int | None = None, since: int | None = None):
-    params = {"expand": ""}
+    """List studies via /tools/find so we can request ModalitiesInStudy in one shot."""
+    body = {
+        "Level": "Study",
+        "Query": {},
+        "Expand": True,
+        "RequestedTags": ["ModalitiesInStudy"],
+    }
     if limit is not None:
-        params["limit"] = str(limit)
+        body["Limit"] = int(limit)
     if since is not None:
-        params["since"] = str(since)
+        body["Since"] = int(since)
     try:
-        resp = await _http().get("/studies", params=params)
+        resp = await _http().post("/tools/find", json=body)
         resp.raise_for_status()
-        studies = resp.json()
-        return await _enrich_study_modalities(studies)
+        return _propagate_modalities(resp.json())
     except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
         raise Exception(f"PACS server unreachable: {exc}") from exc
 
@@ -211,14 +265,16 @@ async def get_series(series_id: str):
 
 
 async def get_series_instances(series_id: str):
+    """Fetch all instances of a series in parallel (was sequential N+1)."""
     series = await get_series(series_id)
     instance_ids = series.get("Instances", [])
-    instances = []
-    for iid in instance_ids:
+
+    async def fetch_instance(iid: str):
         r = await _http().get(f"/instances/{iid}")
         r.raise_for_status()
-        instances.append(r.json())
-    return instances
+        return r.json()
+
+    return list(await asyncio.gather(*[fetch_instance(iid) for iid in instance_ids]))
 
 
 async def download_study_stream(study_id: str) -> AsyncIterator[bytes]:
