@@ -18,9 +18,16 @@ export const queryClient = new QueryClient({
       gcTime: 5 * 60_000,
       refetchOnWindowFocus: false,
       retry: 1,
+      // offlineFirst: if a refetch fails (e.g. backend returned 502 because
+      // Orthanc was cold), keep rendering the previously-cached data instead
+      // of switching the component into an error state. Combined with the
+      // backend's stale-while-error fallback, the UI never goes blank on a
+      // transient Orthanc hiccup.
+      networkMode: "offlineFirst",
     },
     mutations: {
       retry: 0,
+      networkMode: "offlineFirst",
     },
   },
 });
