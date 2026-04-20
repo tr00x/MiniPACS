@@ -38,7 +38,8 @@
   "//-http-threads-": "Bumped from 10 -> 50. OHIF open fires ~150 parallel HTTP requests (metadata + frames). 10 threads serialized them; 50 fits comfortably in 7.6GB RAM (~2MB stack each).",
   "HttpThreadsCount": 50,
   "ConcurrentJobs": 2,
-  "StorageAccessOnFind": "Never",
+  "//-access-": "Never was too aggressive — OHIF per-series metadata with RequestedTags silently hung because Orthanc refused to touch disk to resolve tags, and CF Tunnel cut the connection at 100s. Answers mode allows disk read only when assembling the final answer, not during the find phase.",
+  "StorageAccessOnFind": "Answers",
 
   "DicomWeb": {
     "Enable": true,
