@@ -3,7 +3,7 @@
 
   "StorageDirectory": "/var/lib/orthanc/db",
   "IndexDirectory": "/var/lib/orthanc/db",
-  "StorageCompression": true,
+  "StorageCompression": false,
   "MaximumStorageSize": 0,
   "MaximumPatientCount": 0,
 
@@ -25,10 +25,13 @@
 
   "OverwriteInstances": false,
   "StableAge": 60,
-  "LimitFindResults": 0,
+  "LimitFindResults": 1000,
   "LimitFindInstances": 0,
   "KeepAlive": true,
   "HttpTimeout": 60,
+  "HttpThreadsCount": 10,
+  "ConcurrentJobs": 2,
+  "StorageAccessOnFind": "Never",
 
   "DicomWeb": {
     "Enable": true,
