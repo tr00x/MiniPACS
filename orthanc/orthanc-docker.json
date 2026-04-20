@@ -7,6 +7,9 @@
   "MaximumStorageSize": 0,
   "MaximumPatientCount": 0,
 
+  "//": "With 7.6GB RAM available on the host we can give SQLite a 256MB in-process page cache, on top of OS page cache.",
+  "SQLiteCacheSize": 268435456,
+
   "DicomServerEnabled": true,
   "DicomAet": "MINIPACS",
   "DicomPort": 4242,

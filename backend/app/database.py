@@ -8,6 +8,11 @@ DB_PATH = Path(os.environ.get("DATABASE_PATH", Path(__file__).parent.parent / "m
 async def get_db():
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
+    # Per-connection pragmas — cheap to set, big impact under concurrent writes.
+    await db.execute("PRAGMA journal_mode=WAL")
+    await db.execute("PRAGMA synchronous=NORMAL")
+    await db.execute("PRAGMA cache_size=-65536")  # 64 MB page cache
+    await db.execute("PRAGMA temp_store=MEMORY")
     try:
         yield db
     finally:
@@ -16,6 +21,9 @@ async def get_db():
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        # Persist journal_mode=WAL at the file level so every new connection
+        # inherits it (journal_mode is a per-file property on reopen).
+        await db.execute("PRAGMA journal_mode=WAL")
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

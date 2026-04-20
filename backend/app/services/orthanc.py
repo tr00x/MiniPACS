@@ -46,10 +46,14 @@ def invalidate_study_caches():
 
 async def init_client():
     global _client
+    # Larger pool + long keep-alive: /tools/find, /statistics, and
+    # per-series fetches can fire in parallel at peak; defaults (10/5)
+    # were bottlenecking burst traffic.
     _client = httpx.AsyncClient(
         base_url=settings.orthanc_url,
         auth=(settings.orthanc_username, settings.orthanc_password),
-        timeout=30,
+        timeout=httpx.Timeout(30.0, connect=5.0),
+        limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=60),
     )
 
 
