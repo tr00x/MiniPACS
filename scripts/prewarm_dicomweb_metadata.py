@@ -29,7 +29,8 @@ CONCURRENCY = int(os.environ.get("PREWARM_CONCURRENCY", "3"))
 
 
 async def list_studies(client: httpx.AsyncClient) -> list[str]:
-    resp = await client.get("/studies", params={"limit": 100000})
+    # Orthanc /studies returns the full ID list without params.
+    resp = await client.get("/studies")
     resp.raise_for_status()
     return resp.json()
 
