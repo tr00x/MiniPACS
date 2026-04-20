@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import api from "@/lib/api";
+import { useStudies } from "@/hooks/queries";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
 import { TableSkeleton } from "@/components/TableSkeleton";
@@ -50,11 +50,6 @@ const getDateRange = (preset: DatePreset): { from: string; to: string } | null =
 
 export function StudiesPage() {
   const navigate = useNavigate();
-  const [studies, setStudies] = useState<Study[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [modFilter, setModFilter] = useState("");
@@ -84,38 +79,24 @@ export function StudiesPage() {
     setPage(1);
   };
 
-  useEffect(() => {
-    const ctrl = new AbortController();
-    setLoading(true);
-    setError(null);
-    const range = getDateRange(datePreset);
-    const from = range ? range.from : customFrom.replace(/-/g, "");
-    const to = range ? range.to : customTo.replace(/-/g, "");
-    const params: Record<string, string | number> = {
-      limit: PAGE_SIZE,
-      offset: (page - 1) * PAGE_SIZE,
-    };
-    if (debouncedSearch) params.search = debouncedSearch;
-    if (modFilter) params.modality = modFilter;
-    if (from) params.date_from = from;
-    if (to) params.date_to = to;
-
-    api
-      .get("/studies", { params, signal: ctrl.signal })
-      .then(({ data }) => {
-        setStudies(data.items);
-        setTotal(data.total);
-      })
-      .catch((err) => {
-        if (err.name !== "CanceledError" && err.name !== "AbortError") {
-          setError(
-            err?.response?.data?.detail ?? err.message ?? "Failed to load studies"
-          );
-        }
-      })
-      .finally(() => setLoading(false));
-    return () => ctrl.abort();
-  }, [debouncedSearch, modFilter, datePreset, customFrom, customTo, page]);
+  const range = getDateRange(datePreset);
+  const fromParam = range ? range.from : customFrom.replace(/-/g, "");
+  const toParam = range ? range.to : customTo.replace(/-/g, "");
+  const queryParams = {
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+    ...(debouncedSearch ? { search: debouncedSearch } : {}),
+    ...(modFilter ? { modality: modFilter } : {}),
+    ...(fromParam ? { date_from: fromParam } : {}),
+    ...(toParam ? { date_to: toParam } : {}),
+  };
+  const studiesQuery = useStudies(queryParams);
+  const studies: Study[] = (studiesQuery.data?.items as Study[]) ?? [];
+  const total: number = studiesQuery.data?.total ?? 0;
+  const loading = studiesQuery.isLoading;
+  const error = studiesQuery.error
+    ? ((studiesQuery.error as any)?.response?.data?.detail ?? (studiesQuery.error as any)?.message ?? "Failed to load studies")
+    : null;
 
   const tag = (s: Study, key: keyof Study["MainDicomTags"]) =>
     s.MainDicomTags?.[key] || "";

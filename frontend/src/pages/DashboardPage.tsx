@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,7 +5,7 @@ import { Users, FileImage, ArrowRightLeft, Eye, AlertCircle, CheckCircle, XCircl
 import { CardSkeleton } from "@/components/CardSkeleton";
 import { PageError } from "@/components/page-error";
 import { StatusDot } from "@/components/ui/status-dot";
-import api from "@/lib/api";
+import { useDashboard } from "@/hooks/queries";
 import { formatDicomName, formatTimestamp } from "@/lib/dicom";
 
 interface ApiStats {
@@ -73,42 +72,18 @@ function formatOrthancDate(dateStr: string): string {
 }
 
 export function DashboardPage() {
-  const [stats, setStats] = useState<ApiStats | null>(null);
-  const [health, setHealth] = useState<SystemHealth | null>(null);
-  const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [shares, setShares] = useState<Share[]>([]);
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [statsLoading, setStatsLoading] = useState(true);
-  const [listsLoading, setListsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, isLoading, error: queryError } = useDashboard();
 
-  useEffect(() => {
-    const ctrl = new AbortController();
-    const { signal } = ctrl;
-
-    // Single aggregate endpoint — the backend fans out to Orthanc/SQLite
-    // concurrently and collapses what used to be 5 sequential round-trips.
-    api
-      .get("/dashboard", { signal })
-      .then(({ data }) => {
-        setStats(data.stats);
-        setHealth(data.system_health);
-        setTransfers(Array.isArray(data.recent_transfers) ? data.recent_transfers : []);
-        setShares(Array.isArray(data.active_shares) ? data.active_shares : []);
-        setPatients(Array.isArray(data.patients) ? data.patients : []);
-      })
-      .catch((err) => {
-        if (err.name !== "CanceledError" && err.name !== "AbortError") {
-          setError(err?.response?.data?.detail ?? err.message);
-        }
-      })
-      .finally(() => {
-        setStatsLoading(false);
-        setListsLoading(false);
-      });
-
-    return () => ctrl.abort();
-  }, []);
+  const stats = data?.stats ?? null;
+  const health = data?.system_health ?? null;
+  const transfers: Transfer[] = (data?.recent_transfers as Transfer[]) ?? [];
+  const shares: Share[] = (data?.active_shares as Share[]) ?? [];
+  const patients: Patient[] = (data?.patients as Patient[]) ?? [];
+  const statsLoading = isLoading;
+  const listsLoading = isLoading;
+  const error = queryError
+    ? ((queryError as any)?.response?.data?.detail ?? (queryError as any)?.message ?? null)
+    : null;
 
   const getPatientName = (orthancId: string) => {
     const p = patients.find((pt) => pt.ID === orthancId);

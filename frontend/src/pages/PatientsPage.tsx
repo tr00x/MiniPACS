@@ -9,7 +9,7 @@ import { TableSkeleton } from "@/components/TableSkeleton";
 import { PageError } from "@/components/page-error";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
 import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ExternalLink } from "lucide-react";
-import api from "@/lib/api";
+import { usePatients } from "@/hooks/queries";
 import { formatDicomName, formatDicomDate, calculateAge } from "@/lib/dicom";
 
 const PAGE_SIZE = 50;
@@ -35,49 +35,34 @@ type SortDir = "asc" | "desc";
 
 export function PatientsPage() {
   const navigate = useNavigate();
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
 
+  // Debounce search into a separate state so the React Query key stays stable
+  // while the user is typing.
   useEffect(() => {
-    const ctrl = new AbortController();
     if (debounceRef.current) clearTimeout(debounceRef.current);
-
-    debounceRef.current = setTimeout(() => {
-      setLoading(true);
-      setError(null);
-      api
-        .get("/patients", {
-          params: {
-            ...(search ? { search } : {}),
-            limit: PAGE_SIZE,
-            offset: (page - 1) * PAGE_SIZE,
-          },
-          signal: ctrl.signal,
-        })
-        .then(({ data }) => {
-          setPatients(data.items);
-          setTotal(data.total);
-        })
-        .catch((err) => {
-          if (err.name !== "CanceledError" && err.name !== "AbortError") {
-            setError(err?.response?.data?.detail ?? err.message ?? "Failed to load patients");
-          }
-        })
-        .finally(() => setLoading(false));
-    }, 300);
-
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search), 300);
     return () => {
-      ctrl.abort();
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [search, page]);
+  }, [search]);
+
+  const patientsQuery = usePatients({
+    ...(debouncedSearch ? { search: debouncedSearch } : {}),
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+  });
+  const patients: Patient[] = (patientsQuery.data?.items as Patient[]) ?? [];
+  const total: number = patientsQuery.data?.total ?? 0;
+  const loading = patientsQuery.isLoading;
+  const error = patientsQuery.error
+    ? ((patientsQuery.error as any)?.response?.data?.detail ?? (patientsQuery.error as any)?.message ?? "Failed to load patients")
+    : null;
 
   const handleSearchChange = (value: string) => {
     setSearch(value);

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ import { TableSkeleton } from "@/components/TableSkeleton";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Plus, Pencil, Trash2, Radio } from "lucide-react";
 import api from "@/lib/api";
+import { usePacsNodes, useInvalidate } from "@/hooks/queries";
 
 interface PacsNode {
   id: number;
@@ -59,9 +61,13 @@ function echoStatus(lastEchoAt: string | null): "online" | "warning" | null {
 }
 
 export function PacsNodesPage() {
-  const [nodes, setNodes] = useState<PacsNode[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const pacsNodesQuery = usePacsNodes();
+  const nodes: PacsNode[] = (pacsNodesQuery.data as PacsNode[]) ?? [];
+  const loading = pacsNodesQuery.isLoading;
+  const error = pacsNodesQuery.error
+    ? ((pacsNodesQuery.error as any)?.response?.data?.detail ?? (pacsNodesQuery.error as any)?.message ?? "Failed to load PACS nodes")
+    : null;
+  const invalidate = useInvalidate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<NodeForm>(emptyForm);
@@ -72,25 +78,8 @@ export function PacsNodesPage() {
   const [deleting, setDeleting] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
 
-  const fetchNodes = (signal?: AbortSignal) => {
-    setLoading(true);
-    setError(null);
-    api
-      .get("/pacs-nodes", { signal })
-      .then(({ data }) => setNodes(data))
-      .catch((err) => {
-        if (err.name !== "CanceledError" && err.name !== "AbortError") {
-          setError(err?.response?.data?.detail ?? err.message ?? "Failed to load PACS nodes");
-        }
-      })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    const ctrl = new AbortController();
-    fetchNodes(ctrl.signal);
-    return () => ctrl.abort();
-  }, []);
+  // Data loaded via usePacsNodes above. Mutations call invalidate.pacsNodes() to refetch.
+  const refetchNodes = () => invalidate.pacsNodes();
 
   const openAdd = () => {
     setEditingId(null);
@@ -124,7 +113,7 @@ export function PacsNodesPage() {
         await api.post("/pacs-nodes", payload);
       }
       setDialogOpen(false);
-      fetchNodes();
+      refetchNodes();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       setDialogError(e?.response?.data?.detail ?? e?.message ?? "Failed to save node");
@@ -139,10 +128,10 @@ export function PacsNodesPage() {
     try {
       await api.delete(`/pacs-nodes/${deleteTarget}`);
       setDeleteTarget(null);
-      fetchNodes();
+      refetchNodes();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to delete node");
+      toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to delete node");
       setDeleteTarget(null);
     } finally {
       setDeleting(false);
@@ -153,10 +142,10 @@ export function PacsNodesPage() {
     setTogglingId(n.id);
     try {
       await api.put(`/pacs-nodes/${n.id}`, { is_active: !n.is_active });
-      fetchNodes();
+      refetchNodes();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to update node");
+      toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to update node");
     } finally {
       setTogglingId(null);
     }
@@ -168,7 +157,7 @@ export function PacsNodesPage() {
       const { data } = await api.post(`/pacs-nodes/${id}/echo`);
       setEchoResults((prev) => ({ ...prev, [id]: data.success }));
       // Refresh nodes to get updated last_echo_at
-      fetchNodes();
+      refetchNodes();
     } catch {
       setEchoResults((prev) => ({ ...prev, [id]: false }));
     }
