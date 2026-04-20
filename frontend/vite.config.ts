@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import compression from "vite-plugin-compression";
 import path from "path";
 import fs from "fs";
 
@@ -59,7 +60,19 @@ function getContentType(filePath: string): string {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), ohifStaticPlugin()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    ohifStaticPlugin(),
+    // Emit .gz alongside every JS/CSS/SVG so nginx gzip_static can serve
+    // pre-compressed assets instantly without CPU per request.
+    compression({
+      algorithm: "gzip",
+      ext: ".gz",
+      threshold: 1024,
+      deleteOriginFile: false,
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
