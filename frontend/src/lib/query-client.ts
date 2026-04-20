@@ -18,16 +18,15 @@ export const queryClient = new QueryClient({
       gcTime: 5 * 60_000,
       refetchOnWindowFocus: false,
       retry: 1,
-      // offlineFirst: if a refetch fails (e.g. backend returned 502 because
-      // Orthanc was cold), keep rendering the previously-cached data instead
-      // of switching the component into an error state. Combined with the
-      // backend's stale-while-error fallback, the UI never goes blank on a
-      // transient Orthanc hiccup.
-      networkMode: "offlineFirst",
+      // networkMode left at the default "online". Previously set to
+      // "offlineFirst" hoping to survive 502s gracefully, but in practice it
+      // caused useQuery hooks to never fire on a cold mount inside headless
+      // chromium (and likely some real browsers too) — the app rendered but
+      // no /api/studies / /api/patients request was ever sent. The backend
+      // stale-while-error layer already covers the "Orthanc hiccup" case.
     },
     mutations: {
       retry: 0,
-      networkMode: "offlineFirst",
     },
   },
 });
