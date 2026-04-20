@@ -19,7 +19,7 @@ from app.services import orthanc
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
-_DASHBOARD_TTL = 8.0
+_DASHBOARD_TTL = 30.0  # dashboard isn't a live monitor — 30s is fine, and keeps load off Orthanc
 _cache: dict[str, tuple[float, dict]] = {}
 
 
@@ -131,15 +131,6 @@ async def _active_shares(db: aiosqlite.Connection):
     return [dict(r) for r in rows]
 
 
-async def _patients_list():
-    # Same call Dashboard uses to resolve patient names on the transfer list.
-    try:
-        items, _ = await orthanc.find_patients(limit=100, offset=0)
-        return items
-    except Exception:
-        return []
-
-
 @router.get("")
 async def get_dashboard(
     user: dict = Depends(get_current_user),
@@ -154,12 +145,15 @@ async def get_dashboard(
     recent_transfers = await _recent_transfers(db)
     active_shares = await _active_shares(db)
 
-    (patients_total, studies_total), studies_today, system_health, last_received, patients = await asyncio.gather(
+    # Dashboard no longer pulls the full 100-patient list — that call drove a
+    # 100-request N+1 into Orthanc every 15s (refetchInterval). The frontend
+    # was only using this list to resolve patient names on the transfer card;
+    # those names are already embedded in the transfer row itself.
+    (patients_total, studies_total), studies_today, system_health, last_received = await asyncio.gather(
         _orthanc_stats(),
         _studies_today(),
         _system_health(),
         _last_received(),
-        _patients_list(),
     )
 
     result = {
@@ -177,7 +171,7 @@ async def get_dashboard(
         },
         "recent_transfers": recent_transfers,
         "active_shares": active_shares,
-        "patients": patients,
+        "patients": [],  # kept as empty array so DashboardPage's patient-name lookup gracefully returns null
     }
     _cache["all"] = (time.time(), result)
     return result

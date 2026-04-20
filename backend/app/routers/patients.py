@@ -26,33 +26,12 @@ async def list_patients(
     except Exception as exc:
         raise HTTPException(502, f"PACS server unavailable: {exc}") from exc
 
-    # Enrich with last study info for each patient in the page
-    async def enrich_last_study(patient: dict) -> dict:
-        study_ids = patient.get("Studies", [])
-        if not study_ids:
-            return patient
-        try:
-            last_study = await orthanc.get_study(study_ids[-1])
-            if last_study:
-                tags = last_study.get("MainDicomTags", {})
-                if not tags.get("ModalitiesInStudy"):
-                    series_ids = last_study.get("Series", [])
-                    if series_ids:
-                        r = await orthanc._http().get(f"/series/{series_ids[0]}")
-                        if r.status_code == 200:
-                            mod = r.json().get("MainDicomTags", {}).get("Modality")
-                            if mod:
-                                tags["ModalitiesInStudy"] = mod
-                patient["LastStudy"] = {
-                    "StudyDate": tags.get("StudyDate"),
-                    "StudyDescription": tags.get("StudyDescription"),
-                    "ModalitiesInStudy": tags.get("ModalitiesInStudy"),
-                }
-        except Exception:
-            pass
-        return patient
-
-    page = list(await asyncio.gather(*[enrich_last_study(p) for p in page]))
+    # NOTE: last-study enrichment used to live here and fired one Orthanc /studies/{id}
+    # call per patient (plus a fallback /series/{sid}) — an N+1 that produced
+    # 100-200 concurrent HTTP calls for a Dashboard that fetches 100 patients.
+    # With HttpThreadsCount=10 that serialized into ~30s of queue time.
+    # Patients list UI no longer renders LastStudy (it shows study count from
+    # patient.Studies.length), so enrichment is dropped entirely.
     return {"items": page, "total": total}
 
 

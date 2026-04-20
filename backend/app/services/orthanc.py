@@ -66,7 +66,10 @@ async def init_client():
         base_url=settings.orthanc_url,
         auth=(settings.orthanc_username, settings.orthanc_password),
         timeout=httpx.Timeout(30.0, connect=5.0),
-        limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=60),
+        # Raised from 40/20 — dashboard aggregate + OHIF metadata bursts can
+        # easily saturate the smaller pool; 100/50 sits well under Orthanc's
+        # HttpThreadsCount=50 upper bound.
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=50, keepalive_expiry=60),
     )
 
 

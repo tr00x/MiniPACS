@@ -48,9 +48,10 @@ export function useDashboard() {
       active_shares: any[];
       patients: any[];
     }>("/dashboard"),
-    // Dashboard shows live Orthanc status and recent transfers — poll every 15s
-    // so a radiologist sees PACS going offline without navigating away.
-    refetchInterval: 15_000,
+    // Dashboard shows live Orthanc status and recent transfers. Raised from
+    // 15s -> 60s to avoid hammering Orthanc while the user also has OHIF
+    // open; backend cache TTL is 30s, so effective poll-to-origin is ~60s.
+    refetchInterval: 60_000,
     refetchIntervalInBackground: false,
   });
 }
