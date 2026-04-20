@@ -29,9 +29,17 @@ async def list_shares(
     db: aiosqlite.Connection = Depends(get_db),
 ):
     await log_audit("list_shares", user_id=user["id"], ip_address=request.client.host)
+    # Whitelist columns instead of s.* so the bcrypt pin_hash never leaves the
+    # server. Client only needs to know whether the share has a PIN.
+    select_cols = (
+        "s.id, s.orthanc_patient_id, s.token, s.expires_at, s.created_by, "
+        "s.created_at, s.is_active, s.view_count, s.first_viewed_at, s.last_viewed_at, "
+        "(s.pin_hash IS NOT NULL AND s.pin_hash != '') AS has_pin, "
+        "u.username AS created_by_username"
+    )
     if patient_id:
         cursor = await db.execute(
-            """SELECT s.*, u.username as created_by_username
+            f"""SELECT {select_cols}
                FROM patient_shares s
                LEFT JOIN users u ON s.created_by = u.id
                WHERE s.orthanc_patient_id = ?
@@ -40,7 +48,7 @@ async def list_shares(
         )
     else:
         cursor = await db.execute(
-            """SELECT s.*, u.username as created_by_username
+            f"""SELECT {select_cols}
                FROM patient_shares s
                LEFT JOIN users u ON s.created_by = u.id
                ORDER BY s.created_at DESC""",

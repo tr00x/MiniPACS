@@ -116,9 +116,10 @@ async def get_study_full(
     viewers = [dict(r) for r in await cur.fetchall()]
 
     cur = await db.execute(
-        "SELECT id, orthanc_study_id, title, report_type, content, filename, "
-        "created_by, created_at "
-        "FROM study_reports WHERE orthanc_study_id = ? ORDER BY created_at DESC",
+        "SELECT r.id, r.orthanc_study_id, r.title, r.report_type, r.content, "
+        "r.filename, r.created_by, u.username AS created_by_username, r.created_at "
+        "FROM study_reports r LEFT JOIN users u ON u.id = r.created_by "
+        "WHERE r.orthanc_study_id = ? ORDER BY r.created_at DESC",
         (study_id,),
     )
     reports = [dict(r) for r in await cur.fetchall()]

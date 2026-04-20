@@ -29,7 +29,7 @@ interface Share {
   created_at: string;
   expires_at: string | null;
   created_by_username: string | null;
-  pin_hash: string | null;
+  has_pin?: boolean | number | null;
 }
 
 interface Patient {
@@ -262,7 +262,7 @@ export function SharesPage() {
                         {patientName}
                       </Link>
                       <Badge variant={status.variant}>{status.label}</Badge>
-                      {s.pin_hash && (
+                      {s.has_pin && (
                         <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground">
                           <Lock className="h-3 w-3" />
                           <span>PIN protected</span>
