@@ -51,6 +51,10 @@ services:
       ORTHANC_BASIC_AUTH: "${ORTHANC_BASIC_AUTH}"
       HTTPS_PORT: "443"
       NGINX_TEMPLATE: "nginx-prod"
+    volumes:
+      # Disk cache for DICOMweb metadata + WADO frames. Second viewer open
+      # of the same study hits nginx, not Orthanc.
+      - nginx-cache:/var/cache/nginx
     depends_on:
       - backend
       - orthanc
@@ -69,3 +73,4 @@ services:
 volumes:
   orthanc-data:
   minipacs-db:
+  nginx-cache:

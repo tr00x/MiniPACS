@@ -47,11 +47,11 @@
     "WadoRoot": "/wado",
     "Host": "localhost",
     "Ssl": false,
-    "//-studies-": "MainDicomTags = Orthanc serves the tags cached in SQLite — no disk reads.",
-    "StudiesMetadata": "MainDicomTags",
-    "//-series-": "Was 'Full' — that made Orthanc open every DICOM file on disk to harvest every tag on each metadata request. At 295-instance MRI studies that was 22s per waiting HTTP and ~5 min to fully open a study in OHIF. 'MainDicomTags' returns the cached set (what OHIF actually uses to lay out the viewer) from the SQLite index instantly; per-instance full metadata is still available via individual WADO calls when truly needed.",
+    "//-studies-": "OHIF issue #1680 — viewer hangs with MainDicomTags here, requires Full. Study-level metadata is fetched once per study open, so the disk read cost is bounded.",
+    "StudiesMetadata": "Full",
+    "//-series-": "Series metadata served from the SQLite index — no file reads. Per-series request at 295-instance MR was 22s with 'Full' because Orthanc opened every DICOM file; MainDicomTags makes it ~50ms.",
     "SeriesMetadata": "MainDicomTags",
-    "//-cache-": "Explicitly cache the computed metadata list per series so we only rebuild it when the series changes.",
+    "//-cache-": "Cache the computed metadata list per series so we only rebuild it when the series changes.",
     "SeriesMetadataCacheSize": 200
   },
 
