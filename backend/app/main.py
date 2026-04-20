@@ -77,7 +77,13 @@ class BrowserCacheHeaders(BaseHTTPMiddleware):
             response.headers["Cache-Control"] = "private, max-age=5"
             response.headers["Vary"] = "Authorization"
         elif any(path.startswith(p) for p in _PHI_PATHS):
-            response.headers["Cache-Control"] = "no-store"
+            # Keyed per session via Vary: Authorization so another user on the
+            # same browser never sees a different session's PHI. Short max-age
+            # lets Cloudflare collapse concurrent identical requests + the
+            # browser reuses within a paint cycle. must-revalidate forces an
+            # upstream check once stale instead of indefinitely reusing.
+            response.headers["Cache-Control"] = "private, max-age=5, must-revalidate"
+            response.headers["Vary"] = "Authorization"
         return response
 
 
