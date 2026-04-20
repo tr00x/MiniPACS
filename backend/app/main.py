@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.database import init_db
@@ -36,6 +37,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Short browser-side cache on read-heavy list endpoints.
+# Worklist, patients, dashboard stats are viewed by several users at once and
+# refetched on every client-side navigation. 5s private cache collapses those
+# into a single network trip without risking staleness (backend cache is 8-15s,
+# so max end-to-end staleness is still within the backend TTL).
+_CACHEABLE_PATHS = (
+    "/api/studies",
+    "/api/patients",
+    "/api/stats",
+    "/api/pacs-nodes",
+    "/api/viewers",
+    "/api/settings",
+)
+
+
+class BrowserCacheHeaders(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if (
+            request.method == "GET"
+            and 200 <= response.status_code < 300
+            and any(request.url.path.startswith(p) for p in _CACHEABLE_PATHS)
+            and "cache-control" not in (h.lower() for h in response.headers)
+        ):
+            response.headers["Cache-Control"] = "private, max-age=5"
+        return response
+
+
+app.add_middleware(BrowserCacheHeaders)
 
 
 app.include_router(auth_router)
