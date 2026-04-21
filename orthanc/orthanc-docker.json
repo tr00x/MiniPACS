@@ -7,8 +7,8 @@
   "MaximumStorageSize": 0,
   "MaximumPatientCount": 0,
 
-  "//": "With 7.6GB RAM available on the host we can give SQLite a 256MB in-process page cache, on top of OS page cache.",
-  "SQLiteCacheSize": 268435456,
+  "//": "7.6GB RAM host + SSD — use RAM heavily to avoid even SSD round-trips. 1.5GB SQLite page cache holds the entire ~640MB index plus headroom.",
+  "SQLiteCacheSize": 1610612736,
 
   "DicomServerEnabled": true,
   "DicomAet": "MINIPACS",
@@ -20,8 +20,8 @@
   "HttpServerEnabled": true,
   "HttpPort": 8042,
 
-  "//-mmap-": "mmap the SQLite index so OS page cache serves it zero-copy. Ignored on older Orthanc builds, safe.",
-  "SQLite": { "MmapSize": 1073741824 },
+  "//-mmap-": "mmap the SQLite index so OS page cache serves it zero-copy. 2GB covers index + attachment metadata table on SSD.",
+  "SQLite": { "MmapSize": 2147483648 },
   "RemoteAccessAllowed": true,
   "AuthenticationEnabled": true,
   "RegisteredUsers": {},
@@ -37,7 +37,7 @@
   "HttpTimeout": 60,
   "//-http-threads-": "Bumped from 10 -> 50. OHIF open fires ~150 parallel HTTP requests (metadata + frames). 10 threads serialized them; 50 fits comfortably in 7.6GB RAM (~2MB stack each).",
   "HttpThreadsCount": 50,
-  "ConcurrentJobs": 2,
+  "ConcurrentJobs": 6,
   "//-access-": "Never was too aggressive — OHIF per-series metadata with RequestedTags silently hung because Orthanc refused to touch disk to resolve tags, and CF Tunnel cut the connection at 100s. Answers mode allows disk read only when assembling the final answer, not during the find phase.",
   "StorageAccessOnFind": "Answers",
 
@@ -71,8 +71,8 @@
     "StudiesMetadata": "Full",
     "//-series-": "Series metadata served from the SQLite index — no file reads. Per-series request at 295-instance MR was 22s with 'Full' because Orthanc opened every DICOM file; MainDicomTags makes it ~50ms.",
     "SeriesMetadata": "MainDicomTags",
-    "//-cache-": "Cache the computed metadata list per series. Raised from 200 to 5000 — warm-second-open stays instant across a working set of ~5000 series (~50 MB RAM budget, well within 7.6GB).",
-    "SeriesMetadataCacheSize": 5000
+    "//-cache-": "Cache the computed metadata list per series. 30000 × ~10KB ≈ 300MB — holds every series in the archive with headroom. Warm second-open returns from RAM.",
+    "SeriesMetadataCacheSize": 30000
   },
 
   "Transfers": {
