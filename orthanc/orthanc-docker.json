@@ -60,6 +60,12 @@
     "Study": []
   },
 
+  "OHIF": {
+    "RouterBasename": "/ohif-plugin/",
+    "DataSource": "dicom-json",
+    "Preload": true
+  },
+
   "DicomWeb": {
     "Enable": true,
     "Root": "/dicom-web/",
