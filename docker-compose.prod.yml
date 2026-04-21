@@ -11,6 +11,7 @@ services:
       ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USERNAME:-orthanc}":"${ORTHANC_PASSWORD}"}'
       DICOM_WEB_PLUGIN_ENABLED: "true"
       TRANSFERS_PLUGIN_ENABLED: "true"
+      STONE_WEB_VIEWER_PLUGIN_ENABLED: "true"
     ports:
       - "48924:4242"  # DICOM C-STORE/C-ECHO (LAN + internet via port forward)
     healthcheck:
