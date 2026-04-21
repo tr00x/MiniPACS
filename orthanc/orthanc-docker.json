@@ -41,6 +41,25 @@
   "//-access-": "Never was too aggressive — OHIF per-series metadata with RequestedTags silently hung because Orthanc refused to touch disk to resolve tags, and CF Tunnel cut the connection at 100s. Answers mode allows disk read only when assembling the final answer, not during the find phase.",
   "StorageAccessOnFind": "Answers",
 
+  "//-extra-tags-": "OHIF viewer needs these tags at query time. Without them Orthanc has to open DICOM files from disk which takes >100s for multi-series studies and trips Cloudflare Tunnel's 100s edge timeout (HTTP 524). Running /tools/reconstruct once after adding these makes every subsequent metadata call SQLite-only.",
+  "ExtraMainDicomTags": {
+    "Instance": [
+      "Rows", "Columns",
+      "ImagePositionPatient", "ImageOrientationPatient",
+      "PixelSpacing", "SliceThickness",
+      "NumberOfFrames",
+      "PhotometricInterpretation",
+      "BitsAllocated", "BitsStored", "HighBit", "PixelRepresentation",
+      "SamplesPerPixel",
+      "WindowCenter", "WindowWidth",
+      "RescaleIntercept", "RescaleSlope",
+      "InstanceNumber",
+      "Laterality"
+    ],
+    "Series": ["FrameOfReferenceUID", "BodyPartExamined"],
+    "Study": []
+  },
+
   "DicomWeb": {
     "Enable": true,
     "Root": "/dicom-web/",
