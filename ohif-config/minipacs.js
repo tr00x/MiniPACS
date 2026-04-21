@@ -4,7 +4,7 @@ window.config = {
   extensions: [],
   modes: [],
   showStudyList: false,
-  maxNumberOfWebWorkers: 3,
+  maxNumberOfWebWorkers: 8,
   showLoadingIndicator: true,
   strictZSpacingForVolumeViewport: true,
   defaultDataSourceName: 'orthanc',
