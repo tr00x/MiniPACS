@@ -103,6 +103,7 @@ export function getModalityColor(modality: string): string {
 /** Favicon URLs via Google proxy (avoids CORS) — size 64 for crisp display */
 export const VIEWER_LOGOS: Record<string, string> = {
   ohif: "https://www.google.com/s2/favicons?domain=ohif.org&sz=64",
+  stone: "https://www.google.com/s2/favicons?domain=orthanc-server.com&sz=64",
   osirix: "https://www.google.com/s2/favicons?domain=osirix-viewer.com&sz=64",
   horos: "https://www.google.com/s2/favicons?domain=horosproject.org&sz=64",
   radiant: "https://www.google.com/s2/favicons?domain=radiantviewer.com&sz=64",

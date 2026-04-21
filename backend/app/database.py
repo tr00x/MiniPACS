@@ -145,12 +145,37 @@ async def init_db():
         except Exception:
             pass  # Column already exists
 
+        # Backfill Stone Web Viewer for existing installs that already have
+        # seed rows (seed block below only runs when table is empty).
+        try:
+            cur = await db.execute(
+                "SELECT 1 FROM external_viewers WHERE name = ? LIMIT 1",
+                ("Stone Web Viewer",),
+            )
+            if not await cur.fetchone():
+                await db.execute(
+                    "INSERT INTO external_viewers (name, url_scheme, is_enabled, description, icon_key, sort_order) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        "Stone Web Viewer",
+                        "/stone-webviewer/app/?study={StudyInstanceUID}",
+                        1,
+                        "Native WASM viewer by Orthanc team",
+                        "stone",
+                        2,
+                    ),
+                )
+                await db.commit()
+        except Exception:
+            pass
+
         # Seed default external viewers if none exist
         cursor = await db.execute("SELECT COUNT(*) FROM external_viewers")
         count = (await cursor.fetchone())[0]
         if count == 0:
             default_viewers = [
                 ("OHIF Viewer", "/ohif/viewer?StudyInstanceUIDs={StudyInstanceUID}", 1, "Built-in web viewer", "ohif"),
+                ("Stone Web Viewer", "/stone-webviewer/app/?study={StudyInstanceUID}", 1, "Native WASM viewer by Orthanc team", "stone"),
                 ("OsiriX", "osirix://open?StudyInstanceUID={StudyInstanceUID}", 0, "macOS DICOM viewer", "osirix"),
                 ("Horos", "horos://open?StudyInstanceUID={StudyInstanceUID}", 0, "Free macOS DICOM viewer", "horos"),
                 ("RadiAnt", "radiant://open?StudyInstanceUID={StudyInstanceUID}", 0, "Windows/Mac DICOM viewer", "radiant"),
