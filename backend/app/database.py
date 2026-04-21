@@ -158,7 +158,7 @@ async def init_db():
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         "Stone Web Viewer",
-                        "/stone-webviewer/app/?study={StudyInstanceUID}",
+                        "/stone-webviewer/index.html?study={StudyInstanceUID}",
                         1,
                         "Native WASM viewer by Orthanc team",
                         "stone",
@@ -175,7 +175,7 @@ async def init_db():
         if count == 0:
             default_viewers = [
                 ("OHIF Viewer", "/ohif/viewer?StudyInstanceUIDs={StudyInstanceUID}", 1, "Built-in web viewer", "ohif"),
-                ("Stone Web Viewer", "/stone-webviewer/app/?study={StudyInstanceUID}", 1, "Native WASM viewer by Orthanc team", "stone"),
+                ("Stone Web Viewer", "/stone-webviewer/index.html?study={StudyInstanceUID}", 1, "Native WASM viewer by Orthanc team", "stone"),
                 ("OsiriX", "osirix://open?StudyInstanceUID={StudyInstanceUID}", 0, "macOS DICOM viewer", "osirix"),
                 ("Horos", "horos://open?StudyInstanceUID={StudyInstanceUID}", 0, "Free macOS DICOM viewer", "horos"),
                 ("RadiAnt", "radiant://open?StudyInstanceUID={StudyInstanceUID}", 0, "Windows/Mac DICOM viewer", "radiant"),
