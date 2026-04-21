@@ -445,8 +445,8 @@ minipacs/
 | Endpoint Group | Routes | Description |
 |---------------|--------|-------------|
 | `/api/auth` | 4 | Login, logout, refresh, me |
-| `/api/patients` | 2 | List (paginated), detail with studies |
-| `/api/studies` | 5 | List (filtered), detail, download, series |
+| `/api/patients` | 3 | List (paginated), detail, full-bundle aggregate |
+| `/api/studies` | 6 | List (filtered), detail, full-bundle aggregate, download, series |
 | `/api/transfers` | 3 | Send, retry, history |
 | `/api/shares` | 4 | Create, update, revoke, list |
 | `/api/pacs-nodes` | 5 | CRUD + C-ECHO test |
@@ -457,6 +457,26 @@ minipacs/
 | `/api/audit-log` | 1 | Filtered, paginated log |
 | `/api/stats` | 2 | Dashboard stats + system health |
 | `/api/patient-portal` | 5 | Public: view, download, PIN verify |
+
+---
+
+## Performance Tuning
+
+MiniPACS is tuned for single-worker boxes (no Redis). Key knobs:
+
+| Layer | Setting | Why |
+|-------|---------|-----|
+| Backend | In-memory TTL caches on `/api/studies`, `/api/patients`, `/api/dashboard`, `/api/studies/{id}/full` | Coalesces identical queries from concurrent viewers |
+| Backend | SQLite indexes on `study_reports.orthanc_study_id`, `patient_shares.orthanc_patient_id`, `transfer_log.orthanc_study_id`, `audit_log(user_id, timestamp)` | Hot foreign keys on `/full` aggregates |
+| Backend | httpx pool `max_connections=100`, keepalive 50, TCP+auth prewarm at boot | First user request doesn't pay TCP+BasicAuth |
+| Frontend | React Query 30s staleTime + hover-prefetch on list rows | Click → page paints instantly |
+| Frontend | Route-level `lazy()` + Vite `manualChunks` | Smaller initial bundle, warm vendors cached |
+| nginx | `proxy_cache` for `/dicom-web/` (10m × 2g), upstream keepalive 32 | DICOMweb metadata served from disk cache on re-open |
+| Orthanc | `StorageCompression: false`, `SQLiteCacheSize: 256MB`, `MmapSize: 1GB`, `HttpThreadsCount: 50` | Wider concurrency, bigger SQLite page cache |
+| Orthanc | `ExtraMainDicomTags` with OHIF's required tag set (`Rows`, `PixelSpacing`, `ImagePositionPatient`, `WindowCenter`, …) | Avoids disk reads on per-series metadata calls — critical when fronted by Cloudflare Tunnel's 100s edge timeout |
+| Orthanc | `SeriesMetadata: "MainDicomTags"`, `StudiesMetadata: "Full"`, `EnableMetadataCache: true` (default) | First study open caches metadata as gzipped attachment; subsequent opens are SQLite-only |
+
+After adding or changing `ExtraMainDicomTags`, run `scripts/reconstruct_all.py` once — it iterates every study and calls `/studies/{id}/reconstruct` to backfill the new tags into the index.
 
 ---
 
