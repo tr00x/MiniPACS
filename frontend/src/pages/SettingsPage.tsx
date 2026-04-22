@@ -473,8 +473,8 @@ export function SettingsPage() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="viewer_url">URL Scheme</Label>
-              <Input id="viewer_url" value={viewerForm.url_scheme} onChange={(e) => setViewerForm({ ...viewerForm, url_scheme: e.target.value })} placeholder="/ohif/viewer?StudyInstanceUIDs={StudyInstanceUID}" />
-              <p className="text-xs text-muted-foreground">Use {"{StudyInstanceUID}"} or {"{study_id}"} as placeholders</p>
+              <Input id="viewer_url" value={viewerForm.url_scheme} onChange={(e) => setViewerForm({ ...viewerForm, url_scheme: e.target.value })} placeholder="/ohif/viewer?url=/orthanc/studies/{study_id}/ohif-dicom-json" />
+              <p className="text-xs text-muted-foreground">Use {"{StudyInstanceUID}"} (DICOM UID) or {"{study_id}"} (Orthanc hash) as placeholders</p>
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div className="grid gap-2">

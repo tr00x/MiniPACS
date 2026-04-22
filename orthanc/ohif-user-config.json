@@ -1,0 +1,14 @@
+{
+  "//": "OHIF config overrides layered on top of the Orthanc OHIF plugin's bundled app-config.js. Only plain-JSON keys — no function bodies (the plugin merges JSON, it does not eval JS strings). Mounted at /etc/orthanc/ohif-user-config.json and referenced from OHIF.UserConfiguration in orthanc.json.",
+
+  "//-workers-": "One decoder worker per core (host has 8+). Previous custom bundle tested this against a 3000-instance CT — 8 workers decode ~3x faster than the 3-worker default before worker-pool saturation.",
+  "maxNumberOfWebWorkers": 8,
+
+  "//-prefetch-": "Eagerly pull metadata for the next series while the user scrolls current — hides per-series cold-fetch latency when radiologist advances from T1 to T2 to FLAIR.",
+  "maxNumberOfImagesToPrefetch": 25,
+
+  "//-ui-": "investigationalUseDialog hidden — radiologists know the tool is production.",
+  "investigationalUseDialog": {
+    "option": "never"
+  }
+}

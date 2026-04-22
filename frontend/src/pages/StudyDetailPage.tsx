@@ -354,7 +354,7 @@ export function StudyDetailPage() {
             <Maximize className="h-4 w-4" />
             Fullscreen
           </Button>
-          <Button variant="outline" onClick={() => window.open(`/ohif/viewer?StudyInstanceUIDs=${studyUid}`, '_blank')} className="gap-2">
+          <Button variant="outline" onClick={() => window.open(`/ohif/viewer?url=/orthanc/studies/${id}/ohif-dicom-json`, '_blank')} className="gap-2">
             <ExternalLink className="h-4 w-4" />
             New Tab
           </Button>
@@ -398,7 +398,7 @@ export function StudyDetailPage() {
       {/* DICOM Viewer */}
       {studyUid && (
         <div ref={viewerContainerRef} className="rounded-lg border bg-black overflow-hidden">
-          <OhifViewer studyInstanceUID={studyUid} className={isFullscreen ? "h-screen w-full" : "h-[600px] w-full"} />
+          <OhifViewer orthancStudyID={id!} className={isFullscreen ? "h-screen w-full" : "h-[600px] w-full"} />
         </div>
       )}
 
