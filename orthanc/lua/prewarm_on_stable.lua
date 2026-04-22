@@ -33,9 +33,12 @@ function OnStableStudy(studyId, tags, metadata)
   end
 
   local ok2, result2 = pcall(RestApiGet, '/dicom-web/studies/' .. uid .. '/metadata', true)
-  if ok2 then
+  if ok2 and result2 ~= nil then
     print('prewarm: DICOMweb metadata warmed for ' .. uid .. ' (' .. #result2 .. ' bytes)')
   else
+    -- pcall returns (true, nil) when Orthanc logs E-level for the URI but does
+    -- not raise a Lua error — the `if ok2 then #result2` form crashes with
+    -- "attempt to get length of nil value". Check both branches.
     print('prewarm: DICOMweb metadata failed for ' .. uid .. ': ' .. tostring(result2))
   end
 end

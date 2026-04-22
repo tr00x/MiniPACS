@@ -398,7 +398,7 @@ export function StudyDetailPage() {
       {/* DICOM Viewer */}
       {studyUid && (
         <div ref={viewerContainerRef} className="rounded-lg border bg-black overflow-hidden">
-          <OhifViewer orthancStudyID={id!} className={isFullscreen ? "h-screen w-full" : "h-[600px] w-full"} />
+          <OhifViewer studyInstanceUID={studyUid} className={isFullscreen ? "h-screen w-full" : "h-[600px] w-full"} />
         </div>
       )}
 

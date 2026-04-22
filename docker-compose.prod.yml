@@ -22,7 +22,7 @@ services:
       - orthanc-data:/var/lib/orthanc/db
       - ./orthanc/orthanc-docker.json:/etc/orthanc/orthanc.json:ro
       - ./orthanc/lua:/etc/orthanc/lua:ro
-      - ./orthanc/ohif-user-config.json:/etc/orthanc/ohif-user-config.json:ro
+      - ./orthanc/ohif-user-config.js:/etc/orthanc/ohif-user-config.js:ro
     environment:
       ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
       ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"

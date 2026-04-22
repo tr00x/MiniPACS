@@ -1,17 +1,15 @@
 interface OhifViewerProps {
-  orthancStudyID: string;
+  studyInstanceUID: string;
   className?: string;
 }
 
-export function OhifViewer({ orthancStudyID, className }: OhifViewerProps) {
-  // Orthanc OHIF plugin + dicom-json datasource. The `url=` param points at
-  // the precomputed JSON attachment generated OnStableStudy — viewer opens
-  // from a single DB read instead of re-reading every .dcm file from disk.
-  // Absolute URL via nginx /orthanc/ reverse proxy — relative (../studies/…)
-  // would resolve to /studies/… on the MiniPACS frontend, which nginx does
-  // not route to Orthanc. Plugin's own server serves the dicom-json endpoint
-  // at Orthanc REST root (/studies/{id}/ohif-dicom-json).
-  const src = `/ohif/viewer?url=/orthanc/studies/${orthancStudyID}/ohif-dicom-json`;
+// Named `OhifViewer` for historical reasons but embeds Orthanc's Stone Web
+// Viewer — a ~1MB WASM viewer that opens studies in 2-3s cold vs 25-40s for
+// OHIF. Stone covers the day-to-day radiologist workflow (scroll, W/L, zoom,
+// measure). OHIF stays available via the "Open in OHIF" button on the study
+// detail page for the rare cases that need MPR/segmentation/3D.
+export function OhifViewer({ studyInstanceUID, className }: OhifViewerProps) {
+  const src = `/stone-webviewer/index.html?study=${studyInstanceUID}`;
 
   return (
     <div className="overflow-hidden w-full max-w-full">
