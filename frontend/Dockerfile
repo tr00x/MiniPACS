@@ -16,12 +16,8 @@ RUN apk add --no-cache gettext
 # Copy built React app
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Copy OHIF viewer (pre-built) + MiniPACS branding
-COPY ohif-dist/ /usr/share/nginx/ohif/
-COPY ohif-config/minipacs.js /usr/share/nginx/ohif/app-config.js
-COPY ohif-config/minipacs-brand.css /usr/share/nginx/ohif/minipacs-brand.css
-RUN sed -i 's|</head>|<link href="/ohif/minipacs-brand.css" rel="stylesheet"></head>|' /usr/share/nginx/ohif/index.html && \
-    sed -i 's|<head>|<head><script>window.__filename="";window.__dirname="";globalThis.__filename="";globalThis.__dirname="";</script>|' /usr/share/nginx/ohif/index.html
+# OHIF viewer is served by the Orthanc OHIF plugin (proxied through nginx
+# at /ohif/). No static bundle baked into this image anymore.
 
 # Copy nginx templates (dev with TLS, prod HTTP-only for CF Tunnel)
 COPY nginx/nginx-docker.conf /etc/nginx/templates/nginx-dev.conf.template

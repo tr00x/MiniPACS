@@ -5,12 +5,15 @@ services:
     volumes:
       - orthanc-data:/var/lib/orthanc/db
       - ./orthanc/orthanc-docker.json:/etc/orthanc/orthanc.json:ro
+      - ./orthanc/lua:/etc/orthanc/lua:ro
     environment:
       ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
       ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"
       ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USERNAME:-orthanc}":"${ORTHANC_PASSWORD}"}'
       DICOM_WEB_PLUGIN_ENABLED: "true"
       TRANSFERS_PLUGIN_ENABLED: "true"
+      STONE_WEB_VIEWER_PLUGIN_ENABLED: "true"
+      OHIF_PLUGIN_ENABLED: "true"
     ports:
       - "48923:8042"  # Orthanc HTTP API (for Vite dev proxy)
       - "48924:4242"  # DICOM C-STORE/C-ECHO
@@ -27,6 +30,7 @@ services:
     restart: unless-stopped
     volumes:
       - minipacs-db:/app/data
+      - ./scripts:/app/scripts:ro
     environment:
       SECRET_KEY: "${SECRET_KEY}"
       ORTHANC_URL: "http://orthanc:8042"

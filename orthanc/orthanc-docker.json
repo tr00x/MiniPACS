@@ -57,11 +57,15 @@
     "Study": ["ModalitiesInStudy"]
   },
 
+  "//-ohif-": "OHIF plugin is now THE viewer at /ohif/ (custom bundle removed). dicom-json datasource reads the precomputed SQLite attachment that the plugin generates OnStableStudy — zero disk I/O on open. Preload=true makes the SPA eagerly fetch metadata on route mount so opening feels instant.",
   "OHIF": {
-    "RouterBasename": "/ohif-plugin/",
+    "RouterBasename": "/ohif/",
     "DataSource": "dicom-json",
-    "Preload": false
+    "Preload": true
   },
+
+  "//-lua-": "OnStableStudy prewarm — generates ohif-dicom-json attachment AND warms DICOMweb metadata 60s after last C-STORE. Opens from equipment are instant without any user touching the viewer.",
+  "LuaScripts": ["/etc/orthanc/lua/prewarm_on_stable.lua"],
 
   "DicomWeb": {
     "Enable": true,

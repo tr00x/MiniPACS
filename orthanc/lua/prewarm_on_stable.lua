@@ -1,17 +1,22 @@
--- Auto-prewarm DICOMweb metadata when a study becomes stable.
+-- Auto-prewarm DICOMweb + OHIF plugin metadata when a study becomes stable.
 --
 -- OnStableStudy fires after StableAge seconds of no new instances in a study
--- (Orthanc default 60s). By the time it fires, the study is fully uploaded
--- and will not change — exactly when we want to populate the DICOMweb
--- metadata cache.
+-- (60s). By then the study is fully uploaded and won't change — the exact
+-- moment to precompute everything viewers will ask for.
 --
--- RestApiGet hits the built-in DICOMweb plugin handler which reads every
--- instance's DICOM tags, builds the metadata response, and stores it as a
--- gzipped attachment (EnableMetadataCache=true is the Orthanc default).
--- The first real OHIF open then gets a ~200ms response from Orthanc, which
--- nginx caches for 7d → subsequent opens are ~30ms HIT.
+-- Two prewarms per study, both safe to run in the Lua worker thread:
 --
--- Runs in a worker thread, so blocking here does not delay C-STORE ingest.
+-- 1. /studies/{id}/ohif-dicom-json
+--    Triggers the Orthanc OHIF plugin to read every instance's DICOM tags
+--    and store the JSON as a SQLite attachment. Viewer opens from that
+--    attachment — zero disk I/O at open (1-2s cold, <500ms warm).
+--
+-- 2. /dicom-web/studies/{uid}/metadata
+--    Populates the DICOMweb metadata response which the OHIF viewer and
+--    nginx disk cache (7d TTL) both rely on.
+--
+-- Failures are logged but don't block — study stays usable even if prewarm
+-- fails; the first viewer open regenerates on demand.
 
 function OnStableStudy(studyId, tags, metadata)
   local uid = tags['StudyInstanceUID']
@@ -20,10 +25,17 @@ function OnStableStudy(studyId, tags, metadata)
     return
   end
 
-  local ok, result = pcall(RestApiGet, '/dicom-web/studies/' .. uid .. '/metadata', true)
-  if ok then
-    print('prewarm: warmed metadata for study ' .. uid .. ' (' .. #result .. ' bytes)')
+  local ok1, err1 = pcall(RestApiGet, '/studies/' .. studyId .. '/ohif-dicom-json', true)
+  if ok1 then
+    print('prewarm: OHIF attachment ready for ' .. uid)
   else
-    print('prewarm: failed for study ' .. uid .. ': ' .. tostring(result))
+    print('prewarm: OHIF attachment failed for ' .. uid .. ': ' .. tostring(err1))
+  end
+
+  local ok2, result2 = pcall(RestApiGet, '/dicom-web/studies/' .. uid .. '/metadata', true)
+  if ok2 then
+    print('prewarm: DICOMweb metadata warmed for ' .. uid .. ' (' .. #result2 .. ' bytes)')
+  else
+    print('prewarm: DICOMweb metadata failed for ' .. uid .. ': ' .. tostring(result2))
   end
 end
