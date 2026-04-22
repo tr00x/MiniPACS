@@ -6,6 +6,7 @@
 #
 # Destroys:
 #   docker volume: minipacs_orthanc-data    (all DICOM instances)
+#   docker volume: minipacs_orthanc-pg      (PostgreSQL index — Orthanc catalog)
 #   docker volume: minipacs_minipacs-db     (users, patient map, shares)
 #   docker volume: minipacs_nginx-cache     (DICOMweb disk cache)
 #   file: backups/import_state.json         (archive importer resume state)
@@ -85,7 +86,7 @@ echo "[1/4] stopping stack..."
 $COMPOSE down
 
 echo "[2/4] removing data volumes..."
-for v in minipacs_orthanc-data minipacs_minipacs-db minipacs_nginx-cache; do
+for v in minipacs_orthanc-data minipacs_orthanc-pg minipacs_minipacs-db minipacs_nginx-cache; do
   wipe_volume_with_progress "$v"
 done
 

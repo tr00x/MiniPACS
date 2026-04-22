@@ -57,22 +57,23 @@
     "Study": ["ModalitiesInStudy"]
   },
 
-  "//-ohif-": "OHIF plugin is now THE viewer at /ohif/ (custom bundle removed). dicom-json datasource reads the precomputed SQLite attachment that the plugin generates OnStableStudy — zero disk I/O on open. Preload=true makes the SPA eagerly fetch metadata on route mount so opening feels instant.",
+  "//-ohif-": "OHIF plugin is now THE viewer at /ohif/ (custom bundle removed). dicom-json datasource reads the precomputed JSON attachment that the plugin generates OnStableStudy — zero disk I/O on open. Preload=true makes the SPA eagerly fetch metadata on route mount so opening feels instant. UserConfiguration overrides the bundled app-config.js — bumps web workers to 8 (matches core count) and restores MiniPACS branding.",
   "OHIF": {
     "RouterBasename": "/ohif/",
     "DataSource": "dicom-json",
-    "Preload": true
+    "Preload": true,
+    "UserConfiguration": "/etc/orthanc/ohif-user-config.json"
   },
 
   "//-lua-": "OnStableStudy prewarm — generates ohif-dicom-json attachment AND warms DICOMweb metadata 60s after last C-STORE. Opens from equipment are instant without any user touching the viewer.",
   "LuaScripts": ["/etc/orthanc/lua/prewarm_on_stable.lua"],
 
-  "//-postgresql-": "PostgreSQL holds the Orthanc index (replaces SQLite's global write lock with row-level locks — real concurrent C-STORE from multiple modalities). EnableStorage=false keeps DICOM blobs on disk (simpler backup, no PG bloat). Connection settings come from POSTGRESQL_* env vars in docker-compose; this block only turns the plugin on and sizes the connection pool.",
+  "//-postgresql-": "PostgreSQL holds the Orthanc index (replaces SQLite's global write lock with row-level locks — real concurrent C-STORE from multiple modalities). EnableStorage=false keeps DICOM blobs on disk (simpler backup, no PG bloat). Connection settings come from POSTGRESQL_* env vars in docker-compose; this block only turns the plugin on and sizes the connection pool. Lock=false because this is a single-instance deployment — an advisory lock adds nothing and causes Orthanc to exit whenever the PG connection blips. IndexConnectionsCount=25 sized for HttpThreadsCount=50 + ConcurrentJobs=6 + burst DICOMweb metadata — the previous 10 serialized under moderate load.",
   "PostgreSQL": {
     "EnableIndex": true,
     "EnableStorage": false,
-    "Lock": true,
-    "IndexConnectionsCount": 10
+    "Lock": false,
+    "IndexConnectionsCount": 25
   },
 
   "DicomWeb": {

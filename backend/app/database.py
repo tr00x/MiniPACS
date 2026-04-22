@@ -169,12 +169,34 @@ async def init_db():
         except Exception:
             pass
 
+        # Migrate OHIF Viewer URL to the Orthanc plugin's dicom-json form.
+        # Anything that is NOT already pointing at /orthanc/studies/…/ohif-
+        # dicom-json gets rewritten: covers the legacy StudyInstanceUIDs=… URL
+        # AND an earlier (broken) relative ../studies/… URL we briefly shipped
+        # that nginx does not proxy. New URL resolves via nginx /orthanc/
+        # reverse proxy → Orthanc REST endpoint serving the precomputed JSON.
+        try:
+            await db.execute(
+                "UPDATE external_viewers SET "
+                "url_scheme = ?, description = ? "
+                "WHERE name = ? AND url_scheme NOT LIKE ?",
+                (
+                    "/ohif/viewer?url=/orthanc/studies/{study_id}/ohif-dicom-json",
+                    "Built-in web viewer (Orthanc OHIF plugin, dicom-json datasource)",
+                    "OHIF Viewer",
+                    "%/orthanc/studies/%",
+                ),
+            )
+            await db.commit()
+        except Exception:
+            pass
+
         # Seed default external viewers if none exist
         cursor = await db.execute("SELECT COUNT(*) FROM external_viewers")
         count = (await cursor.fetchone())[0]
         if count == 0:
             default_viewers = [
-                ("OHIF Viewer", "/ohif/viewer?StudyInstanceUIDs={StudyInstanceUID}", 1, "Built-in web viewer (Orthanc OHIF plugin, dicom-json datasource)", "ohif"),
+                ("OHIF Viewer", "/ohif/viewer?url=/orthanc/studies/{study_id}/ohif-dicom-json", 1, "Built-in web viewer (Orthanc OHIF plugin, dicom-json datasource)", "ohif"),
                 ("Stone Web Viewer", "/stone-webviewer/index.html?study={StudyInstanceUID}", 1, "Native WASM viewer by Orthanc team", "stone"),
                 ("OsiriX", "osirix://open?StudyInstanceUID={StudyInstanceUID}", 0, "macOS DICOM viewer", "osirix"),
                 ("Horos", "horos://open?StudyInstanceUID={StudyInstanceUID}", 0, "Free macOS DICOM viewer", "horos"),
