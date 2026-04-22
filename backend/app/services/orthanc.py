@@ -360,16 +360,16 @@ async def get_series(series_id: str):
 
 
 async def get_series_instances(series_id: str):
-    """Fetch all instances of a series in parallel (was sequential N+1)."""
-    series = await get_series(series_id)
-    instance_ids = series.get("Instances", [])
+    """All instances of a series — ONE call via /series/{id}/instances?expand.
 
-    async def fetch_instance(iid: str):
-        r = await _http().get(f"/instances/{iid}")
-        r.raise_for_status()
-        return r.json()
-
-    return list(await asyncio.gather(*[fetch_instance(iid) for iid in instance_ids]))
+    Replaces the earlier N+1 (fetch series, then fan out per-instance /instances/{iid}
+    in parallel — fine for small series, catastrophic for a 300-instance MR because
+    Orthanc must answer 300 simultaneous index reads while also serving the user).
+    Orthanc's native expand walks the children server-side in one round-trip.
+    """
+    resp = await _http().get(f"/series/{series_id}/instances", params={"expand": ""})
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def download_study_stream(study_id: str) -> AsyncIterator[bytes]:

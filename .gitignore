@@ -25,3 +25,8 @@ CLAUDE.md
 .claude/
 docs/superpowers/
 graphify-out/
+
+# Local runtime state — never commit (includes 100+GB of .tar.gz backups)
+backups/
+# docker-compose manual backups
+docker-compose.*.bak*
