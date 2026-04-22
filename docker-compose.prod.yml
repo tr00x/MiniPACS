@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    volumes:
+      - orthanc-pg:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: orthanc
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: orthanc
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orthanc -d orthanc"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
   orthanc:
     image: orthancteam/orthanc
     restart: unless-stopped
@@ -14,6 +30,20 @@ services:
       TRANSFERS_PLUGIN_ENABLED: "true"
       STONE_WEB_VIEWER_PLUGIN_ENABLED: "true"
       OHIF_PLUGIN_ENABLED: "true"
+      # PostgreSQL index. EnableStorage stays false — DICOM files remain on
+      # disk under orthanc-data. PG only holds the SQLite-replacement index.
+      # On first start with an existing SQLite index in the volume, the plugin
+      # auto-migrates it into PG (one-shot, minutes). Subsequent restarts
+      # use PG exclusively — SQLite files in the volume are ignored.
+      POSTGRESQL_PLUGIN_ENABLED: "true"
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: "5432"
+      POSTGRESQL_DATABASE: orthanc
+      POSTGRESQL_USERNAME: orthanc
+      POSTGRESQL_PASSWORD: "${POSTGRES_PASSWORD}"
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "48924:4242"  # DICOM C-STORE/C-ECHO (LAN + internet via port forward)
     healthcheck:
@@ -21,7 +51,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 15s
+      start_period: 30s
 
   backend:
     build:
@@ -76,5 +106,6 @@ services:
 
 volumes:
   orthanc-data:
+  orthanc-pg:
   minipacs-db:
   nginx-cache:

@@ -67,6 +67,14 @@
   "//-lua-": "OnStableStudy prewarm — generates ohif-dicom-json attachment AND warms DICOMweb metadata 60s after last C-STORE. Opens from equipment are instant without any user touching the viewer.",
   "LuaScripts": ["/etc/orthanc/lua/prewarm_on_stable.lua"],
 
+  "//-postgresql-": "PostgreSQL holds the Orthanc index (replaces SQLite's global write lock with row-level locks — real concurrent C-STORE from multiple modalities). EnableStorage=false keeps DICOM blobs on disk (simpler backup, no PG bloat). Connection settings come from POSTGRESQL_* env vars in docker-compose; this block only turns the plugin on and sizes the connection pool.",
+  "PostgreSQL": {
+    "EnableIndex": true,
+    "EnableStorage": false,
+    "Lock": true,
+    "IndexConnectionsCount": 10
+  },
+
   "DicomWeb": {
     "Enable": true,
     "Root": "/dicom-web/",
