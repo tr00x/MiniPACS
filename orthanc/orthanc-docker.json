@@ -62,7 +62,7 @@
     "RouterBasename": "/ohif/",
     "DataSource": "dicom-json",
     "Preload": true,
-    "UserConfiguration": "/etc/orthanc/ohif-user-config.json"
+    "UserConfiguration": "/etc/orthanc/ohif-user-config.js"
   },
 
   "//-lua-": "OnStableStudy prewarm — generates ohif-dicom-json attachment AND warms DICOMweb metadata 60s after last C-STORE. Opens from equipment are instant without any user touching the viewer.",
@@ -73,7 +73,12 @@
     "EnableIndex": true,
     "EnableStorage": false,
     "Lock": false,
-    "IndexConnectionsCount": 25
+    "IndexConnectionsCount": 25,
+    "Host": "${POSTGRESQL_HOST}",
+    "Port": 5432,
+    "Database": "${POSTGRESQL_DATABASE}",
+    "Username": "${POSTGRESQL_USERNAME}",
+    "Password": "${POSTGRESQL_PASSWORD}"
   },
 
   "DicomWeb": {

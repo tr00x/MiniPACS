@@ -8,13 +8,14 @@ Usage (inside mcr.microsoft.com/playwright/python):
   python scripts/pw_bench.py <study_id>
 """
 import asyncio
+import os
 import sys
 import time
 from collections import defaultdict
 
 from playwright.async_api import async_playwright
 
-URL = "https://pacs.clintonmedical.net"
+URL = os.environ.get("PW_URL", "https://pacs.clintonmedical.net")
 USERNAME = "admin"
 PASSWORD = "minipac2026"
 STUDY_ID = sys.argv[1] if len(sys.argv) > 1 else "0a09bfbc-3fe97d69-c7f1b83e-0d9844af-b133e3b0"
@@ -33,12 +34,14 @@ def bucket(url: str) -> str:
         return "dicomweb-other"
     if "/api/" in url:
         return "api"
-    if "/ohif/" in url:
+    if "/ohif/" in url or "/stone-webviewer/" in url:
         if url.endswith(".js") or ".js?" in url or ".js/" in url:
-            return "ohif-js"
+            return "viewer-js"
         if url.endswith(".css") or ".css?" in url:
-            return "ohif-css"
-        return "ohif-other"
+            return "viewer-css"
+        if url.endswith(".wasm") or ".wasm?" in url:
+            return "viewer-wasm"
+        return "viewer-other"
     if "cloudflareinsights" in url:
         return "cf-insights"
     return "other"
@@ -76,6 +79,11 @@ async def run():
 
         page.on("response", lambda resp: asyncio.create_task(on_response(resp)))
 
+        errors: list[str] = []
+        page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
+        page.on("console", lambda msg: errors.append(f"[{msg.type}] {msg.text}  LOC={msg.location}") if msg.type in ("error", "warning") else None)
+        page.on("requestfailed", lambda req: errors.append(f"requestfailed: {req.url} — {req.failure}"))
+
         # --- phase 1: home + login page ---
         t = time.monotonic()
         await page.goto(URL, wait_until="networkidle", timeout=60000)
@@ -97,22 +105,19 @@ async def run():
 
         # --- phase 4: wait for embedded viewer iframe to mount + first image ---
         t = time.monotonic()
+        def is_viewer(url: str) -> bool:
+            return "/ohif/viewer" in url or "/stone-webviewer/" in url
         try:
-            frame = None
-            # OhifViewer.tsx mounts an iframe with /ohif/viewer
-            for fr in page.frames:
-                if "/ohif/viewer" in fr.url:
-                    frame = fr
-                    break
+            frame = next((fr for fr in page.frames if is_viewer(fr.url)), None)
             if frame is None:
-                iframe_el = await page.wait_for_selector('iframe[src*="/ohif/"]', timeout=30000)
+                iframe_el = await page.wait_for_selector(
+                    'iframe[src*="/stone-webviewer/"], iframe[src*="/ohif/viewer"]',
+                    timeout=30000,
+                )
                 frame = await iframe_el.content_frame()
                 await frame.wait_for_load_state("load", timeout=30000)
-            # OHIF draws into <canvas> inside .cornerstone-canvas. Wait for at least one.
-            await frame.wait_for_selector("canvas", timeout=60000, state="attached")
-            # ensure it actually drew something — canvas has non-zero size
             await frame.wait_for_function(
-                "() => { const c = document.querySelector('canvas'); return c && c.width > 0 && c.height > 0; }",
+                "() => Array.from(document.querySelectorAll('canvas')).some(c => c.width > 0 && c.height > 0)",
                 timeout=60000,
             )
         except Exception as exc:
@@ -123,7 +128,23 @@ async def run():
 
         total = time.monotonic() - t0
 
+        try:
+            for fr in page.frames:
+                if is_viewer(fr.url):
+                    print()
+                    print(f"=== iframe {fr.url}  —  last 500 chars ===")
+                    print(await fr.evaluate("document.body.innerText.slice(-500)"))
+                    break
+        except Exception as exc:
+            print(f"iframe dump failed: {exc}")
+
         await browser.close()
+
+    if errors:
+        print()
+        print(f"=== browser errors/warnings ({len(errors)}) ===")
+        for e in errors[:25]:
+            print(f"  {e[:250]}")
 
     print("=== phase timings (seconds) ===")
     for k, v in phases.items():
