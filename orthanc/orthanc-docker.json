@@ -45,25 +45,22 @@
   "ExtraMainDicomTags": {
     "Instance": [
       "Rows", "Columns",
-      "ImagePositionPatient", "ImageOrientationPatient",
       "PixelSpacing", "SliceThickness",
-      "NumberOfFrames",
       "PhotometricInterpretation",
       "BitsAllocated", "BitsStored", "HighBit", "PixelRepresentation",
       "SamplesPerPixel",
       "WindowCenter", "WindowWidth",
       "RescaleIntercept", "RescaleSlope",
-      "InstanceNumber",
       "Laterality"
     ],
-    "Series": ["FrameOfReferenceUID", "BodyPartExamined"],
-    "Study": []
+    "Series": ["FrameOfReferenceUID"],
+    "Study": ["ModalitiesInStudy"]
   },
 
   "OHIF": {
     "RouterBasename": "/ohif-plugin/",
     "DataSource": "dicom-json",
-    "Preload": true
+    "Preload": false
   },
 
   "DicomWeb": {
