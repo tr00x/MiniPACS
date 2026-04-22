@@ -174,7 +174,7 @@ async def init_db():
         count = (await cursor.fetchone())[0]
         if count == 0:
             default_viewers = [
-                ("OHIF Viewer", "/ohif/viewer?StudyInstanceUIDs={StudyInstanceUID}", 1, "Built-in web viewer", "ohif"),
+                ("OHIF Viewer", "/ohif/viewer?StudyInstanceUIDs={StudyInstanceUID}", 1, "Built-in web viewer (Orthanc OHIF plugin, dicom-json datasource)", "ohif"),
                 ("Stone Web Viewer", "/stone-webviewer/index.html?study={StudyInstanceUID}", 1, "Native WASM viewer by Orthanc team", "stone"),
                 ("OsiriX", "osirix://open?StudyInstanceUID={StudyInstanceUID}", 0, "macOS DICOM viewer", "osirix"),
                 ("Horos", "horos://open?StudyInstanceUID={StudyInstanceUID}", 0, "Free macOS DICOM viewer", "horos"),
