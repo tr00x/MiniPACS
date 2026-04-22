@@ -68,6 +68,11 @@
   "//-lua-": "OnStableStudy prewarm — generates ohif-dicom-json attachment AND warms DICOMweb metadata 60s after last C-STORE. Opens from equipment are instant without any user touching the viewer.",
   "LuaScripts": ["/etc/orthanc/lua/prewarm_on_stable.lua"],
 
+  "//-stone-": "Stone Web Viewer default config. SkipSeriesFromModalities excludes non-image SOPs that Stone's DicomResourcesLoader can't render — SEG/PR by default (segmentation masks, presentation states), plus SR (structured reports — text-only dosage/radiology reports) and OT (secondary captures / PDFs) that otherwise surface as 'OrthancException on callable: Not implemented yet' when Stone tries to treat them as image series.",
+  "StoneWebViewer": {
+    "SkipSeriesFromModalities": ["SEG", "PR", "SR", "OT", "KO", "DOC"]
+  },
+
   "//-postgresql-": "PostgreSQL holds the Orthanc index (replaces SQLite's global write lock with row-level locks — real concurrent C-STORE from multiple modalities). EnableStorage=false keeps DICOM blobs on disk (simpler backup, no PG bloat). Connection settings come from POSTGRESQL_* env vars in docker-compose; this block only turns the plugin on and sizes the connection pool. Lock=false because this is a single-instance deployment — an advisory lock adds nothing and causes Orthanc to exit whenever the PG connection blips. IndexConnectionsCount=25 sized for HttpThreadsCount=50 + ConcurrentJobs=6 + burst DICOMweb metadata — the previous 10 serialized under moderate load.",
   "PostgreSQL": {
     "EnableIndex": true,
