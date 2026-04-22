@@ -25,20 +25,22 @@ function OnStableStudy(studyId, tags, metadata)
     return
   end
 
-  local ok1, err1 = pcall(RestApiGet, '/studies/' .. studyId .. '/ohif-dicom-json', true)
-  if ok1 then
-    print('prewarm: OHIF attachment ready for ' .. uid)
+  -- RestApiGet(uri, builtInCalls) — builtInCalls=true *excludes* plugin
+  -- routes (counterintuitive). Both /studies/<id>/ohif-dicom-json and
+  -- /dicom-web/studies/<uid>/metadata are plugin-registered, so pass `false`
+  -- to include plugins in the dispatch. `RestApiGetAfterPlugins` doesn't
+  -- exist in orthancteam/orthanc 1.12.
+  local ok1, result1 = pcall(RestApiGet, '/studies/' .. studyId .. '/ohif-dicom-json', false)
+  if ok1 and result1 ~= nil then
+    print('prewarm: OHIF attachment ready for ' .. uid .. ' (' .. #result1 .. ' bytes)')
   else
-    print('prewarm: OHIF attachment failed for ' .. uid .. ': ' .. tostring(err1))
+    print('prewarm: OHIF attachment failed for ' .. uid .. ': ' .. tostring(result1))
   end
 
-  local ok2, result2 = pcall(RestApiGet, '/dicom-web/studies/' .. uid .. '/metadata', true)
+  local ok2, result2 = pcall(RestApiGet, '/dicom-web/studies/' .. uid .. '/metadata', false)
   if ok2 and result2 ~= nil then
     print('prewarm: DICOMweb metadata warmed for ' .. uid .. ' (' .. #result2 .. ' bytes)')
   else
-    -- pcall returns (true, nil) when Orthanc logs E-level for the URI but does
-    -- not raise a Lua error — the `if ok2 then #result2` form crashes with
-    -- "attempt to get length of nil value". Check both branches.
     print('prewarm: DICOMweb metadata failed for ' .. uid .. ': ' .. tostring(result2))
   end
 end
