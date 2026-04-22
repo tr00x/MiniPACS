@@ -72,8 +72,7 @@
   "StoneWebViewer": {
     "SkipSeriesFromModalities": ["SEG", "PR", "SR", "OT", "KO", "DOC"],
     "ShowInfoPanelAtStartup": "Never",
-    "ShowNotForDiagnosticUsageDisclaimer": false,
-    "InstitutionLogo": "/favicon.svg"
+    "ShowNotForDiagnosticUsageDisclaimer": false
   },
 
   "//-postgresql-": "PostgreSQL holds the Orthanc index (replaces SQLite's global write lock with row-level locks — real concurrent C-STORE from multiple modalities). EnableStorage=false keeps DICOM blobs on disk (simpler backup, no PG bloat). Connection settings come from POSTGRESQL_* env vars in docker-compose; this block only turns the plugin on and sizes the connection pool. Lock=false because this is a single-instance deployment — an advisory lock adds nothing and causes Orthanc to exit whenever the PG connection blips. IndexConnectionsCount=25 sized for HttpThreadsCount=50 + ConcurrentJobs=6 + burst DICOMweb metadata — the previous 10 serialized under moderate load.",
