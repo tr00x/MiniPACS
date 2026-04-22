@@ -68,9 +68,12 @@
   "//-lua-": "OnStableStudy prewarm — generates ohif-dicom-json attachment AND warms DICOMweb metadata 60s after last C-STORE. Opens from equipment are instant without any user touching the viewer.",
   "LuaScripts": ["/etc/orthanc/lua/prewarm_on_stable.lua"],
 
-  "//-stone-": "Stone Web Viewer default config. SkipSeriesFromModalities excludes non-image SOPs that Stone's DicomResourcesLoader can't render — SEG/PR by default (segmentation masks, presentation states), plus SR (structured reports — text-only dosage/radiology reports) and OT (secondary captures / PDFs) that otherwise surface as 'OrthancException on callable: Not implemented yet' when Stone tries to treat them as image series.",
+  "//-stone-": "Stone Web Viewer — the default portal viewer (fast cold-open, ~1MB WASM). SkipSeriesFromModalities excludes non-image SOPs that Stone's DicomResourcesLoader can't render — SEG/PR by default (segmentation masks, presentation states), plus SR/OT/KO/DOC that otherwise surface as 'OrthancException on callable: Not implemented yet'. InfoPanel/Disclaimer off for branded use — we render this as MiniPACS, not as the upstream Stone demo. InstitutionLogo overrides the Orthanc logo in the viewer's corner with our favicon (same-origin, served by the frontend nginx).",
   "StoneWebViewer": {
-    "SkipSeriesFromModalities": ["SEG", "PR", "SR", "OT", "KO", "DOC"]
+    "SkipSeriesFromModalities": ["SEG", "PR", "SR", "OT", "KO", "DOC"],
+    "ShowInfoPanelAtStartup": "Never",
+    "ShowNotForDiagnosticUsageDisclaimer": false,
+    "InstitutionLogo": "/favicon.svg"
   },
 
   "//-postgresql-": "PostgreSQL holds the Orthanc index (replaces SQLite's global write lock with row-level locks — real concurrent C-STORE from multiple modalities). EnableStorage=false keeps DICOM blobs on disk (simpler backup, no PG bloat). Connection settings come from POSTGRESQL_* env vars in docker-compose; this block only turns the plugin on and sizes the connection pool. Lock=false because this is a single-instance deployment — an advisory lock adds nothing and causes Orthanc to exit whenever the PG connection blips. IndexConnectionsCount=25 sized for HttpThreadsCount=50 + ConcurrentJobs=6 + burst DICOMweb metadata — the previous 10 serialized under moderate load.",

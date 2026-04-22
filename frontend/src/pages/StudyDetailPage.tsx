@@ -354,7 +354,7 @@ export function StudyDetailPage() {
             <Maximize className="h-4 w-4" />
             Fullscreen
           </Button>
-          <Button variant="outline" onClick={() => window.open(`/ohif/viewer?url=/orthanc/studies/${id}/ohif-dicom-json`, '_blank')} className="gap-2">
+          <Button variant="outline" onClick={() => window.open(`/stone-webviewer/index.html?study=${studyUid}`, '_blank')} className="gap-2">
             <ExternalLink className="h-4 w-4" />
             New Tab
           </Button>
