@@ -65,8 +65,8 @@
     "UserConfiguration": "/etc/orthanc/ohif-user-config.js"
   },
 
-  "//-lua-": "OnStableStudy prewarm — generates ohif-dicom-json attachment AND warms DICOMweb metadata 60s after last C-STORE. Opens from equipment are instant without any user touching the viewer.",
-  "LuaScripts": ["/etc/orthanc/lua/prewarm_on_stable.lua"],
+  "//-lua-": "Prewarm Lua DISABLED (2026-04-22). Stone Web Viewer — default viewer — does NOT read the OHIF dicom-json attachment or the full-study DICOMweb metadata. It fetches per-series metadata on demand via QIDO/WADO, so prewarm warmed cache that nobody used while burning Orthanc CPU + blocking HTTP (sync Lua callback holds Orthanc's critical section). Reactivate only if OHIF fallback usage grows — and then rewrite via Python plugin + async job queue (see docs/superpowers/specs/2026-04-22-minipacs-rocket-design.md Phase 2).",
+  "LuaScripts": [],
 
   "//-stone-": "Stone Web Viewer — the default portal viewer (fast cold-open, ~1MB WASM). SkipSeriesFromModalities excludes non-image SOPs that Stone's DicomResourcesLoader can't render — SEG/PR by default (segmentation masks, presentation states), plus SR/OT/KO/DOC that otherwise surface as 'OrthancException on callable: Not implemented yet'. InfoPanel/Disclaimer off for branded use — we render this as MiniPACS, not as the upstream Stone demo. InstitutionLogo overrides the Orthanc logo in the viewer's corner with our favicon (same-origin, served by the frontend nginx).",
   "StoneWebViewer": {
