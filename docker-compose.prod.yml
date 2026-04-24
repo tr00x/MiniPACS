@@ -41,6 +41,9 @@ services:
       ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
       ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"
       ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USERNAME:-orthanc}":"${ORTHANC_PASSWORD}"}'
+      # Live-worklist WS: plugin notifies backend on STABLE_STUDY.
+      BACKEND_EVENT_URL: "http://backend:8000/api/internal/events/new-study"
+      INTERNAL_EVENT_TOKEN: "${INTERNAL_EVENT_TOKEN}"
       DICOM_WEB_PLUGIN_ENABLED: "true"
       TRANSFERS_PLUGIN_ENABLED: "true"
       STONE_WEB_VIEWER_PLUGIN_ENABLED: "true"
@@ -84,6 +87,7 @@ services:
       REDIS_URL: "redis://redis:6379/0"
       DATABASE_URL: "sqlite+aiosqlite:///./data/minipacs.db"
       DATABASE_PATH: "/app/data/minipacs.db"
+      INTERNAL_EVENT_TOKEN: "${INTERNAL_EVENT_TOKEN}"
       CORS_ORIGINS: '["https://${DOMAIN}","http://${DOMAIN}","http://localhost"]'
       AUTO_LOGOUT_MINUTES: "${AUTO_LOGOUT_MINUTES:-15}"
       DEFAULT_SHARE_EXPIRY_DAYS: "${DEFAULT_SHARE_EXPIRY_DAYS:-30}"

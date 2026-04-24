@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AuthContext, type User } from "@/lib/auth";
 import api from "@/lib/api";
 import { qk } from "@/hooks/queries";
+import { useStudiesWebSocket } from "@/hooks/useStudiesWebSocket";
 import { SessionTimeoutWarning } from "@/components/session-timeout-warning";
 
 const DEFAULT_INACTIVITY_TIMEOUT = 15 * 60 * 1000; // 15 minutes
@@ -100,6 +101,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       events.forEach((e) => window.removeEventListener(e, reset));
     };
   }, [user, logout, inactivityTimeout]);
+
+  // Live worklist feed — open WS once a user exists, close on logout.
+  useStudiesWebSocket(!!user);
 
   const handleStayLoggedIn = useCallback(() => {
     api
