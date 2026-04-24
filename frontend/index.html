@@ -9,6 +9,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="MiniPACS" />
+    <!-- Preconnect+prefetch Stone so the first study open has the viewer
+         already cached. Stone is a ~1MB WASM bundle loaded inside an iframe
+         on StudyDetailPage — without this hint the radiologist pays that
+         download on every cold open. -->
+    <link rel="prefetch" href="/stone-webviewer/index.html" as="document" />
+    <link rel="prefetch" href="/stone-webviewer/app.js" as="script" />
     <title>MiniPACS Portal</title>
   </head>
   <body>
