@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import compression from "vite-plugin-compression";
+import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
 import fs from "fs";
 
@@ -64,6 +65,80 @@ export default defineConfig({
     react(),
     tailwindcss(),
     ohifStaticPlugin(),
+    // Service worker + manifest. Gives iPad/Android an "Install to home
+    // screen" prompt and keeps the app shell offline-ready. API caching is
+    // NetworkFirst with a 5s network timeout — we always prefer fresh data,
+    // but if the link is down the portal still opens and shows the last
+    // known worklist. DICOM blobs stay NetworkOnly — nginx disk cache owns
+    // that layer.
+    VitePWA({
+      registerType: "autoUpdate",
+      injectRegister: "auto",
+      includeAssets: ["favicon.svg", "robots.txt"],
+      manifest: {
+        name: "MiniPACS",
+        short_name: "MiniPACS",
+        description: "Local-first PACS portal",
+        theme_color: "#863bff",
+        background_color: "#ffffff",
+        display: "standalone",
+        start_url: "/",
+        icons: [
+          {
+            src: "favicon.svg",
+            sizes: "any",
+            type: "image/svg+xml",
+            purpose: "any maskable",
+          },
+        ],
+      },
+      workbox: {
+        navigateFallback: "/index.html",
+        // Exclude /api, /orthanc, /ohif, /stone-webviewer, /dicom-web from
+        // navigation fallback so their HTML errors aren't masked by SPA shell.
+        navigateFallbackDenylist: [
+          /^\/api\//,
+          /^\/orthanc\//,
+          /^\/ohif\//,
+          /^\/stone-webviewer\//,
+          /^\/dicom-web\//,
+        ],
+        // Precache everything Vite emitted plus the manifest.
+        globPatterns: ["**/*.{js,css,html,svg,png,woff2,webmanifest,json}"],
+        // Viewer WASM/JS bundles can be large; bump the single-file limit.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith("/api/"),
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "minipacs-api",
+              networkTimeoutSeconds: 5,
+              expiration: { maxAgeSeconds: 300, maxEntries: 100 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith("/stone-webviewer/"),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "minipacs-stone",
+              expiration: { maxAgeSeconds: 60 * 60 * 24 * 7, maxEntries: 200 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // DICOM blob endpoints — nginx disk cache is authoritative,
+            // never hand them to Workbox.
+            urlPattern: ({ url }) =>
+              url.pathname.startsWith("/dicom-web/") ||
+              url.pathname.startsWith("/orthanc/dicom-web/"),
+            handler: "NetworkOnly",
+          },
+        ],
+      },
+      devOptions: { enabled: false },
+    }),
     // Emit .gz alongside every JS/CSS/SVG so nginx gzip_static can serve
     // pre-compressed assets instantly without CPU per request.
     compression({
