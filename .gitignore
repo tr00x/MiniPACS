@@ -26,6 +26,9 @@ CLAUDE.md
 docs/superpowers/
 graphify-out/
 
+# TLS certs for direct-LAN HTTPS (Cloudflare Origin Certificate etc.)
+ssl/
+
 # Local runtime state — never commit (includes 100+GB of .tar.gz backups)
 backups/
 # docker-compose manual backups
