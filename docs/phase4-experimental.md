@@ -81,6 +81,45 @@ Same two-line config change in `orthanc/orthanc-docker.json`, `git commit`,
 user does `git pull` + `docker compose restart orthanc` on prod. Monitor
 via Stone on a known-good study before announcing to radiologists.
 
+### POC results — 2026-04-24 (BLOCKED at codec layer)
+
+Ran the POC locally against 3 imported studies (LUMBAR MRI 28-slice T2 axial
+series, LT SHOULDER MRI, LT FEMUR DX). Result: **HTJ2K is not supported by
+the stock `orthancteam/orthanc:latest` image** (at Orthanc 1.12.10, DicomWeb
+plugin 1.22, GDCM plugin bundled).
+
+A WADO-RS request with `Accept: multipart/related; type="application/dicom";
+transfer-syntax=1.2.840.10008.1.2.4.201` returns:
+
+```
+HTTP/1.1 400 Bad Request
+{"Message":"Bad request","OrthancError":"Bad request",
+ "Details":"Unsupported transfer syntax in WADO-RS: 1.2.840.10008.1.2.4.201"}
+```
+
+Root cause: the GDCM bundled in the stock image was built without OpenJPH
+(HTJ2K encoder), so the DicomWeb plugin refuses the transfer syntax even
+though the UID is recognized. No separate HTJ2K plugin ships in that image.
+
+**Unlocking HTJ2K requires one of:**
+1. Custom Orthanc image: rebuild `orthancteam/orthanc` base with `-DUSE_SYSTEM_OPENJPH=ON` or
+   link GDCM against OpenJPH. Non-trivial — dockerfile + build pipeline.
+2. Wait for an upstream orthancteam image that ships OpenJPH.
+3. Switch to the commercial Orthanc Team premium images (may include it).
+
+**Collateral POC win (already shipped):** same test confirmed the
+`Transcode: 1.2.840.10008.1.2.4.90` (J2K Lossless, commit 9bdfa90) cuts
+wire bytes **149 KB → 55 KB per MR instance = −63%** (curl-timed
+`/dicom-web/.../instances/{id}` on a T2 axial slice). Not progressive, but
+the bandwidth portion of the HTJ2K story is already delivered. On the
+full 28-slice series, transcoded total is ~1.5 MB vs. ~4.2 MB native.
+
+**Status:** HTJ2K parked. Reopen only when stock image ships OpenJPH or
+we commit to maintaining a custom base image. Progressive rendering is
+the remaining unlock — not worth the build-maintenance tax until the
+clinic explicitly asks for sub-second first-pixel on huge CT series we
+don't currently have in the archive.
+
 ---
 
 ## 4.2 orthanc-advanced-storage plugin (multi-tier)
