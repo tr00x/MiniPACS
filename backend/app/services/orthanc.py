@@ -194,13 +194,21 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
             total = int(total_hit[0])
     if total is None:
         try:
-            count_resp = await _http().post("/tools/find", json={
-                "Level": "Study",
-                "Query": base_query,
-                "Expand": False,
-            })
-            count_resp.raise_for_status()
-            total = len(count_resp.json())
+            if not base_query:
+                # Unfiltered worklist — ask Orthanc for the true archive count
+                # instead of /tools/find, which is globally capped by
+                # LimitFindResults (=1000) and would silently under-report.
+                stat_resp = await _http().get("/statistics")
+                stat_resp.raise_for_status()
+                total = int(stat_resp.json().get("CountStudies", 0))
+            else:
+                count_resp = await _http().post("/tools/find", json={
+                    "Level": "Study",
+                    "Query": base_query,
+                    "Expand": False,
+                })
+                count_resp.raise_for_status()
+                total = len(count_resp.json())
         except Exception:
             total = offset + len(items)
     await cache.set("studies", filter_key, total)
