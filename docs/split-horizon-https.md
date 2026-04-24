@@ -44,12 +44,23 @@ TTL) are fine. Save the two blocks into:
 Set the CF SSL mode to **Full (strict)** so CF validates the cert on the
 tunnel side too.
 
-### 2. Restart the frontend container
+### 2. Activate the override + restart the frontend container
+
+`docker-compose.prod.yml` deliberately does NOT mount `./ssl` (a missing
+host directory would silently get auto-created and shadow the self-signed
+fallback, breaking nginx on fresh installs). To opt in to the real cert,
+copy the override example and recreate:
 
 ```bash
 cd ~/minipacs
+cp docker-compose.override.yml.example docker-compose.override.yml
 docker compose -f docker-compose.prod.yml up -d --force-recreate frontend
 ```
+
+`docker-compose.override.yml` is auto-merged by `docker compose`; it
+mounts `./ssl/cert.pem` + `./ssl/key.pem` as individual files on top of
+the baked pair. If either file is missing on the host, Compose fails
+loudly at `up` time — no silent shadowing.
 
 Nginx now listens on 443 with the real cert.
 
@@ -95,7 +106,12 @@ self-signed fallback.
 
 ## Rollback
 
-If the real cert is absent the self-signed pair still serves — browsers
-show a cert warning but everything works. To go back to "CF-only" entirely:
-unmount `./ssl` from `docker-compose.prod.yml`, recreate the frontend
-container, and remove the UniFi DNS override (so LAN clients hit CF again).
+To go back to the self-signed pair baked into the image:
+
+```bash
+rm docker-compose.override.yml
+docker compose -f docker-compose.prod.yml up -d --force-recreate frontend
+```
+
+Browsers see a cert warning but everything works. Also remove the UniFi
+DNS override if you want LAN clients back on the CF path entirely.

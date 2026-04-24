@@ -31,8 +31,11 @@ class ConnectionManager:
         self._clients: set[WebSocket] = set()
         self._lock = asyncio.Lock()
 
-    async def connect(self, ws: WebSocket) -> None:
-        await ws.accept()
+    async def connect(self, ws: WebSocket, subprotocol: str | None = None) -> None:
+        if subprotocol:
+            await ws.accept(subprotocol=subprotocol)
+        else:
+            await ws.accept()
         async with self._lock:
             self._clients.add(ws)
 
@@ -41,37 +44,79 @@ class ConnectionManager:
             self._clients.discard(ws)
 
     async def broadcast(self, message: dict[str, Any]) -> int:
-        """Send message to every live client. Dead sockets are dropped silently."""
+        """Send message to every live client.
+
+        Sends run concurrently via asyncio.gather so one slow / suspended client
+        (laptop with the lid closed holding an ESTABLISHED TCP socket whose send
+        buffer has filled up) does not block delivery to every other subscriber.
+        Each send is individually time-boxed; dead sockets are evicted after the
+        fan-out completes.
+        """
         async with self._lock:
             clients = list(self._clients)
-        sent = 0
-        dead: list[WebSocket] = []
-        for ws in clients:
+        if not clients:
+            return 0
+
+        async def _send(ws: WebSocket) -> bool:
             try:
-                await ws.send_json(message)
-                sent += 1
+                await asyncio.wait_for(ws.send_json(message), timeout=5.0)
+                return True
             except Exception:
-                dead.append(ws)
+                return False
+
+        results = await asyncio.gather(*(_send(ws) for ws in clients), return_exceptions=False)
+        dead = [ws for ws, ok in zip(clients, results) if not ok]
         if dead:
             async with self._lock:
                 for ws in dead:
                     self._clients.discard(ws)
-        return sent
+        return sum(1 for ok in results if ok)
 
 
 _manager = ConnectionManager()
 
 
+def _extract_bearer_from_subprotocols(header_value: str) -> str | None:
+    """Browsers can pass a bearer token via `Sec-WebSocket-Protocol` because
+    the WS handshake API doesn't let them set `Authorization`. We advertise
+    two entries — ['bearer', '<jwt>'] — and pick the JWT here.
+
+    Using the subprotocol keeps the token OUT of the URL query string, which
+    otherwise lands in nginx/Cloudflare access logs.
+    """
+    items = [p.strip() for p in header_value.split(",") if p.strip()]
+    # Layout we accept from the client: ['bearer', '<jwt>'] in this order.
+    # The JWT is whichever entry is NOT the literal "bearer".
+    for p in items:
+        if p != "bearer" and p:
+            return p
+    return None
+
+
 @router.websocket("/api/ws/studies")
 async def ws_studies(websocket: WebSocket, token: str = ""):
-    """Browser subscribes after login. Token is a standard access JWT passed
-    via query string (browsers cannot set Authorization header on a WS open)."""
-    payload = decode_token(token) if token else None
+    """Browser subscribes after login.
+
+    Auth token preference order:
+      1. `Sec-WebSocket-Protocol: bearer, <jwt>` — preferred; keeps the token
+         out of URL-shaped request logs (nginx, Cloudflare edge).
+      2. `?token=<jwt>` query string — legacy fallback for older clients.
+    """
+    subprotocol_header = websocket.headers.get("sec-websocket-protocol", "")
+    jwt = _extract_bearer_from_subprotocols(subprotocol_header) if subprotocol_header else None
+    if not jwt:
+        jwt = token
+
+    payload = decode_token(jwt) if jwt else None
     if not payload or payload.get("type") != "access":
+        # Close BEFORE accept — no handshake completion, client gets HTTP 403.
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    await _manager.connect(websocket)
+    # Echo "bearer" back as the selected subprotocol — browsers require one of
+    # the offered protocols to be picked, otherwise the WS open fails.
+    accept_protocol = "bearer" if subprotocol_header else None
+    await _manager.connect(websocket, subprotocol=accept_protocol)
     try:
         while True:
             # We only push; client messages are ignored, but we still await
