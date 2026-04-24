@@ -42,15 +42,24 @@ Solo and small clinics pay $150–$2,000/month for cloud PACS solutions that are
 
 ### DICOM Imaging
 - Receive studies from MRI, CT, X-ray, Ultrasound equipment via **C-STORE**
-- View studies in the built-in **OHIF DICOM Viewer** (zero-footprint, web-based)
-- Fullscreen viewer mode with keyboard controls
+- View studies in the built-in **Stone Web Viewer** (default, ~1 MB WASM, cold-open <1 s on a 500-slice MR)
+- **OHIF Viewer** as secondary option — zero-footprint, dicom-json datasource with precomputed metadata
+- Launch in external viewers (OsiriX, RadiAnt, 3D Slicer, MicroDicom, MedDream) via URL schemes
 - Support for all modalities: CT, MR, US, XR, DX, MG, NM, PT, RF, XA
 - Series-level download in DICOM or JPEG format
 
 ### Worklist & Study Management
+- **Live worklist** — new studies appear in the browser within seconds of arrival via WebSocket fanout, no refresh needed
+- **Grid view with thumbnails** — PNGs pre-generated on STABLE_STUDY, served from shared cache
 - Server-side search, filtering, and pagination
 - Filter by modality, date range (presets + custom), patient name
+- Keyboard navigation (`/ j k Enter`) and adjacent-study prefetch on study detail
 - Click any study to view details, series breakdown, and launch viewer
+
+### Progressive Web App
+- **Installable** — Add to Home Screen / Dock, runs in its own window
+- **Offline shell** — last-viewed worklist renders without network
+- Workbox service worker: `NetworkFirst` for `/api/*`, `CacheFirst` for Stone WASM
 
 ### Patient Portal
 - Secure share links with configurable expiry (7/14/30/90 days)
@@ -137,55 +146,92 @@ MiniPACS is designed to run on hardware you already own. No cloud subscriptions,
 ## Architecture
 
 ```
-                    Internet                              Clinic LAN
-                       │                                      │
-         ┌─────────────┴──────────────┐          ┌───────────┴──────────┐
-         │                            │          │                      │
-   [Doctors/Patients]          [Other clinics]   │  [MRI / CT / X-ray]  │
-         │                       │               │         │            │
-         │ HTTPS                 │ C-STORE       │         │ C-STORE    │
-         ▼                       │               │         ▼            │
-   [Cloudflare]                  │               │   LAN IP:48924       │
-         │ CF Tunnel             │               │         │            │
-         ▼                       ▼               │         │            │
-┌─── Docker Compose (on clinic PC) ──────────────┼─────────┤            │
-│                                                │         │            │
-│  [cloudflared] ──► [nginx]  ◄──────────────────┼─────────┘            │
-│                      │  React SPA              │                      │
-│                      │  /api/ ──► [FastAPI]     │                      │
-│                      │  /ohif/ ── OHIF Viewer  │                      │
-│                      │  /dicom-web/ ──┐        │                      │
-│                                       ▼        │                      │
-│                                [Orthanc PACS]◄─┼── port 48924 ◄──────┘
-│                                   │            │
-│                              [2 TB SSD]        │
-└────────────────────────────────────────────────┘
+                    Internet                                   Clinic LAN
+                       │                                           │
+         ┌─────────────┴──────────────┐          ┌────────────────┴─────────┐
+         │                            │          │                          │
+   [Doctors/Patients]          [Other clinics]   │  [MRI / CT / X-ray]      │
+         │                       │               │         │                │
+         │ HTTPS                 │ C-STORE       │         │ C-STORE        │
+         ▼                       │               │         ▼                │
+   [Cloudflare edge]              │               │   LAN :48924             │
+         │ CF Tunnel              │               │         │                │
+         │ (outbound-only)        │               │         │                │
+         ▼                       ▼               │         │                │
+┌─── Docker Compose (on clinic PC) ────────────────────────┤                │
+│                                                          │                │
+│  cloudflared  ──►  nginx :80 / :443 (HTTP/2) ◄───────────┤  (split-horizon│
+│                      │                                    │    DNS via    │
+│                      │   React PWA (Vite + Workbox SW)    │    UniFi)     │
+│                      │   /api/     ──►  FastAPI backend  │                │
+│                      │   /api/ws/  ──►  WebSocket        │                │
+│                      │   /stone-*  ──►  Stone Viewer     │                │
+│                      │   /ohif/    ──►  OHIF plugin      │                │
+│                      │   /dicom-web/                     │                │
+│                      │          │                        │                │
+│       ┌──────────────┴──────────┴───────┐                │                │
+│       ▼                      ▼           ▼                │                │
+│   [backend]            [redis cache]   [orthanc PACS]◄───┼── :48924 ◄─────┘
+│       │                  (QIDO / WS     │   │             │
+│       │ asyncpg           fanout)       │   └── DICOM files on disk (SSD)
+│       ▼                                  ▼             │
+│    [postgres] ◄────── shared DB ───── Orthanc index    │
+│    (Orthanc + MiniPACS tables, disjoint names)         │
+└────────────────────────────────────────────────────────┘
 ```
 
-### Four containers
+Six containers, one host, one `pg_dump` for backup. See
+[docs/architecture.md](docs/architecture.md) for the full breakdown —
+request paths, caching hierarchy, auth surfaces, storage layout.
 
-| Container | Image | Purpose |
-|-----------|-------|---------|
-| `orthanc` | `orthancteam/orthanc` | PACS server — DICOM storage, DICOMweb API |
-| `backend` | python:3.12-slim + FastAPI | Auth, API, business logic, SQLite |
-| `frontend` | node build → nginx:alpine | Reverse proxy + React SPA + OHIF Viewer |
-| `cloudflared` | cloudflare/cloudflared | Tunnel — secure HTTPS without open ports |
+### Stack at a glance
+
+| Container | Image | Role |
+|---|---|---|
+| `postgres` | `postgres:16-alpine` | Shared index — **both** Orthanc and MiniPACS backend tables |
+| `orthanc` | `orthancteam/orthanc` | DICOM ingest + DICOMweb + Stone + OHIF + Python plugin (thumbs, live-worklist events) |
+| `redis` | `redis:7-alpine` | QIDO cache (30 s fresh / 600 s stale), graceful memory fallback |
+| `backend` | python:3.12 + FastAPI + asyncpg | Auth, REST, WebSocket fanout, audit log |
+| `frontend` | node build → nginx:alpine | React SPA (PWA), reverse proxy, LAN-HTTPS listener |
+| `cloudflared` | `cloudflare/cloudflared` | Outbound CF Tunnel for WAN access |
+
+### Key operational features
+
+- **Live worklist** — Orthanc STABLE_STUDY event → backend → WebSocket
+  broadcast → browser invalidates query + toasts. No page refresh.
+- **PWA** — installable, offline-aware shell, aggressive cache of
+  Stone WASM.
+- **Split-horizon HTTPS** — LAN clients hit `:443` directly on the
+  clinic box via HTTP/2, saving ~50–100 ms per request. WAN clients
+  go through Cloudflare Tunnel unchanged.
+- **Autostart + watchdog** — Windows Scheduled Tasks + systemd unit
+  in WSL bring the stack back automatically after a host reboot or
+  WSL crash. See [docs/wsl-autostart.md](docs/wsl-autostart.md).
+- **Shared-DB pattern** — Orthanc and MiniPACS backend co-tenant one
+  PG database with disjoint table names. One backup artefact covers
+  both applications.
 
 ### Ports
 
-| Port | Protocol | Exposed to | Purpose |
-|------|----------|------------|---------|
-| 48924 | DICOM | LAN + internet (port forward) | C-STORE / C-ECHO from equipment |
-| 8080 | HTTP | localhost only | nginx → Cloudflare Tunnel |
+| Port | Bound to | Role |
+|---|---|---|
+| 443 | `0.0.0.0` | LAN HTTPS (HTTP/2, Cloudflare Origin Cert) |
+| 8080 | `127.0.0.1` only | cloudflared → nginx, HTTP (TLS already terminated at CF edge) |
+| 48924 | `0.0.0.0` | DICOM C-STORE / C-ECHO |
 
-> **No HTTP/HTTPS ports are exposed to the internet.** Cloudflare Tunnel handles all web traffic. Only DICOM port 48924 needs a port forward on the router.
+> **No web port is directly exposed to the internet.** WAN traffic flows
+> through the outbound-only Cloudflare Tunnel; LAN traffic terminates
+> on the clinic box via the split-horizon DNS override.
 
 ### Data persistence (Docker volumes)
 
-| Volume | Path in container | Contents |
-|--------|-------------------|----------|
-| `orthanc-data` | `/var/lib/orthanc/db` | DICOM images + Orthanc index |
-| `minipacs-db` | `/app/data` | SQLite database (users, shares, audit, settings) |
+| Volume | Purpose |
+|---|---|
+| `orthanc-pg` | PostgreSQL data dir — Orthanc index + MiniPACS tables |
+| `orthanc-data` | DICOM files on disk |
+| `minipacs-thumbs` | PNG thumbnails shared between Orthanc Python plugin and backend |
+| `nginx-cache` | DICOMweb disk cache (2 GB, 7-day TTL) |
+| `minipacs-db` | Legacy SQLite — kept for migrations from pre-PG installs only |
 
 ---
 
@@ -456,27 +502,55 @@ minipacs/
 | `/api/users` | 4 | CRUD + token revocation |
 | `/api/audit-log` | 1 | Filtered, paginated log |
 | `/api/stats` | 2 | Dashboard stats + system health |
+| `/api/dashboard` | 1 | Aggregate — stats + system health + recent transfers + active shares in one call |
+| `/api/boot` | 1 | Aggregate — user + settings + viewers + pacs-nodes (seeds React Query on login) |
+| `/api/ws/studies` | 1 | WebSocket — live worklist feed (new-study broadcasts on Orthanc STABLE_STUDY) |
+| `/api/internal/events` | 1 | Shared-secret endpoint for Orthanc Python plugin → backend notifications |
 | `/api/patient-portal` | 5 | Public: view, download, PIN verify |
 
 ---
 
 ## Performance Tuning
 
-MiniPACS is tuned for single-worker boxes (no Redis). Key knobs:
+Layered caching so slow-disk fallback is the exception, not the rule.
+Full hierarchy with ASCII in [docs/architecture.md](docs/architecture.md).
 
 | Layer | Setting | Why |
 |-------|---------|-----|
-| Backend | In-memory TTL caches on `/api/studies`, `/api/patients`, `/api/dashboard`, `/api/studies/{id}/full` | Coalesces identical queries from concurrent viewers |
-| Backend | SQLite indexes on `study_reports.orthanc_study_id`, `patient_shares.orthanc_patient_id`, `transfer_log.orthanc_study_id`, `audit_log(user_id, timestamp)` | Hot foreign keys on `/full` aggregates |
-| Backend | httpx pool `max_connections=100`, keepalive 50, TCP+auth prewarm at boot | First user request doesn't pay TCP+BasicAuth |
-| Frontend | React Query 30s staleTime + hover-prefetch on list rows | Click → page paints instantly |
-| Frontend | Route-level `lazy()` + Vite `manualChunks` | Smaller initial bundle, warm vendors cached |
-| nginx | `proxy_cache` for `/dicom-web/` (10m × 2g), upstream keepalive 32 | DICOMweb metadata served from disk cache on re-open |
-| Orthanc | `StorageCompression: false`, `SQLiteCacheSize: 256MB`, `MmapSize: 1GB`, `HttpThreadsCount: 50` | Wider concurrency, bigger SQLite page cache |
-| Orthanc | `ExtraMainDicomTags` with OHIF's required tag set (`Rows`, `PixelSpacing`, `ImagePositionPatient`, `WindowCenter`, …) | Avoids disk reads on per-series metadata calls — critical when fronted by Cloudflare Tunnel's 100s edge timeout |
-| Orthanc | `SeriesMetadata: "MainDicomTags"`, `StudiesMetadata: "Full"`, `EnableMetadataCache: true` (default) | First study open caches metadata as gzipped attachment; subsequent opens are SQLite-only |
+| Browser | Workbox service worker — `NetworkFirst` for `/api/*`, `CacheFirst` for Stone WASM | Offline shell + repeat study opens skip the network |
+| Browser | React Query cache + hover-prefetch + post-login warmup of dashboard/worklist | Click → page paints instantly, login → worklist feels zero-latency |
+| nginx | `proxy_cache` for `/dicom-web/` (2 GB × 7 days) + upstream keepalive 32 | Second viewer open of a study hits nginx, not Orthanc |
+| nginx | CORS preflight cached 24 h (`add_header Access-Control-Max-Age`) + FastAPI `CORSMiddleware max_age=86400` | Browsers stop OPTIONS-ing before every `/api/` call |
+| nginx (LAN path) | `listen 443 ssl; http2 on;` with CF Origin Cert | HTTP/2 multiplex for Stone metadata/frame bursts, ~50–100 ms RTT saved vs WAN path |
+| Backend | **Redis** QIDO cache (30 s fresh / 600 s stale) on `find_studies` / `find_patients` | Stale-while-error preserves worklist when Orthanc stalls; graceful memory fallback if Redis disappears |
+| Backend | In-process aggregate cache on `/api/studies/{id}/full` (15 s TTL) | Back-button / re-open returns from RAM |
+| Backend | `asyncpg.Pool` (2–8) + httpx pool `max_connections=100`, keepalive 50, TCP+auth prewarm at boot | Zero connection setup on the hot path |
+| Backend | **WebSocket fanout** on `/api/ws/studies` — Orthanc STABLE_STUDY triggers query invalidation + toast | Worklist reflects new scans within seconds, no polling |
+| Backend | `orjson` default response class (5–10× faster JSON serialize) | Large worklist responses serialize in microseconds |
+| Frontend | Route-level `lazy()` + Vite `manualChunks` + compressed `.gz` assets served via `gzip_static` | Smaller initial bundle, warm vendors cached, no on-the-fly gzip cost |
+| Orthanc | `ExtraMainDicomTags` with the OHIF-required tag set (`Rows`, `PixelSpacing`, `ImagePositionPatient`, `WindowCenter`, …) | Per-series metadata resolved from the PG index — no disk reads, no 100 s CF Tunnel timeouts |
+| Orthanc | `SeriesMetadata: "MainDicomTags"`, `StudiesMetadata: "Full"`, `SeriesMetadataCacheSize: 30000` | First open caches metadata as an attachment; subsequent opens are index-only |
+| Orthanc | `HttpThreadsCount: 50` (from 10) + `SQLiteCacheSize: 1.5 GB` + `MmapSize: 2 GB` | Wider concurrency, index fully resident in RAM |
+| Orthanc Python plugin | Thumbnail pre-generator — 2/s rate limit + one-shot backfill at boot + atomic writes | Worklist grid paints from disk, viewer never pays preview cost twice |
 
-After adding or changing `ExtraMainDicomTags`, run `scripts/reconstruct_all.py` once — it iterates every study and calls `/studies/{id}/reconstruct` to backfill the new tags into the index.
+After adding or changing `ExtraMainDicomTags`, call `/studies/{id}/reconstruct`
+on every study (Orthanc plugin does this asynchronously via the
+`ConcurrentJobs` queue) to backfill the new tags into the PG index.
+
+---
+
+## Documentation
+
+Detailed guides in [`docs/`](docs/):
+
+| Doc | For |
+|---|---|
+| [`architecture.md`](docs/architecture.md) | How every piece fits — services, request paths, caching, auth, storage |
+| [`wsl-autostart.md`](docs/wsl-autostart.md) | Windows Scheduled Tasks + WSL systemd unit for auto-recovery |
+| [`split-horizon-https.md`](docs/split-horizon-https.md) | Real TLS on LAN — CF Origin Cert, UniFi DNS override, portproxy :443 |
+| [`prod-hardening.md`](docs/prod-hardening.md) | Secret rotation, admin password, firewall, backups |
+| [`phase4-experimental.md`](docs/phase4-experimental.md) | HTJ2K progressive rendering + multi-tier storage POC procedures |
+| [`CHANGELOG.md`](CHANGELOG.md) | Deploy-wave history (no semver — `master` is the product) |
 
 ---
 
