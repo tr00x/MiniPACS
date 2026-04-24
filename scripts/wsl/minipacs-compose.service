@@ -1,0 +1,28 @@
+[Unit]
+# systemd unit that brings the MiniPACS docker-compose stack up whenever
+# WSL itself boots (independent of the Windows-side MiniPACS_Boot task).
+# Useful for the case where someone `wsl --shutdown`'s and restarts the
+# distro manually without rebooting the host: the stack comes back on its
+# own as soon as the distro is online.
+#
+# Install (inside WSL):
+#   sudo cp scripts/wsl/minipacs-compose.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now minipacs-compose.service
+Description=MiniPACS docker compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/pacs-user/minipacs
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
+TimeoutStartSec=300
+User=pacs-user
+Group=pacs-user
+
+[Install]
+WantedBy=multi-user.target
