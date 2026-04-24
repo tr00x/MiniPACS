@@ -62,6 +62,7 @@ export function StudiesPage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [page, setPage] = useState(1);
+  const [showHelp, setShowHelp] = useState(false);
   const [focusedRow, setFocusedRow] = useState<number>(-1);
   // Persist view preference so radiologists don't have to re-pick grid on every
   // reload. localStorage because it's per-workstation convenience, not session.
@@ -189,6 +190,26 @@ export function StudiesPage() {
   useKeyboardNav([
     { key: "/", alwaysActive: true, handler: () => searchInputRef.current?.focus() },
     {
+      key: "?",
+      alwaysActive: true,
+      handler: () => setShowHelp((v) => !v),
+    },
+    {
+      key: "Escape",
+      alwaysActive: true,
+      handler: () => {
+        if (showHelp) { setShowHelp(false); return; }
+        // Clear search + filters + blur, so Esc always makes progress.
+        if (searchQuery || modFilter || datePreset !== "all") {
+          setSearchQuery("");
+          setModFilter("");
+          setDatePreset("all");
+          setPage(1);
+        }
+        (document.activeElement as HTMLElement | null)?.blur?.();
+      },
+    },
+    {
       key: "j",
       handler: () => setFocusedRow((i) => {
         const max = studies.length - 1;
@@ -202,6 +223,22 @@ export function StudiesPage() {
         if (studies.length === 0) return -1;
         return i <= 0 ? 0 : i - 1;
       }),
+    },
+    {
+      key: "h",
+      handler: () => { setPage((p) => Math.max(1, p - 1)); setFocusedRow(-1); },
+    },
+    {
+      key: "l",
+      handler: () => { setPage((p) => Math.min(totalPages, p + 1)); setFocusedRow(-1); },
+    },
+    {
+      key: "g",
+      handler: () => { setPage(1); setFocusedRow(0); },
+    },
+    {
+      key: "G",
+      handler: () => { setPage(totalPages); setFocusedRow(-1); },
     },
     {
       key: "Enter",
@@ -242,6 +279,40 @@ export function StudiesPage() {
 
   return (
     <div className="space-y-4">
+      {showHelp && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setShowHelp(false)}
+        >
+          <div
+            className="w-[min(560px,92vw)] rounded-lg border bg-background p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-3 text-lg font-semibold">Keyboard shortcuts</h3>
+            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+              <kbd className="rounded border bg-muted px-1.5 font-mono text-xs">/</kbd>
+              <span>Focus search</span>
+              <kbd className="rounded border bg-muted px-1.5 font-mono text-xs">Esc</kbd>
+              <span>Clear search and filters, blur input</span>
+              <kbd className="rounded border bg-muted px-1.5 font-mono text-xs">j / k</kbd>
+              <span>Move focus down / up</span>
+              <kbd className="rounded border bg-muted px-1.5 font-mono text-xs">h / l</kbd>
+              <span>Previous / next page</span>
+              <kbd className="rounded border bg-muted px-1.5 font-mono text-xs">g / G</kbd>
+              <span>First / last page</span>
+              <kbd className="rounded border bg-muted px-1.5 font-mono text-xs">Enter</kbd>
+              <span>Open focused study</span>
+              <kbd className="rounded border bg-muted px-1.5 font-mono text-xs">?</kbd>
+              <span>Toggle this help</span>
+            </div>
+            <div className="mt-4 border-t pt-3 text-xs text-muted-foreground">
+              Search accepts modality codes (<code>CT</code>, <code>MR</code>, <code>US</code>…)
+              and dates (<code>2024</code>, <code>2024-01</code>, <code>2024-01-15</code>,
+              <code>2022-2024</code>) inline — e.g. <code>CT 2024 ivanov</code>.
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Worklist</h2>
