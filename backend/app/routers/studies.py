@@ -1,5 +1,6 @@
 import asyncio
 import io
+import os
 import time
 import zipfile as zipfile_mod
 
@@ -22,10 +23,15 @@ router = APIRouter(prefix="/api/studies", tags=["studies"])
 _STUDY_FULL_TTL = 15.0
 _study_full_cache: dict[str, tuple[float, dict]] = {}
 
-# PNG thumbnail cache for the grid-view worklist. Orthanc's /instances/{id}/preview
-# renders on every call (no native cache), so holding a 1h copy in-process lets
-# 50-tile grids re-open instantly and gives back/forward navigation zero cost.
-# Bounded to keep RAM predictable — 500 thumbs × ~50 KB = ~25 MB max.
+# Worklist thumbnails. Two tiers:
+#  1. Orthanc Python plugin (`orthanc/python/thumbnails.py`) pre-generates
+#     PNGs to /srv/thumbs on STABLE_STUDY + one-shot backfill of the archive.
+#  2. On-demand fallback: if the disk copy is missing (ingest still in
+#     flight, or the worker queue is behind), we render via Orthanc /preview
+#     and memoize for 1h.
+# The in-memory cache is bounded to keep RAM predictable —
+# 500 thumbs × ~50 KB = ~25 MB max.
+_THUMB_DIR = "/srv/thumbs"
 _THUMB_TTL = 3600.0
 _THUMB_CACHE_MAX = 500
 _thumb_cache: dict[str, tuple[float, bytes]] = {}
@@ -184,6 +190,26 @@ async def get_study_thumbnail(
             media_type="image/png",
             headers={"Cache-Control": "private, max-age=3600"},
         )
+
+    # Fast path: Orthanc plugin already wrote this one to disk. Single fs stat
+    # + read, no PACS round-trip. We still populate the in-memory cache so
+    # subsequent hits skip even the syscalls.
+    disk_path = os.path.join(_THUMB_DIR, f"{study_id}.png")
+    try:
+        if os.path.isfile(disk_path):
+            with open(disk_path, "rb") as f:
+                png_disk = f.read()
+            _thumb_cache[study_id] = (now, png_disk)
+            if len(_thumb_cache) > _THUMB_CACHE_MAX:
+                _thumb_cache.pop(next(iter(_thumb_cache)))
+            return Response(
+                content=png_disk,
+                media_type="image/png",
+                headers={"Cache-Control": "private, max-age=3600"},
+            )
+    except OSError:
+        # Volume missing or permission oddity — fall through to on-demand.
+        pass
 
     series_list = await orthanc.get_study_series(study_id)
     if not series_list:
