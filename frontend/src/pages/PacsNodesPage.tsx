@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,6 +79,21 @@ export function PacsNodesPage() {
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [dicomEndpoint, setDicomEndpoint] = useState<{ host: string; port: string; aet: string }>({
+    host: window.location.hostname,
+    port: "48924",
+    aet: "MINIPACS",
+  });
+
+  useEffect(() => {
+    api.get("/settings/public").then(({ data }) => {
+      setDicomEndpoint({
+        host: data.dicom_public_host || window.location.hostname,
+        port: data.dicom_public_port || "48924",
+        aet: data.dicom_aet || "MINIPACS",
+      });
+    }).catch(() => { /* fall back to defaults already set */ });
+  }, []);
 
   // Data loaded via usePacsNodes above. Mutations call
   // invalidate.afterPacsNodeChange() to ripple into study.pacs_nodes, transfers,
@@ -201,15 +216,15 @@ export function PacsNodesPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">AE Title</p>
-            <p className="font-mono font-medium text-sm">MINIPACS</p>
+            <p className="font-mono font-medium text-sm">{dicomEndpoint.aet}</p>
           </div>
           <div>
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">IP Address</p>
-            <p className="font-mono font-medium text-sm">{window.location.hostname}</p>
+            <p className="font-mono font-medium text-sm">{dicomEndpoint.host}</p>
           </div>
           <div>
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">DICOM Port</p>
-            <p className="font-mono font-medium text-sm">48924</p>
+            <p className="font-mono font-medium text-sm">{dicomEndpoint.port}</p>
           </div>
           <div>
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Protocol</p>

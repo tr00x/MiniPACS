@@ -26,6 +26,7 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.boot import router as boot_router
 from app.routers.ws import router as ws_router
 from app.routers.import_studies import router as import_router
+from app.routers.received import router as received_router
 
 
 @asynccontextmanager
@@ -134,6 +135,7 @@ app.include_router(dashboard_router)
 app.include_router(boot_router)
 app.include_router(ws_router)
 app.include_router(import_router)
+app.include_router(received_router)
 
 
 @app.get("/api/health")

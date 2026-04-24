@@ -21,6 +21,7 @@ const PatientDetailPage = lazy(() => import("@/pages/PatientDetailPage").then(m 
 const StudiesPage = lazy(() => import("@/pages/StudiesPage").then(m => ({ default: m.StudiesPage })));
 const StudyDetailPage = lazy(() => import("@/pages/StudyDetailPage").then(m => ({ default: m.StudyDetailPage })));
 const TransfersPage = lazy(() => import("@/pages/TransfersPage").then(m => ({ default: m.TransfersPage })));
+const ReceivedPage = lazy(() => import("@/pages/ReceivedPage").then(m => ({ default: m.ReceivedPage })));
 const SharesPage = lazy(() => import("@/pages/SharesPage").then(m => ({ default: m.SharesPage })));
 const PacsNodesPage = lazy(() => import("@/pages/PacsNodesPage").then(m => ({ default: m.PacsNodesPage })));
 const AuditPage = lazy(() => import("@/pages/AuditPage").then(m => ({ default: m.AuditPage })));
@@ -46,6 +47,7 @@ export default function App() {
                 <Route path="/studies" element={<StudiesPage />} />
                 <Route path="/studies/:id" element={<StudyDetailPage />} />
                 <Route path="/transfers" element={<TransfersPage />} />
+                <Route path="/received" element={<ReceivedPage />} />
                 <Route path="/shares" element={<SharesPage />} />
                 <Route path="/pacs-nodes" element={<PacsNodesPage />} />
                 <Route path="/audit" element={<AuditPage />} />

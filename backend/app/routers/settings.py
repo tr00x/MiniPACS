@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
@@ -29,7 +30,15 @@ async def get_public_settings(db: PgConnection = Depends(get_db)):
         "SELECT key, value FROM settings WHERE key IN ('clinic_name', 'clinic_phone', 'clinic_email')"
     )
     rows = await cursor.fetchall()
-    return {row["key"]: row["value"] for row in rows}
+    data = {row["key"]: row["value"] for row in rows}
+    # DICOM endpoint for the "Receiving DICOM Studies" info card — CF tunnel
+    # only carries HTTP, so the browser hostname is wrong for C-STORE. Take
+    # the public IP/port from env; frontend falls back to location.hostname
+    # if unset.
+    data["dicom_public_host"] = os.environ.get("DICOM_PUBLIC_HOST", "")
+    data["dicom_public_port"] = os.environ.get("DICOM_PUBLIC_PORT", "48924")
+    data["dicom_aet"] = os.environ.get("DICOM_AET", "MINIPACS")
+    return data
 
 
 @router.get("")
