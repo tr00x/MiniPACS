@@ -2,6 +2,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# p7zip-full powers the import endpoint's archive extraction — one binary
+# that handles ZIP / TAR / TAR.GZ / 7Z / RAR / ISO (including UDF-mode ISO
+# images that pycdlib chokes on). Slim image ships without it by default.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends p7zip-full \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

@@ -6,7 +6,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, List, LayoutGrid } from "lucide-react";
+import { ChevronLeft, ChevronRight, List, LayoutGrid, Upload } from "lucide-react";
+import { ImportDialog } from "@/components/ImportDialog";
 import { useStudies, usePrefetchStudyFull, usePrefetchPatientFull } from "@/hooks/queries";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
@@ -67,6 +68,61 @@ export function StudiesPage() {
     if (typeof window === "undefined") return "list";
     return (localStorage.getItem("studies.viewMode") as "list" | "grid") || "list";
   });
+  const [importOpen, setImportOpen] = useState(false);
+  const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
+  const [windowDragActive, setWindowDragActive] = useState(false);
+
+  // Window-level drag overlay. If the radiologist drops files anywhere on
+  // the worklist page (not just the modal), pop the import dialog with
+  // those files already queued. The counter logic (dragDepth) is the
+  // standard way to survive dragenter/dragleave firing on child nodes
+  // as the pointer crosses element boundaries.
+  useEffect(() => {
+    let depth = 0;
+    const isFileDrag = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types || []).includes("Files");
+    const onEnter = (e: DragEvent) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      depth++;
+      if (depth === 1) setWindowDragActive(true);
+    };
+    const onOver = (e: DragEvent) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!isFileDrag(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setWindowDragActive(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setWindowDragActive(false);
+      const files: File[] = [];
+      if (e.dataTransfer) {
+        for (let i = 0; i < e.dataTransfer.files.length; i++) {
+          files.push(e.dataTransfer.files[i]);
+        }
+      }
+      if (files.length) {
+        setDroppedFiles(files);
+        setImportOpen(true);
+      }
+    };
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -190,27 +246,58 @@ export function StudiesPage() {
           <h2 className="text-2xl font-semibold tracking-tight">Worklist</h2>
           <p className="text-sm text-muted-foreground">{total} studies</p>
         </div>
-        <div className="flex items-center gap-1 rounded-md border p-0.5">
+        <div className="flex items-center gap-2">
           <Button
-            variant={viewMode === "list" ? "default" : "ghost"}
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => changeView("list")}
-            title="List view"
+            variant="outline"
+            size="sm"
+            onClick={() => { setDroppedFiles([]); setImportOpen(true); }}
+            title="Import DICOM files, ZIP/TAR/7Z archives or ISO images"
           >
-            <List className="h-4 w-4" />
+            <Upload className="h-4 w-4 mr-2" />
+            Import
           </Button>
-          <Button
-            variant={viewMode === "grid" ? "default" : "ghost"}
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => changeView("grid")}
-            title="Grid view with thumbnails"
-          >
-            <LayoutGrid className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1 rounded-md border p-0.5">
+            <Button
+              variant={viewMode === "list" ? "default" : "ghost"}
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => changeView("list")}
+              title="List view"
+            >
+              <List className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === "grid" ? "default" : "ghost"}
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => changeView("grid")}
+              title="Grid view with thumbnails"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
+
+      {/* Window-level drag overlay — any drop on the worklist page opens the
+          import dialog with the files already queued. */}
+      {windowDragActive && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-primary/10 backdrop-blur-sm pointer-events-none">
+          <div className="border-4 border-dashed border-primary rounded-xl p-12 bg-background/90 shadow-2xl">
+            <Upload className="h-16 w-16 mx-auto text-primary mb-4" />
+            <div className="text-2xl font-semibold text-center">Drop files to import</div>
+            <div className="text-sm text-muted-foreground text-center mt-2">
+              DICOM · ZIP · TAR · 7Z · ISO · folders
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        initialFiles={droppedFiles}
+      />
 
       {/* Filter bar */}
       <div className="space-y-3">

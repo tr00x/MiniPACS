@@ -91,7 +91,7 @@ export function useStudiesWebSocket(userLoggedIn: boolean) {
             qc.invalidateQueries({ queryKey: ["dashboard"] });
             const name = msg.patient_name || "Unknown";
             const desc = msg.study_description ? ` — ${msg.study_description}` : "";
-            toast.info(`Новое исследование: ${name}${desc}`);
+            toast.info(`New study: ${name}${desc}`);
           }
         } catch {
           // silently drop malformed frames — server owns the protocol
