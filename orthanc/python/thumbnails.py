@@ -20,6 +20,8 @@ import os
 import threading
 import time
 from queue import Empty, Queue
+from urllib import request as urlrequest
+from urllib.error import URLError
 
 import orthanc  # type: ignore[import-not-found]  # provided by Orthanc runtime
 
@@ -36,6 +38,13 @@ os.makedirs(THUMB_DIR, exist_ok=True)
 _queue: Queue = Queue(maxsize=QUEUE_MAX)
 _seen: set[str] = set()
 _seen_lock = threading.Lock()
+
+# Live-worklist notify pipeline. Orthanc's OnChange callback fires on the
+# write thread — we MUST NOT do blocking HTTP from it. Push an event tuple
+# into this queue and let a dedicated worker thread POST to the backend.
+_BACKEND_EVENT_URL = os.environ.get("BACKEND_EVENT_URL", "").strip()
+_INTERNAL_EVENT_TOKEN = os.environ.get("INTERNAL_EVENT_TOKEN", "").strip()
+_notify_queue: Queue = Queue(maxsize=500)
 
 
 def _thumb_path(study_id: str) -> str:
@@ -178,6 +187,71 @@ def _backfill() -> None:
     )
 
 
+def _build_notify_payload(study_id: str) -> dict:
+    """Minimal study metadata for the live-worklist toast. Best-effort — on
+    any Orthanc hiccup we still broadcast with just the ID; the frontend
+    will invalidate its queries and re-fetch."""
+    payload: dict = {"study_id": study_id}
+    study = _get_json(f"/studies/{study_id}")
+    if not study:
+        return payload
+    tags = study.get("MainDicomTags", {}) or {}
+    p_tags = study.get("PatientMainDicomTags", {}) or {}
+    if p_tags.get("PatientName"):
+        payload["patient_name"] = p_tags["PatientName"]
+    if tags.get("StudyDescription"):
+        payload["study_description"] = tags["StudyDescription"]
+    if tags.get("StudyDate"):
+        payload["study_date"] = tags["StudyDate"]
+    # ModalitiesInStudy is nicer but not always set server-side — cheap to
+    # derive from child series if missing.
+    if tags.get("ModalitiesInStudy"):
+        payload["modalities"] = tags["ModalitiesInStudy"]
+    return payload
+
+
+def _notify_worker() -> None:
+    """POST STABLE_STUDY notifications to the backend. One connection, no
+    pooling — events arrive at worklist cadence (< dozens/min in any real
+    clinic), and a fresh short-lived TCP connection is simpler than
+    reasoning about keep-alive across a long-lived daemon."""
+    if not _BACKEND_EVENT_URL or not _INTERNAL_EVENT_TOKEN:
+        orthanc.LogWarning(
+            "thumb plugin: live-worklist disabled (BACKEND_EVENT_URL or INTERNAL_EVENT_TOKEN not set)"
+        )
+        return
+    while True:
+        try:
+            study_id = _notify_queue.get(timeout=5)
+        except Empty:
+            continue
+        try:
+            payload = _build_notify_payload(study_id)
+            body = json.dumps(payload).encode("utf-8")
+            req = urlrequest.Request(
+                _BACKEND_EVENT_URL,
+                data=body,
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Internal-Token": _INTERNAL_EVENT_TOKEN,
+                },
+            )
+            with urlrequest.urlopen(req, timeout=5) as resp:
+                if resp.status >= 300:
+                    orthanc.LogWarning(
+                        f"thumb notify: backend returned {resp.status} for {study_id[:12]}"
+                    )
+        except URLError as exc:
+            # Backend briefly down is not fatal — the study still lands in
+            # Orthanc, and the next /api/studies refresh will pick it up.
+            orthanc.LogWarning(f"thumb notify: POST failed for {study_id[:12]}: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            orthanc.LogWarning(f"thumb notify worker error for {study_id[:12]}: {exc}")
+        finally:
+            _notify_queue.task_done()
+
+
 def on_change(change_type, level, resource):
     # STABLE_STUDY fires once per study after ~60s of ingest inactivity.
     # NEW_STUDY fires immediately but the study may still be receiving
@@ -185,9 +259,14 @@ def on_change(change_type, level, resource):
     if change_type != orthanc.ChangeType.STABLE_STUDY:
         return
     _enqueue(resource)
+    try:
+        _notify_queue.put_nowait(resource)
+    except Exception:  # noqa: BLE001 — full queue / shutdown
+        pass
 
 
 orthanc.RegisterOnChangeCallback(on_change)
 threading.Thread(target=_worker, daemon=True, name="thumb-worker").start()
 threading.Thread(target=_backfill, daemon=True, name="thumb-backfill").start()
-orthanc.LogInfo("thumb plugin: initialized (worker + backfill scheduled)")
+threading.Thread(target=_notify_worker, daemon=True, name="ws-notifier").start()
+orthanc.LogInfo("thumb plugin: initialized (worker + backfill + notifier)")
