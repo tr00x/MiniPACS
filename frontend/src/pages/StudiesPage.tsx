@@ -12,6 +12,7 @@ import { useStudies, usePrefetchStudyFull, usePrefetchPatientFull } from "@/hook
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
+import { AuthedThumb } from "@/components/AuthedThumb";
 import { TableSkeleton } from "@/components/TableSkeleton";
 import { PageError } from "@/components/page-error";
 
@@ -392,24 +393,7 @@ export function StudiesPage() {
                   onMouseEnter={() => prefetchStudy(s.ID)}
                 >
                   <div className="relative aspect-square w-full overflow-hidden bg-black">
-                    <img
-                      src={`/api/studies/${s.ID}/thumb`}
-                      alt=""
-                      loading="lazy"
-                      className="h-full w-full object-contain"
-                      onError={(e) => {
-                        const img = e.currentTarget;
-                        img.style.display = "none";
-                        const placeholder = img.nextElementSibling as HTMLDivElement | null;
-                        if (placeholder) placeholder.style.display = "flex";
-                      }}
-                    />
-                    <div
-                      style={{ display: "none" }}
-                      className="absolute inset-0 items-center justify-center bg-gradient-to-br from-muted to-muted-foreground/10 text-xs text-muted-foreground"
-                    >
-                      No preview
-                    </div>
+                    <AuthedThumb studyId={s.ID} />
                     {mod && (
                       <div className="absolute left-2 top-2">
                         <ModalityBadgeList modalities={mod.replace(/\\/g, "/").split("/")} />

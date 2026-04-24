@@ -35,6 +35,9 @@ BACKFILL_DELAY_SECONDS = 30  # let Orthanc fully boot before scanning
 
 os.makedirs(THUMB_DIR, exist_ok=True)
 
+# Non-image modalities — no pixel data to render.
+_SKIP_MODALITIES = {"SEG", "PR", "SR", "KO", "OT", "DOC", "PDF", "FID", "PLAN", "RWV", "RAW"}
+
 _queue: Queue = Queue(maxsize=QUEUE_MAX)
 _seen: set[str] = set()
 _seen_lock = threading.Lock()
@@ -69,9 +72,10 @@ def _get_json(uri: str):
 def _pick_instance(study_id: str) -> str | None:
     """Return the best instance to represent this study in a grid tile.
 
-    Strategy: lowest-numbered series' middle slice. Middle beats first
-    because the first slice on CT/MR is often a scout/localizer which
-    makes a confusing tile.
+    Strategy: iterate series by SeriesNumber ascending, skip non-image
+    modalities (SEG, PR, SR, ...), return middle slice of first eligible
+    series. Middle beats first because the first slice on CT/MR is often
+    a scout/localizer which makes a confusing tile.
     """
     study = _get_json(f"/studies/{study_id}")
     if not study:
@@ -80,26 +84,28 @@ def _pick_instance(study_id: str) -> str | None:
     if not series_ids:
         return None
 
-    best_series = None
-    best_num: int | None = None
+    candidates: list[tuple[int, list[str]]] = []
     for sid in series_ids:
         s = _get_json(f"/series/{sid}")
         if not s:
             continue
+        tags = s.get("MainDicomTags", {}) or {}
+        modality = (tags.get("Modality") or "").upper()
+        if modality in _SKIP_MODALITIES:
+            continue
+        instances = s.get("Instances") or []
+        if not instances:
+            continue
         try:
-            num = int(s.get("MainDicomTags", {}).get("SeriesNumber") or 999)
+            num = int(tags.get("SeriesNumber") or 999)
         except (TypeError, ValueError):
             num = 999
-        if best_num is None or num < best_num:
-            best_num = num
-            best_series = s
+        candidates.append((num, instances))
 
-    if not best_series:
+    if not candidates:
         return None
-
-    instances = best_series.get("Instances") or []
-    if not instances:
-        return None
+    candidates.sort(key=lambda c: c[0])
+    instances = candidates[0][1]
     return instances[len(instances) // 2]
 
 
@@ -111,13 +117,24 @@ def _generate(study_id: str) -> str:
     if not instance_id:
         return "no_instance"
 
-    try:
-        png = orthanc.RestApiGet(f"/instances/{instance_id}/preview")
-    except Exception as exc:  # noqa: BLE001
-        orthanc.LogWarning(f"thumb: preview failed for {instance_id[:12]}: {exc}")
-        return "preview_failed"
+    # /preview is fastest but only handles plain image SOP classes.
+    # /rendered?format=png handles multi-frame, video first-frame, and
+    # encapsulated PDFs, so fall back before giving up.
+    png: bytes | None = None
+    for uri in (
+        f"/instances/{instance_id}/preview",
+        f"/instances/{instance_id}/rendered?format=png",
+    ):
+        try:
+            png = orthanc.RestApiGet(uri)
+        except Exception as exc:  # noqa: BLE001
+            orthanc.LogInfo(f"thumb: {uri.split('/')[-1][:20]} failed for {instance_id[:12]}: {exc}")
+            png = None
+            continue
+        if png:
+            break
     if not png:
-        return "empty_png"
+        return "preview_failed"
 
     # Atomic write — avoids the backend reading a half-flushed file.
     tmp = _thumb_path(study_id) + ".tmp"
