@@ -1,12 +1,30 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AuthContext, type User } from "@/lib/auth";
 import api from "@/lib/api";
+import { qk } from "@/hooks/queries";
 import { SessionTimeoutWarning } from "@/components/session-timeout-warning";
 
 const DEFAULT_INACTIVITY_TIMEOUT = 15 * 60 * 1000; // 15 minutes
 const WARNING_SECONDS = 60;
 
+interface BootResponse {
+  user: User;
+  settings: Record<string, string>;
+  viewers: unknown[];
+  pacs_nodes: unknown[];
+}
+
+// Seed React Query caches so viewers/pacs-nodes land hot on first access —
+// pages use the same query keys from queries.ts, so this is a direct handoff.
+function seedBootCaches(qc: ReturnType<typeof useQueryClient>, boot: BootResponse) {
+  qc.setQueryData(qk.settings(), boot.settings);
+  qc.setQueryData(qk.viewers(), boot.viewers);
+  qc.setQueryData(qk.pacsNodes(), boot.pacs_nodes);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const qc = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [inactivityTimeout, setInactivityTimeout] = useState(DEFAULT_INACTIVITY_TIMEOUT);
@@ -87,50 +105,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     const token = localStorage.getItem("access_token");
-    if (token) {
-      api
-        .get("/auth/me")
-        .then(async ({ data }) => {
-          if (!cancelled) {
-            setUser(data);
-            try {
-              const { data: settings } = await api.get("/settings");
-              const minutes = parseInt(settings.auto_logout_minutes, 10);
-              if (!cancelled && !isNaN(minutes) && minutes > 0) {
-                setInactivityTimeout(minutes * 60 * 1000);
-              }
-            } catch {
-              // fallback to default
-            }
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            localStorage.removeItem("access_token");
-            localStorage.removeItem("refresh_token");
-          }
-        })
-        .finally(() => { if (!cancelled) setLoading(false); });
-    } else {
+    if (!token) {
       setLoading(false);
+      return () => { cancelled = true; };
     }
+    // One call replaces /auth/me + /settings + seeds viewers and pacs-nodes
+    // into React Query cache. Saves 1 RTT on page load; later pages that need
+    // viewers/pacs-nodes hit cache instead of the network.
+    api
+      .get<BootResponse>("/boot")
+      .then(({ data }) => {
+        if (cancelled) return;
+        setUser(data.user);
+        seedBootCaches(qc, data);
+        const minutes = parseInt(data.settings?.auto_logout_minutes ?? "", 10);
+        if (!isNaN(minutes) && minutes > 0) {
+          setInactivityTimeout(minutes * 60 * 1000);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          localStorage.removeItem("access_token");
+          localStorage.removeItem("refresh_token");
+        }
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [qc]);
 
   const login = async (username: string, password: string) => {
     const { data } = await api.post("/auth/login", { username, password });
     localStorage.setItem("access_token", data.access_token);
     localStorage.setItem("refresh_token", data.refresh_token);
-    const { data: me } = await api.get("/auth/me");
-    setUser(me);
-    try {
-      const { data: settings } = await api.get("/settings");
-      const minutes = parseInt(settings.auto_logout_minutes, 10);
-      if (!isNaN(minutes) && minutes > 0) {
-        setInactivityTimeout(minutes * 60 * 1000);
-      }
-    } catch {
-      // fallback to default
+    // Pull user + settings + viewers + pacs-nodes in one round-trip instead of
+    // the old /auth/me → /settings sequence.
+    const { data: boot } = await api.get<BootResponse>("/boot");
+    setUser(boot.user);
+    seedBootCaches(qc, boot);
+    const minutes = parseInt(boot.settings?.auto_logout_minutes ?? "", 10);
+    if (!isNaN(minutes) && minutes > 0) {
+      setInactivityTimeout(minutes * 60 * 1000);
     }
   };
 
