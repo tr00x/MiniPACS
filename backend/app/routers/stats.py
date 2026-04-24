@@ -1,7 +1,7 @@
 import time
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends
-import aiosqlite
+from app.db import PgConnection
 from app.database import get_db
 from app.routers.auth import get_current_user
 from app.services import orthanc
@@ -18,7 +18,7 @@ _health_cache: dict[str, tuple[float, dict]] = {}
 @router.get("")
 async def get_stats(
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cached = _stats_cache.get("all")
     if cached and time.time() - cached[0] < _STATS_TTL:

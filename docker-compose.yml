@@ -83,7 +83,7 @@ services:
       ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
       ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"
       REDIS_URL: "redis://redis:6379/0"
-      DATABASE_URL: "sqlite+aiosqlite:///./data/minipacs.db"
+      DATABASE_URL: "postgresql://orthanc:${POSTGRES_PASSWORD}@postgres:5432/orthanc"
       DATABASE_PATH: "/app/data/minipacs.db"
       INTERNAL_EVENT_TOKEN: "${INTERNAL_EVENT_TOKEN}"
       CORS_ORIGINS: '["https://localhost:${HTTPS_PORT:-48921}","http://localhost:${HTTP_PORT:-48920}","http://localhost:48925"]'
@@ -95,6 +95,8 @@ services:
       orthanc:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   frontend:

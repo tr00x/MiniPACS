@@ -14,7 +14,10 @@ class Settings(BaseSettings):
     # and survives a backend restart. Unreachable Redis degrades gracefully
     # to the in-memory path — never a hard dep.
     redis_url: str = ""
-    database_url: str = "sqlite+aiosqlite:///./minipacs.db"
+    # PostgreSQL DSN. In docker-compose this points at the same PG that
+    # Orthanc uses — our tables don't collide with Orthanc's. Outside of
+    # docker (unit tests, tooling) the caller must set it explicitly.
+    database_url: str = "postgresql://orthanc:orthanc@localhost:5432/orthanc"
     cors_origins: list[str] = ["http://localhost:48920"]
     auto_logout_minutes: int = 15
     default_share_expiry_days: int = 30

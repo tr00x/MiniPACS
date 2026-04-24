@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query
-import aiosqlite
+from app.db import PgConnection
 
 from app.database import get_db
 from app.routers.auth import get_current_user
@@ -16,7 +16,7 @@ async def get_audit_log(
     limit: int = Query(default=100, le=1000, ge=1),
     offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     conditions = []
     params = []

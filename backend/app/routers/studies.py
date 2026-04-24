@@ -4,7 +4,7 @@ import os
 import time
 import zipfile as zipfile_mod
 
-import aiosqlite
+from app.db import PgConnection
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
@@ -96,7 +96,7 @@ async def get_study_full(
     study_id: str,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     """One-shot bundle for StudyDetailPage.
 

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
-import aiosqlite
+from app.db import PgConnection
 
 from app.database import get_db
 from app.routers.auth import get_current_user
@@ -24,7 +24,7 @@ ALLOWED_KEYS = set(SettingsUpdate.model_fields.keys())
 
 
 @router.get("/public")
-async def get_public_settings(db: aiosqlite.Connection = Depends(get_db)):
+async def get_public_settings(db: PgConnection = Depends(get_db)):
     cursor = await db.execute(
         "SELECT key, value FROM settings WHERE key IN ('clinic_name', 'clinic_phone', 'clinic_email')"
     )
@@ -35,7 +35,7 @@ async def get_public_settings(db: aiosqlite.Connection = Depends(get_db)):
 @router.get("")
 async def get_settings(
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute("SELECT key, value FROM settings")
     rows = await cursor.fetchall()
@@ -47,7 +47,7 @@ async def put_settings(
     body: SettingsUpdate,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     updates = body.model_dump(exclude_none=True)
     now = datetime.now(timezone.utc).isoformat()

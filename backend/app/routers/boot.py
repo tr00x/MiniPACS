@@ -8,7 +8,7 @@ cache on first navigation.
 Kept separate from auth.py so the auth flow file stays focused on login/tokens.
 """
 
-import aiosqlite
+from app.db import PgConnection
 from fastapi import APIRouter, Depends
 
 from app.database import get_db
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api", tags=["boot"])
 @router.get("/boot")
 async def boot(
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     """Return everything the portal needs at session start."""
     # SQLite reads are sub-millisecond and share one connection — sequential

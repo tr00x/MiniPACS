@@ -1,6 +1,6 @@
 import asyncio
 
-import aiosqlite
+from app.db import PgConnection
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.database import get_db
@@ -54,7 +54,7 @@ async def get_patient_full(
     patient_id: str,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     """One-shot bundle for PatientDetailPage.
 

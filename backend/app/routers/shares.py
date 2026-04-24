@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-import aiosqlite
+from app.db import PgConnection
 
 from app.database import get_db
 from app.models.shares import ShareCreate, ShareUpdate
@@ -26,7 +26,7 @@ async def list_shares(
     request: Request,
     patient_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     await log_audit("list_shares", user_id=user["id"], ip_address=request.client.host)
     # Whitelist columns instead of s.* so the bcrypt pin_hash never leaves the
@@ -62,7 +62,7 @@ async def create_share(
     body: ShareCreate,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     token = generate_share_token()
     expires_at = body.expires_at.isoformat() if body.expires_at else None
@@ -73,7 +73,8 @@ async def create_share(
 
     cursor = await db.execute(
         """INSERT INTO patient_shares (orthanc_patient_id, token, expires_at, created_by, pin_hash)
-           VALUES (?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?)
+           RETURNING id""",
         (body.orthanc_patient_id, token, expires_at, user["id"], pin_hash),
     )
     await db.commit()
@@ -99,7 +100,7 @@ async def update_share(
     body: ShareUpdate,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute("SELECT * FROM patient_shares WHERE id = ?", (share_id,))
     existing = await cursor.fetchone()
@@ -142,7 +143,7 @@ async def revoke_share(
     share_id: int,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute("SELECT * FROM patient_shares WHERE id = ?", (share_id,))
     existing = await cursor.fetchone()
@@ -168,7 +169,7 @@ async def revoke_share(
 portal_router = APIRouter(prefix="/api/patient-portal")
 
 
-async def _validate_share(token: str, db: aiosqlite.Connection) -> dict:
+async def _validate_share(token: str, db: PgConnection) -> dict:
     """Validate a share token and return the share record, or raise appropriate HTTP error."""
     cursor = await db.execute(
         "SELECT * FROM patient_shares WHERE token = ?", (token,),
@@ -196,7 +197,7 @@ async def _validate_share(token: str, db: aiosqlite.Connection) -> dict:
 @portal_router.get("/{token}/info")
 async def share_info(
     token: str,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     """Get basic share info (no PHI) -- used to show PIN prompt."""
     cursor = await db.execute(
@@ -228,7 +229,7 @@ async def share_info(
 async def verify_share_pin(
     token: str,
     request: Request,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     """Verify PIN for a share. Returns 200 if correct, 401 if wrong. Sets cookie for server-side enforcement."""
     body = await request.json()
@@ -265,7 +266,7 @@ async def verify_share_pin(
 async def patient_portal(
     token: str,
     request: Request,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     share = await _validate_share(token, db)
 
@@ -317,7 +318,7 @@ async def patient_portal_download(
     token: str,
     study_id: str,
     request: Request,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     share = await _validate_share(token, db)
 
@@ -355,7 +356,7 @@ async def patient_portal_download_series_images(
     study_id: str,
     series_id: str,
     request: Request,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     """Download a single series as ZIP of JPEG images (patient portal)."""
     share = await _validate_share(token, db)
