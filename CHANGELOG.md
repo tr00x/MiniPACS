@@ -121,12 +121,12 @@ PWA, thumbnails, optimistic UI, aggregate endpoints, prefetch warming.
 
 ---
 
-## 2026-04-16 — Clinical deploy at Clinton Medical
+## 2026-04-16 — Clinical deploy at the pilot clinic
 
 First MiniPACS production deployment.
 
 - Windows 11 host, WSL2 Ubuntu 24.04, Docker Engine 29.4.
-- Cloudflare Tunnel at `pacs.clintonmedical.net`.
+- Cloudflare Tunnel at `pacs.your-clinic.example`.
 - `docker-compose.prod.yml` production profile with cloudflared +
   nginx HTTP-only origin + LAN-only frontend bind.
 - `MiniPACS_PortProxy` Scheduled Task keeps netsh portproxy rules

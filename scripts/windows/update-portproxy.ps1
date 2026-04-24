@@ -12,7 +12,7 @@
 # Ports exposed to the host:
 #   22    — SSH into WSL (Timur's diagnostic access via LAN)
 #   443   — LAN-facing HTTPS for split-horizon DNS
-#                     (pacs.clintonmedical.net → 10.0.0.50 on the UniFi)
+#                     (pacs.your-clinic.example → clinic LAN IP on the UniFi)
 #   48924 — DICOM C-STORE for modalities on the LAN
 
 $ErrorActionPreference = "Stop"

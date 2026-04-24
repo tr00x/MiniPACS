@@ -8,7 +8,7 @@ browser → CF edge (TLS) → CF Tunnel → 127.0.0.1:8080 (HTTP) → nginx → 
 
 That's fine for WAN users, but a radiologist sitting in the clinic pays
 ~50–100ms per request to leave the building and come back. Split-horizon
-DNS pins `pacs.clintonmedical.net` at the clinic's own server (10.0.0.50)
+DNS pins `pacs.your-clinic.example` at the clinic's own server (10.0.0.50)
 for anyone on the LAN, so their traffic never leaves the switch:
 
 ```
@@ -30,7 +30,7 @@ RTT drops to ~1 ms and the HTTP/2 multiplex is visible on Stone bursts.
 
 ### 1. Generate a Cloudflare Origin Certificate
 
-In the CF dashboard for `clintonmedical.net`:
+In the CF dashboard for `your-clinic.example`:
 `SSL/TLS → Origin Server → Create Certificate`. Defaults (RSA 2048, 15-year
 TTL) are fine. Save the two blocks into:
 
@@ -86,18 +86,18 @@ UniFi Network → Settings → Networks → (your LAN) → Advanced → DNS:
 
 | Host | Type | Value |
 |---|---|---|
-| `pacs.clintonmedical.net` | A | `10.0.0.50` |
+| `pacs.your-clinic.example` | A | `10.0.0.50` |
 
 Flush the browser DNS cache on a client (`chrome://net-internals/#dns` →
-Clear host cache) and `nslookup pacs.clintonmedical.net` from the LAN
+Clear host cache) and `nslookup pacs.your-clinic.example` from the LAN
 should now resolve to `10.0.0.50`.
 
 ### 5. Verify
 
 ```bash
 # From a LAN Mac:
-curl -vk https://pacs.clintonmedical.net/api/health
-# → HTTP/2 200, cert CN = pacs.clintonmedical.net, chain = Cloudflare Origin CA
+curl -vk https://pacs.your-clinic.example/api/health
+# → HTTP/2 200, cert CN = pacs.your-clinic.example, chain = Cloudflare Origin CA
 ```
 
 HTTP/2 shows up as `* Using HTTP/2` in the curl trace. Cert name matches

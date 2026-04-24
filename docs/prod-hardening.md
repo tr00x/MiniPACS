@@ -99,12 +99,12 @@ Off-site target for HIPAA 3-2-1 compliance still pending — see
 
 ```bash
 # Public edge
-curl -fsS https://pacs.clintonmedical.net/api/health
+curl -fsS https://pacs.your-clinic.example/api/health
 # Internal endpoints must NOT answer from outside the LAN
 curl -fs --max-time 3 http://<public_ip>:48922/api/health && echo FAIL || echo ok
 curl -fs --max-time 3 http://<public_ip>:48923/            && echo FAIL || echo ok
 # Admin login with new password
-curl -sS -X POST https://pacs.clintonmedical.net/api/auth/login \
+curl -sS -X POST https://pacs.your-clinic.example/api/auth/login \
      -H 'Content-Type: application/json' \
      -d '{"username":"admin","password":"NEW_PASSWORD_HERE"}' | jq .access_token
 ```

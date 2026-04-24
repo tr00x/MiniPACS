@@ -39,7 +39,7 @@ else
   INTERNAL_EVENT_TOKEN=$(openssl rand -hex 32)
   ORTHANC_BASIC_AUTH=$(printf 'orthanc:%s' "$ORTHANC_PASSWORD" | base64 | tr -d '\n')
 
-  read -rp "Domain (e.g. pacs.clintonmedical.com): " DOMAIN
+  read -rp "Domain (e.g. pacs.your-clinic.example): " DOMAIN
   read -rp "Cloudflare Tunnel token: " CF_TUNNEL_TOKEN
 
   cat > .env <<EOF
