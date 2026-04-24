@@ -24,7 +24,7 @@ services:
       - ./orthanc/lua:/etc/orthanc/lua:ro
       - ./orthanc/python:/etc/orthanc/python:ro
       - minipacs-thumbs:/var/cache/minipacs-thumbs
-      - ./orthanc/ohif-user-config.json:/etc/orthanc/ohif-user-config.json:ro
+      - ./orthanc/ohif-user-config.js:/etc/orthanc/ohif-user-config.js:ro
     environment:
       ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
       ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"

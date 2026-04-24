@@ -3,7 +3,10 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+# --legacy-peer-deps: vite-plugin-pwa@1.2.0 declares vite ^5 || ^6 || ^7 || ^8
+# but npm's strict resolver confuses itself with tailwindcss/vite's overlapping
+# range. The lockfile is self-consistent; legacy resolver installs cleanly.
+RUN npm ci --legacy-peer-deps
 COPY frontend/ .
 RUN npm run build
 
