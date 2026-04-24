@@ -5,6 +5,17 @@ from typing import AsyncIterator
 import httpx
 from app.config import settings
 from app.services import cache
+from app.services.search_parser import parse_search
+
+# Fields to fan out across when the user's search string has free-text tokens.
+# Orthanc /tools/find ANDs keys within one Query dict, so to get OR-across-fields
+# we issue one request per field and merge. PatientName is the hottest — listed
+# first so its cache key stays warm across related queries.
+_TEXT_SEARCH_FIELDS = ("PatientName", "PatientID", "StudyDescription", "AccessionNumber")
+# Upper bound on per-field fetch so multi-field merge stays under a second even
+# on a 10k-study archive. 500 covers any realistic name/description collision;
+# if someone actually types "a" we accept that the merged set may be truncated.
+_TEXT_FANOUT_LIMIT = 500
 
 _client: httpx.AsyncClient | None = None
 
@@ -112,37 +123,52 @@ async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
 
 
 async def find_studies(search: str = "", modality: str = "", date_from: str = "", date_to: str = "", limit: int = 25, offset: int = 0):
-    """Server-side study search and pagination via Orthanc /tools/find."""
-    key = (search, modality, date_from, date_to, limit, offset)
+    """Server-side study search and pagination via Orthanc /tools/find.
+
+    `search` is parsed: modality codes (CT, MR, ...) and date tokens (2024,
+    2024-01, 2022-2024) are pulled out into their structured slots, and
+    anything left over is fanned out across PatientName/PatientID/
+    StudyDescription/AccessionNumber so typing `CT 2024 ivanov` finds all
+    CT studies from 2024 where the patient name or description matches.
+    """
+    # Explicit modality/date params still win — they come from UI filter chips.
+    parsed = parse_search(search)
+    text = parsed.text
+    modality = modality or parsed.modality
+    date_from = date_from or parsed.date_from
+    date_to = date_to or parsed.date_to
+
+    key = (text, modality, date_from, date_to, limit, offset)
     hit = await cache.get("studies", key, _STUDIES_FRESH_TTL)
     if hit is not None and hit[1]:
         return tuple(hit[0])
 
-    query = {}
-    if search:
-        query["PatientName"] = f"*{search}*"
+    base_query: dict[str, str] = {}
     if modality:
-        query["ModalitiesInStudy"] = modality.split(",")[0].strip()
+        base_query["ModalitiesInStudy"] = modality.split(",")[0].strip()
     if date_from and date_to:
-        query["StudyDate"] = f"{date_from}-{date_to}"
+        base_query["StudyDate"] = f"{date_from}-{date_to}"
     elif date_from:
-        query["StudyDate"] = f"{date_from}-"
+        base_query["StudyDate"] = f"{date_from}-"
     elif date_to:
-        query["StudyDate"] = f"-{date_to}"
+        base_query["StudyDate"] = f"-{date_to}"
 
-    # RequestedTags tells Orthanc to compute ModalitiesInStudy server-side (aggregated from
-    # child series) so we do NOT need N+1 per-series follow-up fetches in _enrich_*.
     try:
-        resp = await _http().post("/tools/find", json={
-            "Level": "Study",
-            "Query": query,
-            "Expand": True,
-            "RequestedTags": ["ModalitiesInStudy"],
-            "Limit": limit,
-            "Since": offset,
-        })
-        resp.raise_for_status()
-        items = resp.json()
+        if text:
+            items, total = await _multi_field_find(text, base_query, limit, offset)
+        else:
+            # Single query — no fanout needed. Use Orthanc's own pagination.
+            resp = await _http().post("/tools/find", json={
+                "Level": "Study",
+                "Query": base_query,
+                "Expand": True,
+                "RequestedTags": ["ModalitiesInStudy"],
+                "Limit": limit,
+                "Since": offset,
+            })
+            resp.raise_for_status()
+            items = resp.json()
+            total = None  # filled in below
     except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
         # Stale-while-error — same rationale as find_patients: never 502 the UI.
         if hit is not None:
@@ -150,7 +176,15 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
             return tuple(hit[0])
         raise Exception(f"PACS server unreachable: {exc}") from exc
 
-    filter_key = ("s_total", search, modality, date_from, date_to)
+    if text:
+        # _multi_field_find already knows the exact merged total; no need to
+        # round-trip Orthanc for a count. Cache + return.
+        filter_key = ("s_total", text, modality, date_from, date_to)
+        await cache.set("studies", filter_key, total)
+        await cache.set("studies", key, [items, total])
+        return items, total
+
+    filter_key = ("s_total", text, modality, date_from, date_to)
     total: int | None = None
     if offset == 0 and len(items) < limit:
         total = len(items)
@@ -162,7 +196,7 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
         try:
             count_resp = await _http().post("/tools/find", json={
                 "Level": "Study",
-                "Query": query,
+                "Query": base_query,
                 "Expand": False,
             })
             count_resp.raise_for_status()
@@ -174,6 +208,55 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
     items = _propagate_modalities(items)
     await cache.set("studies", key, [items, total])
     return items, total
+
+
+async def _multi_field_find(text: str, base_query: dict, limit: int, offset: int):
+    """Fan out a free-text search across name-like fields and merge by Study.ID.
+
+    Orthanc /tools/find ANDs keys within one Query, so we issue one request
+    per field in parallel and dedupe. Per-field fetches are capped at
+    `_TEXT_FANOUT_LIMIT`; the merged set is sorted by StudyDate desc and
+    paginated in-memory. Trade-off: extremely common tokens (`a`, `b`) may
+    truncate — acceptable because such searches return noise anyway.
+    """
+    wildcard = f"*{text}*"
+
+    async def _fetch(field: str):
+        q = dict(base_query)
+        q[field] = wildcard
+        try:
+            r = await _http().post("/tools/find", json={
+                "Level": "Study",
+                "Query": q,
+                "Expand": True,
+                "RequestedTags": ["ModalitiesInStudy"],
+                "Limit": _TEXT_FANOUT_LIMIT,
+            })
+            r.raise_for_status()
+            return r.json()
+        except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
+            _log.warning("multi_field: %s query failed: %s", field, exc)
+            return []
+
+    results = await asyncio.gather(*(_fetch(f) for f in _TEXT_SEARCH_FIELDS))
+
+    merged: dict[str, dict] = {}
+    for rs in results:
+        for s in rs:
+            sid = s.get("ID")
+            if sid and sid not in merged:
+                merged[sid] = s
+
+    def _sort_key(s: dict) -> str:
+        # StudyDate is YYYYMMDD — lexical desc = chronological desc. Missing
+        # dates sort last (they're usually malformed or legacy imports).
+        return s.get("MainDicomTags", {}).get("StudyDate") or "00000000"
+
+    ordered = sorted(merged.values(), key=_sort_key, reverse=True)
+    total = len(ordered)
+    page = ordered[offset:offset + limit]
+    page = _propagate_modalities(page)
+    return page, total
 
 
 async def get_patients(limit: int | None = None, since: int | None = None):
