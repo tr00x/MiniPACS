@@ -23,6 +23,20 @@ function seedBootCaches(qc: ReturnType<typeof useQueryClient>, boot: BootRespons
   qc.setQueryData(qk.pacsNodes(), boot.pacs_nodes);
 }
 
+// Background warm-up of the routes a logged-in user is most likely to hit
+// first. Non-blocking — we don't await these; by the time the user clicks
+// into Dashboard / Worklist the response is usually already in cache.
+function warmupAfterBoot(qc: ReturnType<typeof useQueryClient>) {
+  qc.prefetchQuery({
+    queryKey: qk.dashboard(),
+    queryFn: async () => (await api.get("/dashboard")).data,
+  });
+  qc.prefetchQuery({
+    queryKey: qk.studies({ limit: 50, offset: 0 }),
+    queryFn: async () => (await api.get("/studies", { params: { limit: 50, offset: 0 } })).data,
+  });
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
@@ -118,6 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setUser(data.user);
         seedBootCaches(qc, data);
+        warmupAfterBoot(qc);
         const minutes = parseInt(data.settings?.auto_logout_minutes ?? "", 10);
         if (!isNaN(minutes) && minutes > 0) {
           setInactivityTimeout(minutes * 60 * 1000);
@@ -142,6 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: boot } = await api.get<BootResponse>("/boot");
     setUser(boot.user);
     seedBootCaches(qc, boot);
+    warmupAfterBoot(qc);
     const minutes = parseInt(boot.settings?.auto_logout_minutes ?? "", 10);
     if (!isNaN(minutes) && minutes > 0) {
       setInactivityTimeout(minutes * 60 * 1000);
