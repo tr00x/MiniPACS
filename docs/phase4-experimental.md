@@ -81,31 +81,36 @@ Same two-line config change in `orthanc/orthanc-docker.json`, `git commit`,
 user does `git pull` + `docker compose restart orthanc` on prod. Monitor
 via Stone on a known-good study before announcing to radiologists.
 
-### POC results — 2026-04-24 (BLOCKED at codec layer)
+### POC results — 2026-04-24 (BLOCKED at encoder layer)
 
 Ran the POC locally against 3 imported studies (LUMBAR MRI 28-slice T2 axial
-series, LT SHOULDER MRI, LT FEMUR DX). Result: **HTJ2K is not supported by
-the stock `orthancteam/orthanc:latest` image** (at Orthanc 1.12.10, DicomWeb
-plugin 1.22, GDCM plugin bundled).
+series, LT SHOULDER MRI, LT FEMUR DX). After a first pass on the outdated
+Jan-2026 image, pulled `orthancteam/orthanc:latest` (2026-04-23 build,
+Orthanc 1.12.11, DicomWeb 1.23) and re-ran.
 
-A WADO-RS request with `Accept: multipart/related; type="application/dicom";
-transfer-syntax=1.2.840.10008.1.2.4.201` returns:
+`GET /tools/accepted-transfer-syntaxes` NOW lists `1.2.840.10008.1.2.4.{201,202,203}`,
+so the core has the **HTJ2K decoder** via OpenJPH — Orthanc can ingest and
+read HTJ2K. But:
 
 ```
-HTTP/1.1 400 Bad Request
-{"Message":"Bad request","OrthancError":"Bad request",
- "Details":"Unsupported transfer syntax in WADO-RS: 1.2.840.10008.1.2.4.201"}
+GET /instances/{id}/file?transcode=1.2.840.10008.1.2.4.201 → HTTP 404
+GET /instances/{id}/file?transcode=1.2.840.10008.1.2.4.90  → OK, 140KB→73KB
 ```
 
-Root cause: the GDCM bundled in the stock image was built without OpenJPH
-(HTJ2K encoder), so the DicomWeb plugin refuses the transfer syntax even
-though the UID is recognized. No separate HTJ2K plugin ships in that image.
+The stock image ships the HTJ2K **decoder** but **not the encoder**. DicomWeb
+WADO-RS correspondingly returns 400 "Unsupported transfer syntax in WADO-RS:
+1.2.840.10008.1.2.4.201" — there's nothing to transcode legacy-compressed or
+uncompressed DICOM with.
 
 **Unlocking HTJ2K requires one of:**
-1. Custom Orthanc image: rebuild `orthancteam/orthanc` base with `-DUSE_SYSTEM_OPENJPH=ON` or
-   link GDCM against OpenJPH. Non-trivial — dockerfile + build pipeline.
-2. Wait for an upstream orthancteam image that ships OpenJPH.
-3. Switch to the commercial Orthanc Team premium images (may include it).
+1. Custom Orthanc image built with an OpenJPH encoder link (non-trivial
+   dockerfile + build pipeline + ongoing maintenance).
+2. Pre-ingest transcode via an external `dcm2dcm`-style OpenJPH tool —
+   store already-HTJ2K DICOMs so Orthanc just serves stored bytes.
+   Substantial pipeline work + batch re-transcode of the 5,000+ study
+   archive.
+3. Wait for an upstream orthancteam image that ships the encoder, or
+   switch to commercial Orthanc Team premium images (may include it).
 
 **Collateral POC win (already shipped):** same test confirmed the
 `Transcode: 1.2.840.10008.1.2.4.90` (J2K Lossless, commit 9bdfa90) cuts
@@ -114,8 +119,8 @@ wire bytes **149 KB → 55 KB per MR instance = −63%** (curl-timed
 the bandwidth portion of the HTJ2K story is already delivered. On the
 full 28-slice series, transcoded total is ~1.5 MB vs. ~4.2 MB native.
 
-**Status:** HTJ2K parked. Reopen only when stock image ships OpenJPH or
-we commit to maintaining a custom base image. Progressive rendering is
+**Status:** HTJ2K parked. Reopen only when stock image ships an HTJ2K encoder
+or we commit to maintaining a custom base image / pre-ingest pipeline. Progressive rendering is
 the remaining unlock — not worth the build-maintenance tax until the
 clinic explicitly asks for sub-second first-pixel on huge CT series we
 don't currently have in the archive.
