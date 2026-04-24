@@ -42,6 +42,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Cache CORS preflight 24h. Without this, browsers OPTIONS every /api/
+    # call, adding 1 RTT per fetch. Starlette's default is 600s.
+    # Note: FastAPI's CORSMiddleware handles OPTIONS itself BEFORE nginx's
+    # add_header has a chance — so the nginx-side Access-Control-Max-Age
+    # directive is shadowed, and the authoritative knob is this one.
+    max_age=86400,
 )
 
 
