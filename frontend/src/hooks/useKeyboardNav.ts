@@ -26,9 +26,14 @@ function isTypingContext(el: EventTarget | null): boolean {
 }
 
 export function useKeyboardNav(bindings: KeyBinding[]) {
-  // Store bindings in a ref so handler doesn't re-attach on every render.
+  // Store bindings in a ref so the window listener doesn't re-attach on every
+  // render. React 19's lint rules forbid writing refs during render, so we
+  // sync via effect — the first keystroke only reaches the handler after the
+  // first paint anyway, so there's no observable lag from the async update.
   const bindingsRef = useRef(bindings);
-  bindingsRef.current = bindings;
+  useEffect(() => {
+    bindingsRef.current = bindings;
+  });
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
