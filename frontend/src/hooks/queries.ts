@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient, skipToken } from "@tanstack/react-query";
 import api from "@/lib/api";
 
@@ -174,6 +175,36 @@ export function usePrefetchPatientFull() {
       staleTime: 30_000,
     });
   };
+}
+
+// ---------- Adjacent-study navigation ----------
+// Resolve prev/next study IDs for the given patient + current study, and
+// prefetch their full payload so keyboard n/p feels instant — navigation
+// hits the React Query cache instead of the network.
+//
+// Ordering matches the portal's default list view: StudyDate desc (newest
+// first). So `next` = older study, `prev` = newer study. This mirrors what
+// the radiologist sees in the list.
+export function useAdjacentStudies(patientId: string | undefined, currentStudyId: string) {
+  const { data } = usePatientFull(patientId);
+  const prefetch = usePrefetchStudyFull();
+
+  const studies: Array<{ ID: string; MainDicomTags?: { StudyDate?: string } }> = data?.studies ?? [];
+  const sorted = [...studies].sort((a, b) => {
+    const da = a?.MainDicomTags?.StudyDate ?? "";
+    const db = b?.MainDicomTags?.StudyDate ?? "";
+    return db.localeCompare(da);
+  });
+  const idx = sorted.findIndex((s) => s.ID === currentStudyId);
+  const prev = idx > 0 ? sorted[idx - 1].ID : null;
+  const next = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1].ID : null;
+
+  useEffect(() => {
+    if (next) prefetch(next);
+    if (prev) prefetch(prev);
+  }, [next, prev, prefetch]);
+
+  return { next, prev };
 }
 
 // ---------- Invalidation helpers ----------
