@@ -133,14 +133,16 @@ export function SettingsPage() {
   };
 
   const handleDeleteUser = async (id: number) => {
+    // Optimistic: drop the user from the UI immediately, rollback on error.
+    const previousUsers = users;
+    setUsers(users.filter((u) => u.id !== id));
+    setDeleteUserId(null);
     try {
       await api.delete(`/users/${id}`);
-      setUsers(users.filter((u) => u.id !== id));
-      setDeleteUserId(null);
     } catch (err: unknown) {
+      setUsers(previousUsers);
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to delete user");
-      setDeleteUserId(null);
+      toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to delete user");
     }
   };
 
@@ -198,14 +200,16 @@ export function SettingsPage() {
   };
 
   const handleDeleteViewer = async (id: number) => {
+    // Optimistic: drop the viewer from the UI immediately, rollback on error.
+    const previousViewers = viewers;
+    setViewers(viewers.filter((v) => v.id !== id));
+    setDeleteViewerId(null);
     try {
       await api.delete(`/viewers/${id}`);
-      setViewers(viewers.filter((v) => v.id !== id));
-      setDeleteViewerId(null);
     } catch (err: unknown) {
+      setViewers(previousViewers);
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to delete viewer");
-      setDeleteViewerId(null);
+      toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to delete viewer");
     }
   };
 

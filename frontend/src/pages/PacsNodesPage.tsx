@@ -14,8 +14,9 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TableSkeleton } from "@/components/TableSkeleton";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Plus, Pencil, Trash2, Radio } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { usePacsNodes, useInvalidate } from "@/hooks/queries";
+import { usePacsNodes, useInvalidate, qk } from "@/hooks/queries";
 
 interface PacsNode {
   id: number;
@@ -68,6 +69,7 @@ export function PacsNodesPage() {
     ? ((pacsNodesQuery.error as any)?.response?.data?.detail ?? (pacsNodesQuery.error as any)?.message ?? "Failed to load PACS nodes")
     : null;
   const invalidate = useInvalidate();
+  const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<NodeForm>(emptyForm);
@@ -125,15 +127,22 @@ export function PacsNodesPage() {
 
   const handleDeleteConfirm = async () => {
     if (deleteTarget === null) return;
+    const targetId = deleteTarget;
+    // Optimistic: drop the row immediately from the cached list. Rollback on error.
+    const nodesKey = qk.pacsNodes();
+    const previous = qc.getQueryData(nodesKey);
+    qc.setQueryData(nodesKey, (old: PacsNode[] | undefined) =>
+      Array.isArray(old) ? old.filter((n) => n.id !== targetId) : old,
+    );
+    setDeleteTarget(null);
     setDeleting(true);
     try {
-      await api.delete(`/pacs-nodes/${deleteTarget}`);
-      setDeleteTarget(null);
+      await api.delete(`/pacs-nodes/${targetId}`);
       invalidate.afterPacsNodeChange();
     } catch (err: unknown) {
+      qc.setQueryData(nodesKey, previous);
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to delete node");
-      setDeleteTarget(null);
     } finally {
       setDeleting(false);
     }
