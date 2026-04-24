@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import ORJSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -44,6 +45,13 @@ app = FastAPI(
     lifespan=lifespan,
     default_response_class=ORJSONResponse,
 )
+
+# Gzip large JSON responses. Worklist payload for 1000 studies is ~2MB of
+# very repetitive JSON — compresses to ~15% of that. In prod, nginx gzips
+# on top; but for direct backend access (LAN direct-IP, CF Tunnel without
+# intermediate gzip, dev) this is where the saving lives. minimum_size=1024
+# skips tiny responses where the CPU/latency cost outweighs the bytes saved.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 app.add_middleware(
     CORSMiddleware,
