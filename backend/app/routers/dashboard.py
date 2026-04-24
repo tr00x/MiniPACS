@@ -10,7 +10,7 @@ import asyncio
 import time
 from datetime import datetime, timezone, timedelta
 
-import aiosqlite
+from app.db import PgConnection
 from fastapi import APIRouter, Depends
 
 from app.database import get_db
@@ -95,7 +95,7 @@ async def _last_received():
     return None
 
 
-async def _db_counts(db: aiosqlite.Connection):
+async def _db_counts(db: PgConnection):
     week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
     cur = await db.execute(
         "SELECT COUNT(*) FROM transfer_log WHERE created_at >= ?", (week_ago,)
@@ -110,7 +110,7 @@ async def _db_counts(db: aiosqlite.Connection):
     return transfers_week, failed_transfers, unviewed_shares
 
 
-async def _recent_transfers(db: aiosqlite.Connection):
+async def _recent_transfers(db: PgConnection):
     cur = await db.execute(
         "SELECT t.id, t.orthanc_study_id, "
         "n.name AS pacs_node_name, n.ae_title AS pacs_node_ae_title, "
@@ -122,7 +122,7 @@ async def _recent_transfers(db: aiosqlite.Connection):
     return [dict(r) for r in rows]
 
 
-async def _active_shares(db: aiosqlite.Connection):
+async def _active_shares(db: PgConnection):
     cur = await db.execute(
         "SELECT id, orthanc_patient_id, token, is_active, view_count, created_at, expires_at "
         "FROM patient_shares WHERE is_active = 1 ORDER BY created_at DESC LIMIT 5"
@@ -134,7 +134,7 @@ async def _active_shares(db: aiosqlite.Connection):
 @router.get("")
 async def get_dashboard(
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cached = _cache.get("all")
     if cached and time.time() - cached[0] < _DASHBOARD_TTL:

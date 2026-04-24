@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-import aiosqlite
+from app.db import PgConnection
 
 from app.database import get_db
 from app.models.transfers import TransferRequest
@@ -22,7 +22,7 @@ async def list_transfers(
     limit: int = Query(default=25, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     await log_audit("list_transfers", user_id=user["id"], ip_address=request.client.host)
 
@@ -63,7 +63,7 @@ async def create_transfer(
     body: TransferRequest,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     # Validate PACS node exists and is active
     cursor = await db.execute(
@@ -80,7 +80,8 @@ async def create_transfer(
     # Create transfer log entry
     cursor = await db.execute(
         """INSERT INTO transfer_log (orthanc_study_id, pacs_node_id, initiated_by, status)
-           VALUES (?, ?, ?, 'pending')""",
+           VALUES (?, ?, ?, 'pending')
+           RETURNING id""",
         (body.study_id, body.pacs_node_id, user["id"]),
     )
     await db.commit()
@@ -129,7 +130,7 @@ async def retry_transfer(
     transfer_id: int,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute(
         """SELECT t.*, p.name as pacs_node_name

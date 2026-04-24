@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-import aiosqlite
+from app.db import PgConnection
 
 from app.database import get_db
 from app.models.pacs_nodes import PacsNodeCreate, PacsNodeUpdate
@@ -22,7 +22,7 @@ def _modality_id(name: str) -> str:
 async def list_pacs_nodes(
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     await log_audit("list_pacs_nodes", user_id=user["id"], ip_address=request.client.host)
     cursor = await db.execute("SELECT * FROM pacs_nodes ORDER BY id")
@@ -35,7 +35,7 @@ async def create_pacs_node(
     body: PacsNodeCreate,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     modality = _modality_id(body.name)
 
@@ -47,7 +47,8 @@ async def create_pacs_node(
 
     cursor = await db.execute(
         """INSERT INTO pacs_nodes (name, ae_title, ip, port, description)
-           VALUES (?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?)
+           RETURNING id""",
         (body.name, body.ae_title, body.ip, body.port, body.description),
     )
     await db.commit()
@@ -69,7 +70,7 @@ async def update_pacs_node(
     body: PacsNodeUpdate,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute("SELECT * FROM pacs_nodes WHERE id = ?", (node_id,))
     existing = await cursor.fetchone()
@@ -126,7 +127,7 @@ async def delete_pacs_node(
     node_id: int,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute("SELECT * FROM pacs_nodes WHERE id = ?", (node_id,))
     existing = await cursor.fetchone()
@@ -155,7 +156,7 @@ async def echo_pacs_node(
     node_id: int,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute("SELECT * FROM pacs_nodes WHERE id = ?", (node_id,))
     existing = await cursor.fetchone()

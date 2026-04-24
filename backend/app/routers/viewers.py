@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-import aiosqlite
+from app.db import PgConnection
 
 from app.database import get_db
 from app.routers.auth import get_current_user
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/viewers", tags=["viewers"])
 @router.get("")
 async def list_viewers(
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute(
         "SELECT * FROM external_viewers ORDER BY sort_order, name"
@@ -26,11 +26,11 @@ async def create_viewer(
     body: ViewerCreate,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute(
         "INSERT INTO external_viewers (name, icon, url_scheme, is_enabled, sort_order, description, icon_key) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
         (body.name, body.icon, body.url_scheme, body.is_enabled, body.sort_order, body.description, body.icon_key),
     )
     await db.commit()
@@ -52,7 +52,7 @@ async def update_viewer(
     body: ViewerUpdate,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute("SELECT * FROM external_viewers WHERE id = ?", (viewer_id,))
     existing = await cursor.fetchone()
@@ -95,7 +95,7 @@ async def delete_viewer(
     viewer_id: int,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute("SELECT * FROM external_viewers WHERE id = ?", (viewer_id,))
     existing = await cursor.fetchone()

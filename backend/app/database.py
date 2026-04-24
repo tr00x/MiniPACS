@@ -1,214 +1,180 @@
-import os
-import aiosqlite
-from pathlib import Path
+"""Schema bootstrap for the MiniPACS backend on PostgreSQL.
 
-DB_PATH = Path(os.environ.get("DATABASE_PATH", Path(__file__).parent.parent / "minipacs.db"))
+The backend shares Orthanc's PG instance (and database) — our table
+names do not overlap with Orthanc's internal schema, so no extra DB
+or role is needed. Connection management lives in `app/db.py`.
+"""
 
+from __future__ import annotations
 
-async def get_db():
-    db = await aiosqlite.connect(DB_PATH)
-    db.row_factory = aiosqlite.Row
-    # Per-connection pragmas — cheap to set, big impact under concurrent writes.
-    await db.execute("PRAGMA journal_mode=WAL")
-    await db.execute("PRAGMA synchronous=NORMAL")
-    await db.execute("PRAGMA cache_size=-65536")  # 64 MB page cache
-    await db.execute("PRAGMA temp_store=MEMORY")
-    try:
-        yield db
-    finally:
-        await db.close()
+from app.db import pool, get_db  # re-export for existing imports
 
 
-async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        # Persist journal_mode=WAL at the file level so every new connection
-        # inherits it (journal_mode is a per-file property on reopen).
-        await db.execute("PRAGMA journal_mode=WAL")
-        await db.executescript("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                token_version INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT (datetime('now')),
-                last_login TEXT
-            );
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    token_version INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'),
+    last_login TEXT
+);
 
-            CREATE TABLE IF NOT EXISTS patient_shares (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                orthanc_patient_id TEXT NOT NULL,
-                token TEXT UNIQUE NOT NULL,
-                expires_at TEXT,
-                created_by INTEGER REFERENCES users(id),
-                created_at TEXT DEFAULT (datetime('now')),
-                is_active INTEGER DEFAULT 1,
-                view_count INTEGER DEFAULT 0,
-                first_viewed_at TEXT,
-                last_viewed_at TEXT,
-                pin_hash TEXT
-            );
+CREATE TABLE IF NOT EXISTS patient_shares (
+    id SERIAL PRIMARY KEY,
+    orthanc_patient_id TEXT NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    expires_at TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'),
+    is_active INTEGER DEFAULT 1,
+    view_count INTEGER DEFAULT 0,
+    first_viewed_at TEXT,
+    last_viewed_at TEXT,
+    pin_hash TEXT
+);
 
-            CREATE TABLE IF NOT EXISTS pacs_nodes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                ae_title TEXT NOT NULL,
-                ip TEXT NOT NULL,
-                port INTEGER NOT NULL,
-                description TEXT,
-                is_active INTEGER DEFAULT 1,
-                last_echo_at TEXT
-            );
+CREATE TABLE IF NOT EXISTS pacs_nodes (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    ae_title TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    description TEXT,
+    is_active INTEGER DEFAULT 1,
+    last_echo_at TEXT
+);
 
-            CREATE TABLE IF NOT EXISTS transfer_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                orthanc_study_id TEXT NOT NULL,
-                pacs_node_id INTEGER REFERENCES pacs_nodes(id),
-                initiated_by INTEGER REFERENCES users(id),
-                status TEXT DEFAULT 'pending',
-                error_message TEXT,
-                created_at TEXT DEFAULT (datetime('now')),
-                completed_at TEXT
-            );
+CREATE TABLE IF NOT EXISTS transfer_log (
+    id SERIAL PRIMARY KEY,
+    orthanc_study_id TEXT NOT NULL,
+    pacs_node_id INTEGER REFERENCES pacs_nodes(id),
+    initiated_by INTEGER REFERENCES users(id),
+    status TEXT DEFAULT 'pending',
+    error_message TEXT,
+    created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'),
+    completed_at TEXT
+);
 
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                patient_token TEXT,
-                action TEXT NOT NULL,
-                resource_type TEXT,
-                resource_id TEXT,
-                ip_address TEXT,
-                timestamp TEXT DEFAULT (datetime('now'))
-            );
+CREATE TABLE IF NOT EXISTS audit_log (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER,
+    patient_token TEXT,
+    action TEXT NOT NULL,
+    resource_type TEXT,
+    resource_id TEXT,
+    ip_address TEXT,
+    timestamp TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')
+);
 
-            CREATE TABLE IF NOT EXISTS external_viewers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                icon TEXT,
-                url_scheme TEXT NOT NULL,
-                is_enabled INTEGER DEFAULT 1,
-                sort_order INTEGER DEFAULT 0
-            );
+CREATE TABLE IF NOT EXISTS external_viewers (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    icon TEXT,
+    url_scheme TEXT NOT NULL,
+    is_enabled INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    description TEXT,
+    icon_key TEXT
+);
 
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT,
-                updated_at TEXT DEFAULT (datetime('now'))
-            );
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')
+);
 
-            CREATE TABLE IF NOT EXISTS study_reports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                orthanc_study_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                report_type TEXT NOT NULL DEFAULT 'text',
-                content TEXT,
-                filename TEXT,
-                created_by INTEGER REFERENCES users(id),
-                created_at TEXT DEFAULT (datetime('now'))
-            );
+CREATE TABLE IF NOT EXISTS study_reports (
+    id SERIAL PRIMARY KEY,
+    orthanc_study_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    report_type TEXT NOT NULL DEFAULT 'text',
+    content TEXT,
+    filename TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')
+);
 
-            CREATE INDEX IF NOT EXISTS idx_study_reports_sid
-                ON study_reports(orthanc_study_id);
-            CREATE INDEX IF NOT EXISTS idx_patient_shares_pid
-                ON patient_shares(orthanc_patient_id);
-            CREATE INDEX IF NOT EXISTS idx_transfer_log_sid
-                ON transfer_log(orthanc_study_id);
-            CREATE INDEX IF NOT EXISTS idx_audit_log_user_time
-                ON audit_log(user_id, timestamp);
-            CREATE INDEX IF NOT EXISTS idx_audit_log_time
-                ON audit_log(timestamp);
-        """)
-        await db.commit()
+CREATE INDEX IF NOT EXISTS idx_study_reports_sid ON study_reports(orthanc_study_id);
+CREATE INDEX IF NOT EXISTS idx_patient_shares_pid ON patient_shares(orthanc_patient_id);
+CREATE INDEX IF NOT EXISTS idx_transfer_log_sid ON transfer_log(orthanc_study_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_user_time ON audit_log(user_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_log_time ON audit_log(timestamp);
+"""
 
-        # Migrations for existing databases
-        try:
-            await db.execute("ALTER TABLE pacs_nodes ADD COLUMN last_echo_at TEXT")
-            await db.commit()
-        except Exception:
-            pass  # Column already exists
 
-        try:
-            await db.execute("ALTER TABLE patient_shares ADD COLUMN pin_hash TEXT")
-            await db.commit()
-        except Exception:
-            pass  # Column already exists
+_DEFAULT_VIEWERS = [
+    ("OHIF Viewer",
+     "/ohif/viewer?url=/orthanc/studies/{study_id}/ohif-dicom-json",
+     1,
+     "Built-in web viewer (Orthanc OHIF plugin, dicom-json datasource)",
+     "ohif"),
+    ("Stone Web Viewer",
+     "/stone-webviewer/index.html?study={StudyInstanceUID}",
+     1,
+     "Native WASM viewer by Orthanc team",
+     "stone"),
+    ("OsiriX",
+     "osirix://open?StudyInstanceUID={StudyInstanceUID}",
+     0, "macOS DICOM viewer", "osirix"),
+    ("Horos",
+     "horos://open?StudyInstanceUID={StudyInstanceUID}",
+     0, "Free macOS DICOM viewer", "horos"),
+    ("RadiAnt",
+     "radiant://open?StudyInstanceUID={StudyInstanceUID}",
+     0, "Windows/Mac DICOM viewer", "radiant"),
+    ("3D Slicer",
+     "slicer://viewer/?StudyInstanceUID={StudyInstanceUID}",
+     0, "3D visualization platform", "slicer"),
+    ("MicroDicom",
+     "microdicom://open?StudyInstanceUID={StudyInstanceUID}",
+     0, "Free Windows DICOM viewer", "microdicom"),
+    ("PostDICOM",
+     "https://cloud.postdicom.com/viewer.html?StudyInstanceUID={StudyInstanceUID}",
+     0, "Cloud DICOM viewer", "postdicom"),
+    ("MedDream",
+     "https://demo.meddream.com/viewer/{StudyInstanceUID}",
+     0, "Web-based diagnostic viewer", "meddream"),
+]
 
-        try:
-            await db.execute("ALTER TABLE external_viewers ADD COLUMN description TEXT")
-            await db.commit()
-        except Exception:
-            pass  # Column already exists
 
-        try:
-            await db.execute("ALTER TABLE external_viewers ADD COLUMN icon_key TEXT")
-            await db.commit()
-        except Exception:
-            pass  # Column already exists
+async def init_db() -> None:
+    """Create tables, migrate legacy columns, seed viewers.
 
-        # Backfill Stone Web Viewer for existing installs that already have
-        # seed rows (seed block below only runs when table is empty).
-        try:
-            cur = await db.execute(
-                "SELECT 1 FROM external_viewers WHERE name = ? LIMIT 1",
-                ("Stone Web Viewer",),
-            )
-            if not await cur.fetchone():
-                await db.execute(
-                    "INSERT INTO external_viewers (name, url_scheme, is_enabled, description, icon_key, sort_order) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        "Stone Web Viewer",
-                        "/stone-webviewer/index.html?study={StudyInstanceUID}",
-                        1,
-                        "Native WASM viewer by Orthanc team",
-                        "stone",
-                        2,
-                    ),
+    Runs on every backend boot; idempotent. Uses IF NOT EXISTS for DDL
+    and ON CONFLICT DO NOTHING for viewer seeding so a restart on a
+    warm database is a fast no-op.
+    """
+    p = pool()
+    async with p.acquire() as conn:
+        # Schema + indexes.
+        await conn.execute(SCHEMA_SQL)
+
+        # Rewrite any legacy OHIF viewer URL to the plugin's dicom-json form.
+        # Covers installs migrated from SQLite where the earlier URL shapes
+        # (StudyInstanceUIDs=... or the broken ../studies/... relative form)
+        # are still persisted.
+        await conn.execute(
+            """UPDATE external_viewers
+               SET url_scheme = $1, description = $2
+               WHERE name = $3 AND url_scheme NOT LIKE $4""",
+            "/ohif/viewer?url=/orthanc/studies/{study_id}/ohif-dicom-json",
+            "Built-in web viewer (Orthanc OHIF plugin, dicom-json datasource)",
+            "OHIF Viewer",
+            "%/orthanc/studies/%",
+        )
+
+        # Seed defaults only when the table is empty.
+        count = await conn.fetchval("SELECT COUNT(*) FROM external_viewers")
+        if (count or 0) == 0:
+            for name, url_scheme, is_enabled, description, icon_key in _DEFAULT_VIEWERS:
+                await conn.execute(
+                    """INSERT INTO external_viewers
+                       (name, url_scheme, is_enabled, description, icon_key)
+                       VALUES ($1, $2, $3, $4, $5)""",
+                    name, url_scheme, is_enabled, description, icon_key,
                 )
-                await db.commit()
-        except Exception:
-            pass
 
-        # Migrate OHIF Viewer URL to the Orthanc plugin's dicom-json form.
-        # Anything that is NOT already pointing at /orthanc/studies/…/ohif-
-        # dicom-json gets rewritten: covers the legacy StudyInstanceUIDs=… URL
-        # AND an earlier (broken) relative ../studies/… URL we briefly shipped
-        # that nginx does not proxy. New URL resolves via nginx /orthanc/
-        # reverse proxy → Orthanc REST endpoint serving the precomputed JSON.
-        try:
-            await db.execute(
-                "UPDATE external_viewers SET "
-                "url_scheme = ?, description = ? "
-                "WHERE name = ? AND url_scheme NOT LIKE ?",
-                (
-                    "/ohif/viewer?url=/orthanc/studies/{study_id}/ohif-dicom-json",
-                    "Built-in web viewer (Orthanc OHIF plugin, dicom-json datasource)",
-                    "OHIF Viewer",
-                    "%/orthanc/studies/%",
-                ),
-            )
-            await db.commit()
-        except Exception:
-            pass
 
-        # Seed default external viewers if none exist
-        cursor = await db.execute("SELECT COUNT(*) FROM external_viewers")
-        count = (await cursor.fetchone())[0]
-        if count == 0:
-            default_viewers = [
-                ("OHIF Viewer", "/ohif/viewer?url=/orthanc/studies/{study_id}/ohif-dicom-json", 1, "Built-in web viewer (Orthanc OHIF plugin, dicom-json datasource)", "ohif"),
-                ("Stone Web Viewer", "/stone-webviewer/index.html?study={StudyInstanceUID}", 1, "Native WASM viewer by Orthanc team", "stone"),
-                ("OsiriX", "osirix://open?StudyInstanceUID={StudyInstanceUID}", 0, "macOS DICOM viewer", "osirix"),
-                ("Horos", "horos://open?StudyInstanceUID={StudyInstanceUID}", 0, "Free macOS DICOM viewer", "horos"),
-                ("RadiAnt", "radiant://open?StudyInstanceUID={StudyInstanceUID}", 0, "Windows/Mac DICOM viewer", "radiant"),
-                ("3D Slicer", "slicer://viewer/?StudyInstanceUID={StudyInstanceUID}", 0, "3D visualization platform", "slicer"),
-                ("MicroDicom", "microdicom://open?StudyInstanceUID={StudyInstanceUID}", 0, "Free Windows DICOM viewer", "microdicom"),
-                ("PostDICOM", "https://cloud.postdicom.com/viewer.html?StudyInstanceUID={StudyInstanceUID}", 0, "Cloud DICOM viewer", "postdicom"),
-                ("MedDream", "https://demo.meddream.com/viewer/{StudyInstanceUID}", 0, "Web-based diagnostic viewer", "meddream"),
-            ]
-            for name, url_scheme, is_enabled, description, icon_key in default_viewers:
-                await db.execute(
-                    "INSERT INTO external_viewers (name, url_scheme, is_enabled, description, icon_key) VALUES (?, ?, ?, ?, ?)",
-                    (name, url_scheme, is_enabled, description, icon_key),
-                )
-            await db.commit()
+# Back-compat re-export: old modules did `from app.database import get_db`
+__all__ = ["init_db", "get_db", "pool"]

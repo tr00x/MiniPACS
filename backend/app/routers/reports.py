@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-import aiosqlite
+from app.db import PgConnection
 
 from app.database import get_db
 from app.models.reports import ReportCreate, ReportUpdate
@@ -14,7 +14,7 @@ async def list_reports(
     request: Request,
     study_id: str = None,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     await log_audit("list_reports", user_id=user["id"], ip_address=request.client.host)
     if study_id:
@@ -42,11 +42,12 @@ async def create_report(
     body: ReportCreate,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute(
         """INSERT INTO study_reports (orthanc_study_id, title, report_type, content, filename, created_by)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?)
+           RETURNING id""",
         (body.orthanc_study_id, body.title, body.report_type, body.content, body.filename, user["id"]),
     )
     await db.commit()
@@ -70,7 +71,7 @@ async def delete_report(
     report_id: int,
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     cursor = await db.execute("SELECT * FROM study_reports WHERE id = ?", (report_id,))
     if not await cursor.fetchone():

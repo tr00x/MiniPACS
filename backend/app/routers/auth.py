@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-import aiosqlite
+from app.db import PgConnection
 
 from app.database import get_db
 from app.models.auth import LoginRequest, TokenResponse, UserResponse, RefreshRequest
@@ -20,7 +20,7 @@ MAX_ATTEMPTS = 5
 WINDOW_MINUTES = 5
 
 
-async def _check_rate_limit(ip: str, db: aiosqlite.Connection):
+async def _check_rate_limit(ip: str, db: PgConnection):
     """Check if IP is rate-limited based on failed login audit entries. Survives restarts."""
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=WINDOW_MINUTES)).isoformat()
     cursor = await db.execute(
@@ -34,7 +34,7 @@ async def _check_rate_limit(ip: str, db: aiosqlite.Connection):
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ) -> dict:
     payload = decode_token(credentials.credentials)
     if not payload or payload.get("type") != "access":
@@ -51,7 +51,7 @@ async def get_current_user(
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, request: Request, db: aiosqlite.Connection = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, db: PgConnection = Depends(get_db)):
     ip = request.client.host
     await _check_rate_limit(ip, db)
 
@@ -104,7 +104,7 @@ def _schedule_post_login_warmup():
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(body: RefreshRequest, db: aiosqlite.Connection = Depends(get_db)):
+async def refresh(body: RefreshRequest, db: PgConnection = Depends(get_db)):
     payload = decode_token(body.refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(401, "Invalid refresh token")
@@ -126,7 +126,7 @@ async def refresh(body: RefreshRequest, db: aiosqlite.Connection = Depends(get_d
 async def logout(
     request: Request,
     user: dict = Depends(get_current_user),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
 ):
     await db.execute(
         "UPDATE users SET token_version = token_version + 1 WHERE id = ?",

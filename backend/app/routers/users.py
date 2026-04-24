@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-import aiosqlite
+from app.db import PgConnection
 
 from app.database import get_db
 from app.routers.auth import get_current_user
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 
 @router.get("")
-async def list_users(db: aiosqlite.Connection = Depends(get_db), user: dict = Depends(get_current_user)):
+async def list_users(db: PgConnection = Depends(get_db), user: dict = Depends(get_current_user)):
     cursor = await db.execute("SELECT id, username, created_at, last_login FROM users")
     return [dict(row) for row in await cursor.fetchall()]
 
@@ -20,12 +20,12 @@ async def list_users(db: aiosqlite.Connection = Depends(get_db), user: dict = De
 async def create_user(
     body: LoginRequest,
     request: Request,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
     try:
         cursor = await db.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            "INSERT INTO users (username, password_hash) VALUES (?, ?) RETURNING id",
             (body.username, hash_password(body.password)),
         )
         await db.commit()
@@ -42,7 +42,7 @@ async def create_user(
 async def delete_user(
     target_id: int,
     request: Request,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
     if target_id == user["id"]:
@@ -57,7 +57,7 @@ async def delete_user(
 async def revoke_tokens(
     target_id: int,
     request: Request,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: PgConnection = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
     await db.execute("UPDATE users SET token_version = token_version + 1 WHERE id = ?", (target_id,))
