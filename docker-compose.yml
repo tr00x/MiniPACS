@@ -78,6 +78,11 @@ services:
       - ./scripts:/app/scripts:ro
       - minipacs-thumbs:/srv/thumbs:ro
     environment:
+      # Local dev only — allows the placeholder secrets in the shipped
+      # .env.docker template to run without tripping the prod startup gate
+      # in app.config. docker-compose.prod.yml deliberately does NOT set
+      # this flag, so prod will refuse to boot with default secrets.
+      MINIPACS_ALLOW_INSECURE_DEFAULTS: "1"
       SECRET_KEY: "${SECRET_KEY}"
       ORTHANC_URL: "http://orthanc:8042"
       ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
