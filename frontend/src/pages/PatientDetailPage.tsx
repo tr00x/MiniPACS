@@ -17,7 +17,8 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import { PageLoader } from "@/components/PageLoader";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
-import { usePatientFull, useInvalidate } from "@/hooks/queries";
+import { useQueryClient } from "@tanstack/react-query";
+import { usePatientFull, useInvalidate, qk } from "@/hooks/queries";
 import { formatDicomName, formatDicomDate, formatTimestamp, calculateAge, getShareStatus, EXPIRY_PRESETS } from "@/lib/dicom";
 
 interface PatientData {
@@ -74,6 +75,7 @@ export function PatientDetailPage() {
     ? ((patientFullQuery.error as any)?.response?.data?.detail ?? (patientFullQuery.error as any)?.message ?? "Failed to load patient")
     : null;
   const invalidate = useInvalidate();
+  const qc = useQueryClient();
   const [copiedToken, setCopiedToken] = useState<number | null>(null);
 
   // Share dialog — 3-step flow
@@ -168,11 +170,22 @@ export function PatientDetailPage() {
   };
 
   const handleRevokeShare = async (shareId: number) => {
+    if (!id) return;
+    // Optimistic remove from patient.shares so the row disappears instantly.
+    // Rollback if backend rejects.
+    const patientKey = qk.patient(id);
+    const previousPatient = qc.getQueryData(patientKey);
+    qc.setQueryData(patientKey, (old: any) => {
+      if (!old?.shares) return old;
+      return { ...old, shares: old.shares.filter((s: Share) => s.id !== shareId) };
+    });
     setRevokingShare(shareId);
     try {
       await api.delete(`/shares/${shareId}`);
       invalidate.afterShareChange(id);
     } catch (err: unknown) {
+      // Restore prior cache so the share reappears in the list.
+      qc.setQueryData(patientKey, previousPatient);
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
       toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to revoke share");
     } finally {

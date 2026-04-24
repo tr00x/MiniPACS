@@ -120,16 +120,21 @@ export function SharesPage() {
 
   const handleRevokeConfirm = async () => {
     if (revokeTarget === null) return;
+    const targetId = revokeTarget;
+    // Optimistic: drop the share from the list right away so the UI feels instant.
+    // Rollback if the backend rejects.
+    const previousShares = shares;
+    setShares((prev) => prev.filter((s) => s.id !== targetId));
+    setRevokeTarget(null);
     setRevoking(true);
     try {
-      await api.delete(`/shares/${revokeTarget}`);
-      setRevokeTarget(null);
+      await api.delete(`/shares/${targetId}`);
       toast.success("Share link revoked");
       fetchShares();
     } catch (err: unknown) {
+      setShares(previousShares);
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      setError(e?.response?.data?.detail ?? e?.message ?? "Failed to revoke share");
-      setRevokeTarget(null);
+      toast.error(e?.response?.data?.detail ?? e?.message ?? "Failed to revoke share");
     } finally {
       setRevoking(false);
     }
