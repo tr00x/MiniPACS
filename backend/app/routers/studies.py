@@ -5,7 +5,7 @@ import zipfile as zipfile_mod
 
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from app.database import get_db
 from app.routers.auth import get_current_user
@@ -21,6 +21,14 @@ router = APIRouter(prefix="/api/studies", tags=["studies"])
 # entries FIFO so memory stays under 50 MB on worst case.
 _STUDY_FULL_TTL = 15.0
 _study_full_cache: dict[str, tuple[float, dict]] = {}
+
+# PNG thumbnail cache for the grid-view worklist. Orthanc's /instances/{id}/preview
+# renders on every call (no native cache), so holding a 1h copy in-process lets
+# 50-tile grids re-open instantly and gives back/forward navigation zero cost.
+# Bounded to keep RAM predictable — 500 thumbs × ~50 KB = ~25 MB max.
+_THUMB_TTL = 3600.0
+_THUMB_CACHE_MAX = 500
+_thumb_cache: dict[str, tuple[float, bytes]] = {}
 
 
 @router.get("")
@@ -155,6 +163,63 @@ async def get_study_full(
     if len(_study_full_cache) > 64:
         _study_full_cache.pop(next(iter(_study_full_cache)))
     return result
+
+
+@router.get("/{study_id}/thumb")
+async def get_study_thumbnail(
+    study_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """PNG thumbnail for the worklist grid view.
+
+    Resolves the first series' middle instance (more representative than the
+    very first slice) and proxies Orthanc's /instances/{id}/preview. Cached
+    in-process for 1h — grid reopens and back navigation never re-render.
+    """
+    hit = _thumb_cache.get(study_id)
+    now = time.time()
+    if hit and now - hit[0] < _THUMB_TTL:
+        return Response(
+            content=hit[1],
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+
+    series_list = await orthanc.get_study_series(study_id)
+    if not series_list:
+        raise HTTPException(status_code=404, detail="Study has no series")
+
+    def _series_num(s):
+        try:
+            return int(s.get("MainDicomTags", {}).get("SeriesNumber") or 999)
+        except ValueError:
+            return 999
+
+    first_series = sorted(series_list, key=_series_num)[0]
+    instances = first_series.get("Instances") or []
+    if not instances:
+        raise HTTPException(status_code=404, detail="Series has no instances")
+    # Middle slice ≈ diagnostic preview. First slice on CT/MR is often a scout
+    # or localizer, which makes a confusing grid tile.
+    instance_id = instances[len(instances) // 2]
+
+    try:
+        resp = await orthanc._http().get(f"/instances/{instance_id}/preview")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Orthanc preview failed: {exc}") from exc
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Orthanc preview HTTP {resp.status_code}")
+    png = resp.content
+
+    _thumb_cache[study_id] = (now, png)
+    if len(_thumb_cache) > _THUMB_CACHE_MAX:
+        _thumb_cache.pop(next(iter(_thumb_cache)))
+
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.get("/{study_id}/series/{series_id}")
