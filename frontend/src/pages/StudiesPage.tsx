@@ -6,7 +6,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, List, LayoutGrid, Upload } from "lucide-react";
+import { ChevronLeft, ChevronRight, List, LayoutGrid, Upload, Keyboard } from "lucide-react";
 import { ImportDialog } from "@/components/ImportDialog";
 import { useStudies, usePrefetchStudyFull, usePrefetchPatientFull } from "@/hooks/queries";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
@@ -348,6 +348,15 @@ export function StudiesPage() {
               <LayoutGrid className="h-4 w-4" />
             </Button>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setShowHelp(true)}
+            title="Keyboard shortcuts (?)"
+          >
+            <Keyboard className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 
