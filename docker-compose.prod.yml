@@ -106,14 +106,20 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:80"  # HTTP only — CF Tunnel connects here
+      # LAN-facing HTTPS for split-horizon DNS (UniFi → pacs.clintonmedical.net
+      # points at 10.0.0.50 internally). HTTP/2 multiplexes Stone bursts; ~1ms
+      # RTT on LAN vs ~50-100ms through CF Tunnel on intermittent WAN.
+      - "443:443"
+    volumes:
+      - nginx-cache:/var/cache/nginx
+      # Real Cloudflare Origin Certificate goes here; if absent, nginx falls
+      # back to the self-signed pair baked into the image at build time so the
+      # container still boots. Put `cert.pem` + `key.pem` in ./ssl before `up`.
+      - ./ssl:/etc/ssl/minipacs:ro
     environment:
       ORTHANC_BASIC_AUTH: "${ORTHANC_BASIC_AUTH}"
       HTTPS_PORT: "443"
       NGINX_TEMPLATE: "nginx-prod"
-    volumes:
-      # Disk cache for DICOMweb metadata + WADO frames. Second viewer open
-      # of the same study hits nginx, not Orthanc.
-      - nginx-cache:/var/cache/nginx
     depends_on:
       - backend
       - orthanc
