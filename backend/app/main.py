@@ -6,6 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.database import init_db
+from app.services.cache import init_cache, close_cache
 from app.services.orthanc import init_client as init_orthanc, close_client as close_orthanc
 from app.routers.auth import router as auth_router
 from app.routers.patients import router as patients_router
@@ -26,9 +27,11 @@ from app.routers.boot import router as boot_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await init_cache(settings.redis_url)
     await init_orthanc()
     yield
     await close_orthanc()
+    await close_cache()
 
 
 app = FastAPI(

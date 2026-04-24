@@ -1,4 +1,16 @@
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Shared QIDO cache across uvicorn workers. Internal only, no host port.
+    # No persistence — Redis is a derived cache; Orthanc is the source of truth.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -69,6 +81,7 @@ services:
       ORTHANC_URL: "http://orthanc:8042"
       ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
       ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"
+      REDIS_URL: "redis://redis:6379/0"
       DATABASE_URL: "sqlite+aiosqlite:///./data/minipacs.db"
       DATABASE_PATH: "/app/data/minipacs.db"
       CORS_ORIGINS: '["https://${DOMAIN}","http://${DOMAIN}","http://localhost"]'
@@ -76,6 +89,8 @@ services:
       DEFAULT_SHARE_EXPIRY_DAYS: "${DEFAULT_SHARE_EXPIRY_DAYS:-30}"
     depends_on:
       orthanc:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:
