@@ -22,6 +22,8 @@ services:
       - orthanc-data:/var/lib/orthanc/db
       - ./orthanc/orthanc-docker.json:/etc/orthanc/orthanc.json:ro
       - ./orthanc/lua:/etc/orthanc/lua:ro
+      - ./orthanc/python:/etc/orthanc/python:ro
+      - minipacs-thumbs:/var/cache/minipacs-thumbs
       - ./orthanc/ohif-user-config.js:/etc/orthanc/ohif-user-config.js:ro
     environment:
       ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
@@ -61,6 +63,7 @@ services:
     volumes:
       - minipacs-db:/app/data
       - ./scripts:/app/scripts:ro
+      - minipacs-thumbs:/srv/thumbs:ro
     environment:
       SECRET_KEY: "${SECRET_KEY}"
       ORTHANC_URL: "http://orthanc:8042"
@@ -110,3 +113,4 @@ volumes:
   orthanc-pg:
   minipacs-db:
   nginx-cache:
+  minipacs-thumbs:
