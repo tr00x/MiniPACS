@@ -20,7 +20,8 @@ import { EXPIRY_PRESETS } from "@/lib/dicom";
 import { OhifViewer } from "@/components/viewer/OhifViewer";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import api, { getErrorMessage } from "@/lib/api";
-import { useStudyFull, useInvalidate } from "@/hooks/queries";
+import { useStudyFull, useInvalidate, useAdjacentStudies } from "@/hooks/queries";
+import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { PageLoader } from "@/components/PageLoader";
 import { formatDicomName, formatDicomDate, VIEWER_LOGOS } from "@/lib/dicom";
 import { toast } from "sonner";
@@ -121,6 +122,22 @@ export function StudyDetailPage() {
     document.addEventListener("fullscreenchange", handleChange);
     return () => document.removeEventListener("fullscreenchange", handleChange);
   }, []);
+
+  // Adjacent-study navigation: hook also prefetches next/prev, so n/p keys
+  // feel instant (cache hit). Safe to call before the `if (!id)` guard because
+  // the hook internally handles undefined patientId.
+  const adjacent = useAdjacentStudies(study?.ParentPatient, id ?? "");
+
+  useKeyboardNav([
+    {
+      key: "n",
+      handler: () => { if (adjacent.next) navigate(`/studies/${adjacent.next}`); },
+    },
+    {
+      key: "p",
+      handler: () => { if (adjacent.prev) navigate(`/studies/${adjacent.prev}`); },
+    },
+  ]);
 
   if (!id) return <p className="text-muted-foreground">Invalid study ID</p>;
 

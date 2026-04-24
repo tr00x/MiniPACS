@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useStudies, usePrefetchStudyFull, usePrefetchPatientFull } from "@/hooks/queries";
+import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
 import { TableSkeleton } from "@/components/TableSkeleton";
@@ -59,8 +60,10 @@ export function StudiesPage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [page, setPage] = useState(1);
+  const [focusedRow, setFocusedRow] = useState<number>(-1);
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
@@ -68,17 +71,20 @@ export function StudiesPage() {
     debounceTimer.current = setTimeout(() => {
       setDebouncedSearch(value);
       setPage(1);
+      setFocusedRow(-1);
     }, 300);
   };
 
   const handleModFilter = (mod: string) => {
     setModFilter(mod);
     setPage(1);
+    setFocusedRow(-1);
   };
 
   const handleDatePreset = (preset: DatePreset) => {
     setDatePreset(preset);
     setPage(1);
+    setFocusedRow(-1);
   };
 
   const range = getDateRange(datePreset);
@@ -103,6 +109,39 @@ export function StudiesPage() {
   const error = studiesQuery.error
     ? ((studiesQuery.error as any)?.response?.data?.detail ?? (studiesQuery.error as any)?.message ?? "Failed to load studies")
     : null;
+
+  // Keep the focused row visible — j/k can drive focus off-screen on long lists.
+  useEffect(() => {
+    if (focusedRow < 0) return;
+    const el = document.querySelector(`[data-study-row-index="${focusedRow}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [focusedRow]);
+
+  useKeyboardNav([
+    { key: "/", alwaysActive: true, handler: () => searchInputRef.current?.focus() },
+    {
+      key: "j",
+      handler: () => setFocusedRow((i) => {
+        const max = studies.length - 1;
+        if (max < 0) return -1;
+        return i < 0 ? 0 : Math.min(i + 1, max);
+      }),
+    },
+    {
+      key: "k",
+      handler: () => setFocusedRow((i) => {
+        if (studies.length === 0) return -1;
+        return i <= 0 ? 0 : i - 1;
+      }),
+    },
+    {
+      key: "Enter",
+      handler: () => {
+        const target = studies[focusedRow];
+        if (target) navigate(`/studies/${target.ID}`);
+      },
+    },
+  ]);
 
   const tag = (s: Study, key: keyof Study["MainDicomTags"]) =>
     s.MainDicomTags?.[key] || "";
@@ -142,7 +181,8 @@ export function StudiesPage() {
       {/* Filter bar */}
       <div className="space-y-3">
         <Input
-          placeholder="Search patient name, description, MRN..."
+          ref={searchInputRef}
+          placeholder="Search patient name, description, MRN... (press /)"
           value={searchQuery}
           onChange={(e) => handleSearchChange(e.target.value)}
           className="max-w-md"
@@ -171,14 +211,14 @@ export function StudiesPage() {
               <Input
                 type="date"
                 value={customFrom}
-                onChange={(e) => { setCustomFrom(e.target.value); setPage(1); }}
+                onChange={(e) => { setCustomFrom(e.target.value); setPage(1); setFocusedRow(-1); }}
                 className="w-[150px] h-8"
               />
               <span className="text-sm text-muted-foreground">—</span>
               <Input
                 type="date"
                 value={customTo}
-                onChange={(e) => { setCustomTo(e.target.value); setPage(1); }}
+                onChange={(e) => { setCustomTo(e.target.value); setPage(1); setFocusedRow(-1); }}
                 className="w-[150px] h-8"
               />
             </div>
@@ -228,15 +268,17 @@ export function StudiesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {studies.map((s) => {
+              {studies.map((s, i) => {
                 const mod = tag(s, "ModalitiesInStudy");
                 const institution = tag(s, "InstitutionName");
                 const referrer = tag(s, "ReferringPhysicianName");
                 const accession = tag(s, "AccessionNumber");
+                const isFocused = focusedRow === i;
                 return (
                   <TableRow
                     key={s.ID}
-                    className="cursor-pointer hover:bg-accent/50"
+                    data-study-row-index={i}
+                    className={`cursor-pointer hover:bg-accent/50 ${isFocused ? "bg-accent" : ""}`}
                     onClick={() => navigate(`/studies/${s.ID}`)}
                     onMouseEnter={() => prefetchStudy(s.ID)}
                   >
@@ -312,7 +354,7 @@ export function StudiesPage() {
                   variant="outline"
                   size="icon"
                   className="h-8 w-8"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  onClick={() => { setPage((p) => Math.max(1, p - 1)); setFocusedRow(-1); }}
                   disabled={currentPage === 1}
                 >
                   <ChevronLeft className="h-4 w-4" />
@@ -321,7 +363,7 @@ export function StudiesPage() {
                   variant="outline"
                   size="icon"
                   className="h-8 w-8"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  onClick={() => { setPage((p) => Math.min(totalPages, p + 1)); setFocusedRow(-1); }}
                   disabled={currentPage === totalPages}
                 >
                   <ChevronRight className="h-4 w-4" />
