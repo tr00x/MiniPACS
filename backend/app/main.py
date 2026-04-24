@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import ORJSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
@@ -29,7 +30,11 @@ async def lifespan(app: FastAPI):
     await close_orthanc()
 
 
-app = FastAPI(title=settings.app_name, lifespan=lifespan)
+app = FastAPI(
+    title=settings.app_name,
+    lifespan=lifespan,
+    default_response_class=ORJSONResponse,
+)
 
 app.add_middleware(
     CORSMiddleware,
