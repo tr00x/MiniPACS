@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTheme } from "next-themes";
 import {
-  LayoutDashboard, Users, ClipboardList, Send, Share2,
+  LayoutDashboard, Users, ClipboardList, Send, Inbox, Share2,
   Network, Settings, ScrollText, LogOut, ChevronDown, ChevronUp,
   Menu, PanelLeftClose, PanelLeft, Sun, Moon,
 } from "lucide-react";
@@ -17,6 +17,7 @@ const mainNav = [
   { to: "/studies", icon: ClipboardList, label: "Worklist" },
   { to: "/patients", icon: Users, label: "Patients" },
   { to: "/transfers", icon: Send, label: "Transfers" },
+  { to: "/received", icon: Inbox, label: "Received" },
   { to: "/shares", icon: Share2, label: "Shares" },
 ];
 

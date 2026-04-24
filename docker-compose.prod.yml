@@ -91,6 +91,12 @@ services:
       CORS_ORIGINS: '["https://${DOMAIN}","http://${DOMAIN}","http://localhost"]'
       AUTO_LOGOUT_MINUTES: "${AUTO_LOGOUT_MINUTES:-15}"
       DEFAULT_SHARE_EXPIRY_DAYS: "${DEFAULT_SHARE_EXPIRY_DAYS:-30}"
+      # DICOM endpoint shown to external senders in the "Receiving DICOM Studies"
+      # info card. CF tunnel only carries HTTP, so this must be the public IP
+      # where the router forwards TCP 48924, not the CF hostname.
+      DICOM_PUBLIC_HOST: "${DICOM_PUBLIC_HOST:-}"
+      DICOM_PUBLIC_PORT: "${DICOM_PUBLIC_PORT:-48924}"
+      DICOM_AET: "${DICOM_AET:-MINIPACS}"
     depends_on:
       orthanc:
         condition: service_healthy
