@@ -934,7 +934,7 @@ What you can do:
 If you have any questions about your results, please contact our office.
 
 Best regards,
-Clinton Medical`
+Your Clinic`
                     );
                     window.open(`mailto:?subject=${subject}&body=${body}`, "_self");
                   }}

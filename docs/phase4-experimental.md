@@ -27,7 +27,7 @@ Rollback is a config revert + Orthanc restart.
 
 1. **Stone 3.0 progressive path is young.** Docs claim support; there is
    no track record on mixed archives of CT / MR / CR that match the
-   Clinton Medical mix. A rendering bug that only shows on certain
+   pilot clinic mix. A rendering bug that only shows on certain
    transfer syntaxes would be invisible until radiologist #3 opens the
    wrong study.
 2. **GDCM transcoder CPU cost.** First request for a frame pays the

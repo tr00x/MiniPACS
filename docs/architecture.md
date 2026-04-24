@@ -36,7 +36,7 @@ postgres + redis  ──►  orthanc  ──►  /var/lib/orthanc/db (DICOM file
 ```
 Browser
   │ HTTPS (TLS terminated at the clinic box, HTTP/2)
-  │ DNS: pacs.clintonmedical.net → 10.0.0.50  (UniFi split-horizon override)
+  │ DNS: pacs.your-clinic.example → 10.0.0.50  (UniFi split-horizon override)
   ▼
 Windows host :443  (netsh portproxy → WSL)
   ▼

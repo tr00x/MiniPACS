@@ -106,9 +106,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:80"  # HTTP only — CF Tunnel connects here
-      # LAN-facing HTTPS for split-horizon DNS (UniFi → pacs.clintonmedical.net
-      # points at 10.0.0.50 internally). HTTP/2 multiplexes Stone bursts; ~1ms
-      # RTT on LAN vs ~50-100ms through CF Tunnel on intermittent WAN.
+      # LAN-facing HTTPS for split-horizon DNS (UniFi → pacs.your-clinic.example
+      # points at the clinic LAN IP internally). HTTP/2 multiplexes Stone bursts;
+      # ~1ms RTT on LAN vs ~50-100ms through CF Tunnel on intermittent WAN.
       - "443:443"
     volumes:
       - nginx-cache:/var/cache/nginx
