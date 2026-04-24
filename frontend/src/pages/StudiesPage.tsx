@@ -6,7 +6,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, List, LayoutGrid } from "lucide-react";
 import { useStudies, usePrefetchStudyFull, usePrefetchPatientFull } from "@/hooks/queries";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
@@ -61,6 +61,12 @@ export function StudiesPage() {
   const [customTo, setCustomTo] = useState("");
   const [page, setPage] = useState(1);
   const [focusedRow, setFocusedRow] = useState<number>(-1);
+  // Persist view preference so radiologists don't have to re-pick grid on every
+  // reload. localStorage because it's per-workstation convenience, not session.
+  const [viewMode, setViewMode] = useState<"list" | "grid">(() => {
+    if (typeof window === "undefined") return "list";
+    return (localStorage.getItem("studies.viewMode") as "list" | "grid") || "list";
+  });
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -116,6 +122,12 @@ export function StudiesPage() {
     const el = document.querySelector(`[data-study-row-index="${focusedRow}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [focusedRow]);
+
+  const changeView = (mode: "list" | "grid") => {
+    setViewMode(mode);
+    try { localStorage.setItem("studies.viewMode", mode); } catch { /* private mode */ }
+    setFocusedRow(-1);
+  };
 
   useKeyboardNav([
     { key: "/", alwaysActive: true, handler: () => searchInputRef.current?.focus() },
@@ -173,9 +185,31 @@ export function StudiesPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight">Worklist</h2>
-        <p className="text-sm text-muted-foreground">{total} studies</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight">Worklist</h2>
+          <p className="text-sm text-muted-foreground">{total} studies</p>
+        </div>
+        <div className="flex items-center gap-1 rounded-md border p-0.5">
+          <Button
+            variant={viewMode === "list" ? "default" : "ghost"}
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => changeView("list")}
+            title="List view"
+          >
+            <List className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={viewMode === "grid" ? "default" : "ghost"}
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => changeView("grid")}
+            title="Grid view with thumbnails"
+          >
+            <LayoutGrid className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       {/* Filter bar */}
@@ -254,6 +288,94 @@ export function StudiesPage() {
       {loading ? (
         <div className="rounded-lg border">
           <TableSkeleton columns={6} />
+        </div>
+      ) : viewMode === "grid" ? (
+        <div className={`transition-opacity ${fetching ? "opacity-60" : ""}`}>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {studies.map((s, i) => {
+              const mod = tag(s, "ModalitiesInStudy");
+              const isFocused = focusedRow === i;
+              return (
+                <button
+                  key={s.ID}
+                  type="button"
+                  data-study-row-index={i}
+                  className={`group flex flex-col overflow-hidden rounded-lg border text-left transition-all hover:border-primary/50 hover:shadow-md ${isFocused ? "border-primary ring-2 ring-primary/50" : ""}`}
+                  onClick={() => navigate(`/studies/${s.ID}`)}
+                  onMouseEnter={() => prefetchStudy(s.ID)}
+                >
+                  <div className="relative aspect-square w-full overflow-hidden bg-black">
+                    <img
+                      src={`/api/studies/${s.ID}/thumb`}
+                      alt=""
+                      loading="lazy"
+                      className="h-full w-full object-contain"
+                      onError={(e) => {
+                        const img = e.currentTarget;
+                        img.style.display = "none";
+                        const placeholder = img.nextElementSibling as HTMLDivElement | null;
+                        if (placeholder) placeholder.style.display = "flex";
+                      }}
+                    />
+                    <div
+                      style={{ display: "none" }}
+                      className="absolute inset-0 items-center justify-center bg-gradient-to-br from-muted to-muted-foreground/10 text-xs text-muted-foreground"
+                    >
+                      No preview
+                    </div>
+                    {mod && (
+                      <div className="absolute left-2 top-2">
+                        <ModalityBadgeList modalities={mod.replace(/\\/g, "/").split("/")} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2 space-y-0.5">
+                    <p className="truncate text-sm font-medium">
+                      {formatDicomName(ptag(s, "PatientName"))}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {tag(s, "StudyDescription") || "Untitled Study"}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {formatDicomDate(tag(s, "StudyDate"))}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {studies.length === 0 && (
+            <p className="py-12 text-center text-sm text-muted-foreground">
+              No studies match the current filters
+            </p>
+          )}
+          {total > 0 && (
+            <div className="mt-4 flex items-center justify-between rounded-lg border px-4 py-3">
+              <p className="text-sm text-muted-foreground">
+                Page {currentPage} of {totalPages} ({total} studies)
+              </p>
+              <div className="flex gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => { setPage((p) => Math.max(1, p - 1)); setFocusedRow(-1); }}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => { setPage((p) => Math.min(totalPages, p + 1)); setFocusedRow(-1); }}
+                  disabled={currentPage === totalPages}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className={`rounded-lg border transition-opacity ${fetching ? "opacity-60" : ""}`}>
