@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+import asyncpg
+
 from app.db import PgConnection
 
 from app.database import get_db
@@ -28,14 +30,21 @@ async def create_user(
             "INSERT INTO users (username, password_hash) VALUES (?, ?) RETURNING id",
             (body.username, hash_password(body.password)),
         )
-        await db.commit()
-        new_id = cursor.lastrowid
-        await log_audit("create_user", "user", str(new_id), user_id=user["id"], ip_address=request.client.host, wait=True)
-        row = await db.execute("SELECT id, username, token_version, created_at, last_login FROM users WHERE id = ?", (new_id,))
-        new_user = await row.fetchone()
-        return dict(new_user)
-    except Exception:
+    except asyncpg.UniqueViolationError:
         raise HTTPException(409, "Username already exists")
+    # Everything after the INSERT is NOT a duplicate-username situation — any
+    # pool / network / follow-up error here would previously mask as 409 and
+    # make the operator think they were hitting a naming collision. Let real
+    # errors propagate as 500 with their actual traceback in the logs.
+    await db.commit()
+    new_id = cursor.lastrowid
+    await log_audit("create_user", "user", str(new_id), user_id=user["id"], ip_address=request.client.host, wait=True)
+    row = await db.execute(
+        "SELECT id, username, token_version, created_at, last_login FROM users WHERE id = ?",
+        (new_id,),
+    )
+    new_user = await row.fetchone()
+    return dict(new_user)
 
 
 @router.delete("/{target_id}")

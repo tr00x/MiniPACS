@@ -112,10 +112,16 @@ services:
       - "443:443"
     volumes:
       - nginx-cache:/var/cache/nginx
-      # Real Cloudflare Origin Certificate goes here; if absent, nginx falls
-      # back to the self-signed pair baked into the image at build time so the
-      # container still boots. Put `cert.pem` + `key.pem` in ./ssl before `up`.
-      - ./ssl:/etc/ssl/minipacs:ro
+      # SSL certificates:
+      # The image bakes a self-signed pair at /etc/ssl/minipacs/ so the 443
+      # listener always boots. To serve a real Cloudflare Origin Certificate
+      # instead, COPY `docker-compose.override.yml.example` →
+      # `docker-compose.override.yml`, drop cert.pem + key.pem into ./ssl/,
+      # and re-run `up -d`. The override mounts the individual files on top
+      # of the baked pair and fails loudly at up-time if either is missing.
+      # We deliberately DON'T mount ./ssl here — a missing host directory
+      # would silently get auto-created empty and shadow the baked fallback,
+      # breaking nginx on a fresh install.
     environment:
       ORTHANC_BASIC_AUTH: "${ORTHANC_BASIC_AUTH}"
       HTTPS_PORT: "443"

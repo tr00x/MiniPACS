@@ -1,0 +1,23 @@
+# Copy to `docker-compose.override.yml` (automatically merged into
+# `docker-compose.prod.yml` by `docker compose` when present) on hosts that
+# terminate LAN HTTPS with a real Cloudflare Origin Certificate.
+#
+# Flow:
+#   1. Generate the Origin Certificate in Cloudflare dashboard (15-year TTL).
+#   2. Drop cert.pem + key.pem into ./ssl/ in the repo root.
+#   3. cp docker-compose.override.yml.example docker-compose.override.yml
+#   4. docker compose -f docker-compose.prod.yml up -d --force-recreate frontend
+#
+# Docker Compose fails at `up` time if either file is missing on the host —
+# that's intentional: a missing-then-auto-created empty directory is the
+# anti-pattern that broke the previous (directory-level) mount.
+#
+# To revert (back to the self-signed pair baked into the frontend image):
+#   rm docker-compose.override.yml
+#   docker compose -f docker-compose.prod.yml up -d --force-recreate frontend
+
+services:
+  frontend:
+    volumes:
+      - ./ssl/cert.pem:/etc/ssl/minipacs/cert.pem:ro
+      - ./ssl/key.pem:/etc/ssl/minipacs/key.pem:ro
