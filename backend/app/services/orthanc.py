@@ -1,60 +1,27 @@
 import asyncio
-import time
+import logging as _logging
 from typing import AsyncIterator
 
 import httpx
 from app.config import settings
+from app.services import cache
 
 _client: httpx.AsyncClient | None = None
 
-# Short-TTL in-memory cache for list endpoints.
-# Worklist is read-heavy and many clients view the same window simultaneously;
-# a few-seconds cache collapses bursts of identical requests into one Orthanc call.
-_STUDIES_CACHE_TTL = 8.0
-_studies_cache: dict[tuple, tuple[float, list, int]] = {}
-_PATIENTS_CACHE_TTL = 8.0
-_patients_cache: dict[tuple, tuple[float, list, int]] = {}
-_STUDIES_CACHE_MAX = 32  # simple FIFO bound; small enough that lookup cost is trivial
-
-# Per-filter total cache — avoids counting all studies again on every page flip.
-# Keyed by filter tuple (no pagination params), so page 2/3/... all reuse the
-# total computed on first page. TTL matches the studies_cache.
-_studies_total_cache: dict[tuple, tuple[float, int]] = {}
-_patients_total_cache: dict[tuple, tuple[float, int]] = {}
+# Fresh-window for QIDO cache. Redis (when present) keeps the entry for up to
+# STALE_TTL_SECONDS beyond this so transient Orthanc stalls don't 502 the UI.
+# 30s is long enough to collapse a workroom's concurrent worklist refreshes
+# and short enough that a manually-refreshed study is visible within one tick.
+_STUDIES_FRESH_TTL = 30.0
+_PATIENTS_FRESH_TTL = 30.0
 
 
-def _cache_get(cache: dict, key: tuple, ttl: float):
-    hit = cache.get(key)
-    if hit and time.time() - hit[0] < ttl:
-        return hit[1:]
-    return None
-
-
-def _cache_get_stale(cache: dict, key: tuple):
-    """Return whatever is in cache regardless of TTL — used as stale-while-error
-    fallback so a transient Orthanc stall doesn't produce a 502 in the UI."""
-    hit = cache.get(key)
-    if hit:
-        return hit[1:]
-    return None
-
-
-def _cache_put(cache: dict, key: tuple, *values):
-    cache[key] = (time.time(),) + values
-    if len(cache) > _STUDIES_CACHE_MAX:
-        cache.pop(next(iter(cache)))
-
-
-import logging as _logging
 _log = _logging.getLogger(__name__)
 
 
-def invalidate_study_caches():
+async def invalidate_study_caches() -> None:
     """Call when studies change (C-STORE received, study deleted) to bust caches."""
-    _studies_cache.clear()
-    _patients_cache.clear()
-    _studies_total_cache.clear()
-    _patients_total_cache.clear()
+    await cache.invalidate_namespace("studies", "patients")
 
 
 async def init_client():
@@ -94,9 +61,9 @@ def _http() -> httpx.AsyncClient:
 async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
     """Server-side patient search and pagination via Orthanc /tools/find."""
     key = ("p", search, limit, offset)
-    cached = _cache_get(_patients_cache, key, _PATIENTS_CACHE_TTL)
-    if cached is not None:
-        return cached
+    hit = await cache.get("patients", key, _PATIENTS_FRESH_TTL)
+    if hit is not None and hit[1]:
+        return tuple(hit[0])
 
     query = {}
     if search:
@@ -114,22 +81,20 @@ async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
     except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
         # Stale-while-error: if Orthanc is slow or timing out, return the last
         # known good cache entry for this key (past TTL) so the UI keeps
-        # rendering rows instead of flashing a 502. The prewarm cron will
-        # restore live data on the next tick.
-        stale = _cache_get_stale(_patients_cache, key)
-        if stale is not None:
+        # rendering rows instead of flashing a 502.
+        if hit is not None:
             _log.warning("find_patients: serving stale cache (Orthanc error: %s)", exc)
-            return stale
+            return tuple(hit[0])
         raise Exception(f"PACS server unreachable: {exc}") from exc
 
-    filter_key = (search,)
+    filter_key = ("p_total", search)
     total: int | None = None
     if offset == 0 and len(items) < limit:
         total = len(items)
     else:
-        hit = _patients_total_cache.get(filter_key)
-        if hit and time.time() - hit[0] < _PATIENTS_CACHE_TTL:
-            total = hit[1]
+        total_hit = await cache.get("patients", filter_key, _PATIENTS_FRESH_TTL)
+        if total_hit is not None and total_hit[1]:
+            total = int(total_hit[0])
     if total is None:
         try:
             count_resp = await _http().post("/tools/find", json={
@@ -141,18 +106,17 @@ async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
             total = len(count_resp.json())
         except Exception:
             total = offset + len(items)
-    _patients_total_cache[filter_key] = (time.time(), total)
-
-    _cache_put(_patients_cache, key, items, total)
+    await cache.set("patients", filter_key, total)
+    await cache.set("patients", key, [items, total])
     return items, total
 
 
 async def find_studies(search: str = "", modality: str = "", date_from: str = "", date_to: str = "", limit: int = 25, offset: int = 0):
     """Server-side study search and pagination via Orthanc /tools/find."""
     key = (search, modality, date_from, date_to, limit, offset)
-    cached = _cache_get(_studies_cache, key, _STUDIES_CACHE_TTL)
-    if cached is not None:
-        return cached
+    hit = await cache.get("studies", key, _STUDIES_FRESH_TTL)
+    if hit is not None and hit[1]:
+        return tuple(hit[0])
 
     query = {}
     if search:
@@ -180,25 +144,20 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
         resp.raise_for_status()
         items = resp.json()
     except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
-        # Stale-while-error — same rationale as find_patients: never 502 the UI
-        # just because Orthanc is briefly cold.
-        stale = _cache_get_stale(_studies_cache, key)
-        if stale is not None:
+        # Stale-while-error — same rationale as find_patients: never 502 the UI.
+        if hit is not None:
             _log.warning("find_studies: serving stale cache (Orthanc error: %s)", exc)
-            return stale
+            return tuple(hit[0])
         raise Exception(f"PACS server unreachable: {exc}") from exc
 
-    # Total count — issued once per (filter) tuple and cached so subsequent
-    # pages do not lie to the pagination UI. Only skipped when the first page
-    # already contains everything.
-    filter_key = (search, modality, date_from, date_to)
+    filter_key = ("s_total", search, modality, date_from, date_to)
     total: int | None = None
     if offset == 0 and len(items) < limit:
         total = len(items)
     else:
-        hit = _studies_total_cache.get(filter_key)
-        if hit and time.time() - hit[0] < _STUDIES_CACHE_TTL:
-            total = hit[1]
+        total_hit = await cache.get("studies", filter_key, _STUDIES_FRESH_TTL)
+        if total_hit is not None and total_hit[1]:
+            total = int(total_hit[0])
     if total is None:
         try:
             count_resp = await _http().post("/tools/find", json={
@@ -210,10 +169,10 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
             total = len(count_resp.json())
         except Exception:
             total = offset + len(items)
-    _studies_total_cache[filter_key] = (time.time(), total)
+    await cache.set("studies", filter_key, total)
 
     items = _propagate_modalities(items)
-    _cache_put(_studies_cache, key, items, total)
+    await cache.set("studies", key, [items, total])
     return items, total
 
 

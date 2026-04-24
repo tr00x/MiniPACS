@@ -1,4 +1,17 @@
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Shared QIDO cache for uvicorn workers. Not exposed to host; internal only.
+    # Data is 100% derivable from Orthanc, no persistence needed — a cold Redis
+    # just means the next /api/studies call repopulates from Orthanc.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -65,6 +78,7 @@ services:
       ORTHANC_URL: "http://orthanc:8042"
       ORTHANC_USERNAME: "${ORTHANC_USERNAME:-orthanc}"
       ORTHANC_PASSWORD: "${ORTHANC_PASSWORD}"
+      REDIS_URL: "redis://redis:6379/0"
       DATABASE_URL: "sqlite+aiosqlite:///./data/minipacs.db"
       DATABASE_PATH: "/app/data/minipacs.db"
       CORS_ORIGINS: '["https://localhost:${HTTPS_PORT:-48921}","http://localhost:${HTTP_PORT:-48920}","http://localhost:48925"]'
@@ -74,6 +88,8 @@ services:
       - "48922:8000"  # Expose for Vite dev proxy
     depends_on:
       orthanc:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:
