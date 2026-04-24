@@ -104,7 +104,9 @@
     "//-series-": "Series metadata served from the SQLite index — no file reads. Per-series request at 295-instance MR was 22s with 'Full' because Orthanc opened every DICOM file; MainDicomTags makes it ~50ms.",
     "SeriesMetadata": "MainDicomTags",
     "//-cache-": "Cache the computed metadata list per series. 30000 × ~10KB ≈ 300MB — holds every series in the archive with headroom. Warm second-open returns from RAM.",
-    "SeriesMetadataCacheSize": 30000
+    "SeriesMetadataCacheSize": 30000,
+    "//-transcode-": "On-the-fly transcode to JPEG 2000 Lossless (1.2.840.10008.1.2.4.90) when WADO-RS clients don't pin a transfer syntax. Mathematically lossless; cuts wire bytes ~40–50% vs Explicit VR Little Endian on CT/MR. Stone Web Viewer accepts it via OpenJPEG.",
+    "Transcode": "1.2.840.10008.1.2.4.90"
   },
 
   "Transfers": {
