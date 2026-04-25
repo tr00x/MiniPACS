@@ -135,3 +135,46 @@
     @apply font-sans;
     }
 }
+
+/* --- Opulento-style login background (pure CSS, no WebGL) --- */
+.opu-blob {
+  position: absolute;
+  width: 60vw;
+  height: 60vw;
+  max-width: 900px;
+  max-height: 900px;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.55;
+  will-change: transform;
+  mix-blend-mode: screen;
+}
+.opu-blob-1 { background: radial-gradient(circle at 30% 30%, #7c3aed 0%, transparent 60%); top: -20%; left: -15%; animation: opu-drift-1 22s ease-in-out infinite alternate; }
+.opu-blob-2 { background: radial-gradient(circle at 60% 40%, #ec4899 0%, transparent 60%); top: 10%; right: -20%; animation: opu-drift-2 26s ease-in-out infinite alternate; }
+.opu-blob-3 { background: radial-gradient(circle at 50% 50%, #06b6d4 0%, transparent 60%); bottom: -25%; left: 10%; animation: opu-drift-3 30s ease-in-out infinite alternate; }
+.opu-blob-4 { background: radial-gradient(circle at 50% 50%, #f97316 0%, transparent 60%); bottom: -10%; right: 5%; animation: opu-drift-4 24s ease-in-out infinite alternate; opacity: 0.35; }
+.opu-grain {
+  position: absolute; inset: 0;
+  background-image: radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 3px 3px;
+  pointer-events: none;
+}
+@keyframes opu-drift-1 { 0% { transform: translate(0,0) scale(1); } 100% { transform: translate(15vw, 20vh) scale(1.25); } }
+@keyframes opu-drift-2 { 0% { transform: translate(0,0) scale(1.1); } 100% { transform: translate(-20vw, 15vh) scale(0.95); } }
+@keyframes opu-drift-3 { 0% { transform: translate(0,0) scale(1); } 100% { transform: translate(25vw, -20vh) scale(1.15); } }
+@keyframes opu-drift-4 { 0% { transform: translate(0,0) scale(0.9); } 100% { transform: translate(-15vw, -15vh) scale(1.2); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .opu-blob { animation: none !important; }
+}
+
+/* Shake for invalid login */
+@keyframes opu-shake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-8px); }
+  30% { transform: translateX(7px); }
+  45% { transform: translateX(-5px); }
+  60% { transform: translateX(3px); }
+  75% { transform: translateX(-2px); }
+}
+.opu-shake { animation: opu-shake 0.45s cubic-bezier(.36,.07,.19,.97) both; }
