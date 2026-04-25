@@ -41,7 +41,9 @@ export function LoginPage() {
       // Warm the dashboard + first worklist page while the transition plays —
       // by the time the fade-out ends (~650ms) the queries are in cache, so
       // the dashboard mounts with data instead of skeletons.
-      const prefetches = [
+      // Warm dashboard + worklist queries so the next page mounts with
+      // data already in cache.
+      Promise.allSettled([
         queryClient.prefetchQuery({
           queryKey: qk.dashboard(),
           queryFn: async () => (await api.get("/dashboard")).data,
@@ -50,11 +52,13 @@ export function LoginPage() {
           queryKey: qk.studies({ limit: 25, offset: 0 }),
           queryFn: async () => (await api.get("/studies", { params: { limit: 25, offset: 0 } })).data,
         }),
-      ];
+      ]);
       setLeaving(true);
-      // Fire prefetch; navigate after the exit animation window.
-      Promise.allSettled(prefetches);
-      setTimeout(() => navigate("/"), 650);
+      // Trigger the App-level transition overlay (300ms fade-in, 250ms hold,
+      // 300ms fade-out). Navigate at ~280ms — by then the cover is opaque,
+      // so the route swap and Suspense fallback happen entirely under it.
+      window.dispatchEvent(new CustomEvent("pacs:transition"));
+      setTimeout(() => navigate("/"), 280);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number } };
       if (axiosErr?.response?.status === 429) {

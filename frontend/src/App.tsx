@@ -6,6 +6,7 @@ import { AuthProvider } from "@/providers/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageLoader } from "@/components/PageLoader";
+import { AppTransition } from "@/components/AppTransition";
 
 // LoginPage is the entry point — keep it in the main bundle so the first
 // render after a cold load doesn't wait on a second chunk.
@@ -36,6 +37,7 @@ export default function App() {
       <ErrorBoundary>
         <AuthProvider>
           <Toaster position="top-right" richColors />
+          <AppTransition />
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
