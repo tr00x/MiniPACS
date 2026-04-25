@@ -1,12 +1,12 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { AnimatePresence } from "motion/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageLoader } from "@/components/PageLoader";
-import { AppTransition } from "@/components/AppTransition";
 
 // LoginPage is the entry point — keep it in the main bundle so the first
 // render after a cold load doesn't wait on a second chunk.
@@ -30,6 +30,43 @@ const SettingsPage = lazy(() => import("@/pages/SettingsPage").then(m => ({ defa
 const PatientPortalPage = lazy(() => import("@/pages/PatientPortalPage").then(m => ({ default: m.PatientPortalPage })));
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage").then(m => ({ default: m.NotFoundPage })));
 
+// Group routes into "buckets" so AnimatePresence only triggers a slide when
+// the user crosses a real boundary (login → app, app → login). Switching
+// between sibling app pages (e.g. /studies → /patients) keeps the same
+// bucket, so the AppLayout stays mounted and only its <Outlet/> changes —
+// no full-screen slide for in-app navigation.
+function routeBucket(pathname: string): "login" | "portal" | "app" {
+  if (pathname.startsWith("/login")) return "login";
+  if (pathname.startsWith("/patient-portal")) return "portal";
+  return "app";
+}
+
+function AnimatedRoutes() {
+  const location = useLocation();
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <Routes location={location} key={routeBucket(location.pathname)}>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/patient-portal/:token" element={<PatientPortalPage />} />
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/patients" element={<PatientsPage />} />
+          <Route path="/patients/:id" element={<PatientDetailPage />} />
+          <Route path="/studies" element={<StudiesPage />} />
+          <Route path="/studies/:id" element={<StudyDetailPage />} />
+          <Route path="/transfers" element={<TransfersPage />} />
+          <Route path="/received" element={<ReceivedPage />} />
+          <Route path="/shares" element={<SharesPage />} />
+          <Route path="/pacs-nodes" element={<PacsNodesPage />} />
+          <Route path="/audit" element={<AuditPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Route>
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </AnimatePresence>
+  );
+}
+
 export default function App() {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
@@ -37,26 +74,8 @@ export default function App() {
       <ErrorBoundary>
         <AuthProvider>
           <Toaster position="top-right" richColors />
-          <AppTransition />
           <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/patient-portal/:token" element={<PatientPortalPage />} />
-              <Route element={<AppLayout />}>
-                <Route path="/" element={<DashboardPage />} />
-                <Route path="/patients" element={<PatientsPage />} />
-                <Route path="/patients/:id" element={<PatientDetailPage />} />
-                <Route path="/studies" element={<StudiesPage />} />
-                <Route path="/studies/:id" element={<StudyDetailPage />} />
-                <Route path="/transfers" element={<TransfersPage />} />
-                <Route path="/received" element={<ReceivedPage />} />
-                <Route path="/shares" element={<SharesPage />} />
-                <Route path="/pacs-nodes" element={<PacsNodesPage />} />
-                <Route path="/audit" element={<AuditPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-              </Route>
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
+            <AnimatedRoutes />
           </Suspense>
         </AuthProvider>
       </ErrorBoundary>

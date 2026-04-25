@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import { Outlet, Navigate } from "react-router-dom";
 import { motion } from "motion/react";
 import { useAuth } from "@/lib/auth";
@@ -6,18 +5,14 @@ import { Sidebar, MobileSidebar } from "./Sidebar";
 
 export function AppLayout() {
   const { isAuthenticated } = useAuth();
-  // First mount after login = scale-in entrance under the flash. Subsequent
-  // mounts (e.g. user manually refreshes /studies) skip the entrance so the
-  // page snaps in normally.
-  const firstRender = useRef(true);
-  useEffect(() => { firstRender.current = false; }, []);
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   return (
     <motion.div
-      initial={firstRender.current ? { opacity: 0, scale: 0.96 } : false}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+      initial={{ opacity: 0, x: 24 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 24 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
       className="flex h-screen flex-col md:flex-row"
     >
       {/* Mobile top bar */}
