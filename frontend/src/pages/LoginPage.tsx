@@ -54,11 +54,13 @@ export function LoginPage() {
         }),
       ]);
       setLeaving(true);
-      // Trigger the App-level transition overlay (300ms fade-in, 250ms hold,
-      // 300ms fade-out). Navigate at ~280ms — by then the cover is opaque,
-      // so the route swap and Suspense fallback happen entirely under it.
-      window.dispatchEvent(new CustomEvent("pacs:transition"));
-      setTimeout(() => navigate("/"), 280);
+      // Card zooms forward + blurs (400ms) while a radial flash ramps to
+      // peak white (180ms). Fire flash slightly delayed so the card is
+      // already mid-zoom when the screen blasts to white. Navigate at the
+      // peak — route swap is invisible. The flash exits over 600ms,
+      // revealing the dashboard which scales in under it.
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent("pacs:transition")), 220);
+      window.setTimeout(() => navigate("/"), 380);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number } };
       if (axiosErr?.response?.status === 429) {
@@ -88,7 +90,13 @@ export function LoginPage() {
             key="login-card"
             initial={{ opacity: 0, y: 24, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 1.04, filter: "blur(12px)" }}
+            exit={{
+              opacity: 0,
+              scale: 1.6,
+              y: -40,
+              filter: "blur(24px)",
+              transition: { duration: 0.4, ease: [0.55, 0, 0.85, 0] },
+            }}
             transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
             className="relative z-10 w-full max-w-[420px] px-4"
           >
