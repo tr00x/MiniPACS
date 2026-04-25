@@ -37,8 +37,7 @@ export function AppTransition() {
           className="fixed inset-0 z-[9999] pointer-events-none"
           style={{
             background:
-              "radial-gradient(ellipse at center, rgba(255,255,255,1) 0%, rgba(255,240,255,0.95) 30%, rgba(180,120,255,0.6) 60%, rgba(0,0,0,0) 100%)",
-            mixBlendMode: "screen",
+              "radial-gradient(ellipse at center, rgba(255,255,255,1) 0%, rgba(255,255,255,0.85) 35%, rgba(255,255,255,0.4) 65%, rgba(0,0,0,0) 100%)",
           }}
         />
       )}
