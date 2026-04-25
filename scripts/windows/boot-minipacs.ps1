@@ -24,7 +24,7 @@ function Log($msg) {
     Add-Content -Path $log -Value $line
 }
 
-$distro = "Ubuntu"
+$distro = "Ubuntu-24.04"
 $composeDir = "~/minipacs"
 $composeFile = "docker-compose.prod.yml"
 

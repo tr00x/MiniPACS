@@ -17,7 +17,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$distro = "Ubuntu"
+$distro = "Ubuntu-24.04"
 
 # Get the current WSL IP. Probes once — WSL must already be running; the
 # caller (either Task Scheduler's "Start WSL" step, or a human) is expected
