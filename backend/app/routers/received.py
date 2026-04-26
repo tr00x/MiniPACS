@@ -13,6 +13,8 @@ out so only peer-to-peer DICOM C-STOREs show up. A 60s in-proc cache
 makes repeat-loads trivial.
 """
 
+import asyncio
+import logging
 import time
 from fastapi import APIRouter, Depends, Query, Request
 
@@ -22,22 +24,23 @@ from app.middleware.audit import log_audit
 
 router = APIRouter(prefix="/api/received", tags=["received"])
 
-_CACHE_TTL = 60.0
+_log = logging.getLogger(__name__)
+
+# 5 min fresh, 30 min stale-while-revalidate. Browser audit caught a 7.9s
+# TTFB on /api/received whenever the cache was cold — three Orthanc bulk
+# calls plus the /tools/find on a large archive simply takes that long.
+# Stale-while-revalidate means a refresh-after-lunch user gets the
+# previous page instantly while we re-compute in the background.
+_CACHE_TTL = 300.0
+_STALE_TTL = 1800.0
 _cache: dict[int, tuple[float, dict]] = {}
+_inflight: dict[int, asyncio.Task] = {}
 
 
-@router.get("")
-async def list_received(
-    request: Request,
-    limit: int = Query(default=50, ge=1, le=200),
-    user: dict = Depends(get_current_user),
-):
-    await log_audit("list_received", user_id=user["id"], ip_address=request.client.host)
-
-    cached = _cache.get(limit)
-    if cached and time.time() - cached[0] < _CACHE_TTL:
-        return cached[1]
-
+async def _compute_received(limit: int) -> dict:
+    """Run the 3-step Orthanc bulk pipeline and update _cache. Used both
+    by the request handler (when cache is cold) and the lifespan prewarm
+    task (so the first user hit after a backend restart is warm)."""
     http = orthanc._http()
     empty = {"items": [], "total": 0}
 
@@ -153,3 +156,55 @@ async def list_received(
     result = {"items": items, "total": len(items)}
     _cache[limit] = (time.time(), result)
     return result
+
+
+def _spawn_refresh(limit: int) -> None:
+    """Kick off a background refresh, ensuring only one in-flight per limit
+    so concurrent stale hits don't fan out into N copies of the pipeline."""
+    existing = _inflight.get(limit)
+    if existing and not existing.done():
+        return
+
+    async def _runner():
+        try:
+            await _compute_received(limit)
+        except Exception as exc:
+            _log.warning("received background refresh failed (limit=%d): %s", limit, exc)
+        finally:
+            _inflight.pop(limit, None)
+
+    _inflight[limit] = asyncio.create_task(_runner())
+
+
+async def prewarm_received(limit: int = 50) -> None:
+    """Backend lifespan hook: pre-populate cache so the first hit after a
+    boot doesn't take 7-8 s. Swallows errors — Orthanc may still be coming
+    up itself when this runs."""
+    try:
+        await _compute_received(limit)
+        _log.info("received prewarm complete (limit=%d)", limit)
+    except Exception as exc:
+        _log.warning("received prewarm failed: %s", exc)
+
+
+@router.get("")
+async def list_received(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    user: dict = Depends(get_current_user),
+):
+    await log_audit("list_received", user_id=user["id"], ip_address=request.client.host)
+
+    cached = _cache.get(limit)
+    if cached:
+        age = time.time() - cached[0]
+        if age < _CACHE_TTL:
+            return cached[1]
+        if age < _STALE_TTL:
+            # Stale-while-revalidate: serve previous result instantly,
+            # refresh in the background. Next caller after refresh hits a
+            # warm cache.
+            _spawn_refresh(limit)
+            return cached[1]
+
+    return await _compute_received(limit)
