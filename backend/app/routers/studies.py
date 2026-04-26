@@ -1,10 +1,13 @@
 import asyncio
 import base64
 import io
+import logging
 import os
 import re
 import time
 from datetime import datetime, timezone
+
+_log = logging.getLogger(__name__)
 
 from app.db import PgConnection
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -39,6 +42,10 @@ _THUMB_DIR = "/srv/thumbs"
 _THUMB_TTL = 3600.0
 _THUMB_CACHE_MAX = 500
 _thumb_cache: dict[str, tuple[float, bytes]] = {}
+# Single-flight gate: when a worklist scroll fires N concurrent /thumb
+# requests for the same study, only one decodes through Pillow; the rest
+# await the Event and read the cache the winner populated.
+_thumb_inflight: dict[str, asyncio.Event] = {}
 
 
 # Thumbnail target: 96 px square is plenty for grid view (cards are 64-80
@@ -51,11 +58,13 @@ _THUMB_TARGET_PX = 96
 _THUMB_QUALITY = 70
 
 
-def _resize_to_webp(raw: bytes) -> bytes:
+def _resize_to_webp(raw: bytes) -> bytes | None:
     """Decode any common image format Orthanc returns and re-encode as a
     96 px WebP. Synchronous (Pillow has no async API) — callers must
-    dispatch via asyncio.to_thread. Returns the original bytes if the
-    decode fails so we never serve nothing when something is better."""
+    dispatch via asyncio.to_thread. Returns None on decode/encode failure
+    (callers fall through to the next cache tier). Never returns the
+    original bytes — that path silently persisted a non-WebP file under a
+    .webp name and served it forever after with image/webp Content-Type."""
     try:
         with Image.open(io.BytesIO(raw)) as im:
             im.thumbnail((_THUMB_TARGET_PX, _THUMB_TARGET_PX), Image.Resampling.LANCZOS)
@@ -64,21 +73,33 @@ def _resize_to_webp(raw: bytes) -> bytes:
             out = io.BytesIO()
             im.save(out, format="WEBP", quality=_THUMB_QUALITY, method=6)
             return out.getvalue()
-    except Exception:
-        return raw
+    except Exception as exc:
+        _log.warning("thumb resize failed: %s", exc)
+        return None
+
+
+def _is_webp(buf: bytes) -> bool:
+    # RIFF....WEBP — magic bytes 0..3 = b"RIFF", 8..11 = b"WEBP".
+    return len(buf) > 12 and buf[:4] == b"RIFF" and buf[8:12] == b"WEBP"
 
 
 def _persist_webp(study_id: str, webp: bytes) -> None:
     """Write a WebP sibling next to the plugin-generated PNG so a backend
     restart doesn't re-pay the resize cost on every study. Atomic via
-    rename — the read path tolerates a brief tmp file."""
+    rename — the read path tolerates a brief tmp file. Refuses to write
+    if the bytes don't carry the WebP magic (defense in depth — callers
+    already filter None resize results)."""
+    if not _is_webp(webp):
+        _log.warning("thumb persist refused for %s: bytes not WebP", study_id[:12])
+        return
     path = os.path.join(_THUMB_DIR, f"{study_id}.webp")
     tmp = path + ".tmp"
     try:
         with open(tmp, "wb") as f:
             f.write(webp)
         os.replace(tmp, path)
-    except OSError:
+    except OSError as exc:
+        _log.warning("thumb persist failed for %s: %s", study_id[:12], exc)
         try:
             os.remove(tmp)
         except OSError:
@@ -105,34 +126,72 @@ async def _load_thumb(study_id: str) -> bytes | None:
     webp_path = os.path.join(_THUMB_DIR, f"{study_id}.webp")
     png_path = os.path.join(_THUMB_DIR, f"{study_id}.png")
 
-    # Tier 2: pre-rendered WebP from a previous backend lifetime.
+    # Tier 2: pre-rendered WebP from a previous backend lifetime. Skip if
+    # the source PNG has been touched more recently — plugin overwrites
+    # X.png when new series merge into the study, and the WebP we made
+    # earlier may now be of an outdated middle-instance.
     try:
         if os.path.isfile(webp_path):
-            with open(webp_path, "rb") as f:
-                webp = f.read()
-            # Pop-then-set so a re-insert of an existing key moves it to the
-            # tail of the insertion order. Without the pop, FIFO eviction
-            # below could throw out the entry we just refreshed.
-            _thumb_cache.pop(study_id, None)
-            _thumb_cache[study_id] = (now, webp)
-            if len(_thumb_cache) > _THUMB_CACHE_MAX:
-                _thumb_cache.pop(next(iter(_thumb_cache)))
-            return webp
+            webp_mtime = os.path.getmtime(webp_path)
+            png_mtime = os.path.getmtime(png_path) if os.path.isfile(png_path) else 0
+            if webp_mtime >= png_mtime:
+                with open(webp_path, "rb") as f:
+                    webp = f.read()
+                if _is_webp(webp):
+                    # Pop-then-set so a re-insert of an existing key moves
+                    # it to the tail of insertion order. Without the pop,
+                    # FIFO eviction could throw out the entry we just
+                    # refreshed.
+                    _thumb_cache.pop(study_id, None)
+                    _thumb_cache[study_id] = (now, webp)
+                    if len(_thumb_cache) > _THUMB_CACHE_MAX:
+                        _thumb_cache.pop(next(iter(_thumb_cache)))
+                    return webp
+                # Bad bytes on disk (legacy or partial write) — drop and
+                # fall through to re-render.
+                _log.warning("thumb tier-2: %s.webp not WebP, re-rendering", study_id[:12])
     except OSError:
         pass
 
+    # Single-flight gate for tier-3/4: a worklist scroll fires N concurrent
+    # /thumb requests for the same study; without coalescing each request
+    # decodes + encodes through Pillow independently. The dict is keyed by
+    # study_id; the first arrival creates an Event, does the work, and
+    # signals; the rest await and read the cache.
+    inflight = _thumb_inflight.get(study_id)
+    if inflight is not None:
+        await inflight.wait()
+        hit = _thumb_cache.get(study_id)
+        if hit and now - hit[0] < _THUMB_TTL:
+            return hit[1]
+        # winner returned None → fall through and try ourselves
+    inflight = asyncio.Event()
+    _thumb_inflight[study_id] = inflight
+    try:
+        return await _resolve_thumb_uncached(study_id, png_path, now)
+    finally:
+        inflight.set()
+        _thumb_inflight.pop(study_id, None)
+
+
+async def _resolve_thumb_uncached(study_id: str, png_path: str, now: float) -> bytes | None:
+    """Tier-3/4 path. Tries the plugin PNG on disk first, then falls back
+    to /preview against Orthanc. Persists a WebP on success so the next
+    backend lifetime gets a tier-2 hit."""
     # Tier 3: plugin PNG → resize + persist.
     try:
         if os.path.isfile(png_path):
             with open(png_path, "rb") as f:
                 png_disk = f.read()
             webp = await asyncio.to_thread(_resize_to_webp, png_disk)
-            await asyncio.to_thread(_persist_webp, study_id, webp)
-            _thumb_cache.pop(study_id, None)
-            _thumb_cache[study_id] = (now, webp)
-            if len(_thumb_cache) > _THUMB_CACHE_MAX:
-                _thumb_cache.pop(next(iter(_thumb_cache)))
-            return webp
+            if webp is not None:
+                await asyncio.to_thread(_persist_webp, study_id, webp)
+                _thumb_cache.pop(study_id, None)
+                _thumb_cache[study_id] = (now, webp)
+                if len(_thumb_cache) > _THUMB_CACHE_MAX:
+                    _thumb_cache.pop(next(iter(_thumb_cache)))
+                return webp
+            # resize failed — try the live Orthanc path before giving up
     except OSError:
         pass
 
@@ -163,6 +222,8 @@ async def _load_thumb(study_id: str) -> bytes | None:
     if resp.status_code != 200:
         return None
     webp = await asyncio.to_thread(_resize_to_webp, resp.content)
+    if webp is None:
+        return None
     await asyncio.to_thread(_persist_webp, study_id, webp)
 
     _thumb_cache.pop(study_id, None)

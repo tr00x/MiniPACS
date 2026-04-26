@@ -32,18 +32,31 @@ export function useStudiesWebSocket(userLoggedIn: boolean) {
     refreshingRef.current = false;
 
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    // Debounce cache invalidations: in a busy clinic 5+ new-study events
-    // can arrive inside one second (CT batches, DX flood). Without
-    // coalescing, each event invalidates studies/patients/dashboard
-    // independently and triggers refetches per active hook — hammers the
-    // API. 500 ms window batches the burst into one refetch cycle.
+    // Cache invalidation policy: leading-edge fire + trailing-edge
+    // coalesce. In a busy clinic 5+ new-study events arrive inside one
+    // second (CT batches, DX flood); the trailing window collapses the
+    // burst into a single refetch. But on quiet hours (one study/min)
+    // pure trailing-debounce delays the worklist refresh by 500 ms after
+    // every toast — that's the lag radiologists notice. Leading-edge
+    // means t=0 fires immediately, then a 500 ms cooldown suppresses
+    // duplicates until a new event arrives after the window.
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastFlushAt = 0;
     const flushInvalidations = () => {
+      lastFlushAt = Date.now();
+      invalidateTimer = null;
       qc.invalidateQueries({ queryKey: ["studies"] });
       qc.invalidateQueries({ queryKey: ["patients"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
     };
     const scheduleInvalidate = () => {
+      const sinceLast = Date.now() - lastFlushAt;
+      if (sinceLast >= 500 && !invalidateTimer) {
+        // Quiet path: fire immediately for instant feedback.
+        flushInvalidations();
+        return;
+      }
+      // Burst path: coalesce subsequent events into one trailing flush.
       if (invalidateTimer) clearTimeout(invalidateTimer);
       invalidateTimer = setTimeout(flushInvalidations, 500);
     };
