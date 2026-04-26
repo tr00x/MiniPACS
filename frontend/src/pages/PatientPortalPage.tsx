@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Download, Eye, EyeOff, Shield, Phone, Mail, Calendar, User, Lock, FileImage, Clock, Maximize, Minimize, ClipboardPaste } from "lucide-react";
 import { ModalityBadge } from "@/components/ui/modality-badge";
 import axios from "axios";
-import { OhifViewer } from "@/components/viewer/OhifViewer";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
 
 interface PatientData {
@@ -502,8 +501,8 @@ export function PatientPortalPage() {
                   </div>
 
                   {isViewing && studyInstanceUID && (
-                    <div ref={viewerRef} className="border-t bg-black overflow-hidden rounded-b-xl">
-                      <OhifViewer studyInstanceUID={studyInstanceUID} className={isFullscreen ? "h-screen w-full" : "h-[55vh] sm:h-[65vh] lg:h-[70vh] w-full max-w-full"} />
+                    <div ref={viewerRef} className="border-t p-6 text-center text-sm text-muted-foreground rounded-b-xl">
+                      In-browser viewer is temporarily unavailable. Please use the download buttons above to retrieve your study.
                     </div>
                   )}
                 </div>
