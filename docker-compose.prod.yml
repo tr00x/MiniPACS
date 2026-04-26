@@ -1,7 +1,14 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "100m"
+    max-file: "3"
+
 services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
     # Shared QIDO cache across uvicorn workers. Internal only, no host port.
     # No persistence — Redis is a derived cache; Orthanc is the source of truth.
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
@@ -14,6 +21,7 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - orthanc-pg:/var/lib/postgresql/data
     environment:
@@ -30,6 +38,7 @@ services:
   orthanc:
     image: orthancteam/orthanc
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - orthanc-data:/var/lib/orthanc/db
       - ./orthanc/orthanc-docker.json:/etc/orthanc/orthanc.json:ro
@@ -75,6 +84,7 @@ services:
     build:
       context: ./backend
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - minipacs-db:/app/data
       - ./scripts:/app/scripts:ro
@@ -110,6 +120,7 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "127.0.0.1:8080:80"  # HTTP only — CF Tunnel connects here
       # LAN-facing HTTPS for split-horizon DNS (UniFi → pacs.your-clinic.example
@@ -139,6 +150,7 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
+    logging: *default-logging
     command: tunnel run
     environment:
       TUNNEL_TOKEN: "${CF_TUNNEL_TOKEN}"
