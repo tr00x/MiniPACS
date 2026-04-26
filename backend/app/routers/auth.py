@@ -45,7 +45,7 @@ def _clear_viewer_cookie(response: Response) -> None:
 
 async def _check_rate_limit(ip: str, db: PgConnection):
     """Check if IP is rate-limited based on failed login audit entries. Survives restarts."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=WINDOW_MINUTES)).isoformat()
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=WINDOW_MINUTES)
     cursor = await db.execute(
         "SELECT COUNT(*) FROM audit_log WHERE ip_address = ? AND action = 'login_failed' AND timestamp > ?",
         (ip, cutoff),
@@ -87,7 +87,7 @@ async def login(body: LoginRequest, request: Request, response: Response, db: Pg
     user = dict(user)
     await db.execute(
         "UPDATE users SET last_login = ? WHERE id = ?",
-        (datetime.now(timezone.utc).isoformat(), user["id"]),
+        (datetime.now(timezone.utc), user["id"]),
     )
     await db.commit()
     await log_audit("login", user_id=user["id"], ip_address=ip, wait=True)

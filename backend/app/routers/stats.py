@@ -45,7 +45,7 @@ async def get_stats(
         pass
 
     now = datetime.now(timezone.utc)
-    week_ago = (now - timedelta(days=7)).isoformat()
+    week_ago = now - timedelta(days=7)
 
     cursor = await db.execute(
         "SELECT COUNT(*) FROM transfer_log WHERE created_at >= ?", (week_ago,)

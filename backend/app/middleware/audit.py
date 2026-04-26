@@ -28,7 +28,7 @@ async def _write_audit(
                  (user_id, patient_token, action, resource_type, resource_id, ip_address, timestamp)
                VALUES ($1, $2, $3, $4, $5, $6, $7)""",
             user_id, patient_token, action, resource_type, resource_id, ip_address,
-            datetime.now(timezone.utc).isoformat(),
+            datetime.now(timezone.utc),
         )
 
 

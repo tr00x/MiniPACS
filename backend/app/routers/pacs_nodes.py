@@ -169,7 +169,7 @@ async def echo_pacs_node(
     if success:
         await db.execute(
             "UPDATE pacs_nodes SET last_echo_at = ? WHERE id = ?",
-            (datetime.now(timezone.utc).isoformat(), node_id),
+            (datetime.now(timezone.utc), node_id),
         )
         await db.commit()
 
