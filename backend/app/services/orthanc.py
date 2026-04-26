@@ -331,7 +331,11 @@ async def bounded_get_instance_preview(instance_id: str) -> bytes | None:
     Used by series-image ZIP downloads (clinician + patient portal) where a
     single series can have 100+ instances. Sequential per-instance fetch turned
     a cold-cache 100-frame download into ~10s of stalled HTTP; gather'd through
-    _BATCH_SEM(20) it collapses to ~5 round-trips.
+    _BATCH_SEM(20) it collapses to ~5 sequential batches of 20 (still 100 HTTP
+    calls total, but with up to 20 in flight at once).
+
+    Result order matches input order — callers depend on this for indexed
+    filenames. Don't switch to as_completed without re-threading the index.
     """
     async with _BATCH_SEM:
         try:

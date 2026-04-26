@@ -419,13 +419,13 @@ async def patient_portal_download_series_images(
 
     previews = await asyncio.gather(
         *(orthanc.bounded_get_instance_preview(iid) for iid in instance_ids),
-        return_exceptions=False,
+        return_exceptions=True,
     )
 
     buf = io.BytesIO()
     with zipfile_mod.ZipFile(buf, "w", zipfile_mod.ZIP_DEFLATED) as zf:
         for i, content in enumerate(previews, 1):
-            if content:
+            if isinstance(content, (bytes, bytearray)) and content:
                 zf.writestr(f"{series_desc}_{i:04d}.jpg", content)
 
     buf.seek(0)
