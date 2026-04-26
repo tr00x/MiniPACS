@@ -22,6 +22,20 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     logging: *default-logging
+    # Preload pg_stat_statements so we can diagnose slow queries on demand
+    # (track=all covers nested calls + utility statements). Cost: a fixed
+    # ~16 MB shared_buffer slot per server, negligible on this workload.
+    # Mirrors docker-compose.yml — backend's init_db CREATE EXTENSION needs
+    # this preload or it fails on startup right after the TIMESTAMPTZ
+    # migration block.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - pg_stat_statements.max=5000
     volumes:
       - orthanc-pg:/var/lib/postgresql/data
     environment:
@@ -88,7 +102,10 @@ services:
     volumes:
       - minipacs-db:/app/data
       - ./scripts:/app/scripts:ro
-      - minipacs-thumbs:/srv/thumbs:ro
+      # rw because the backend now persists resized WebP siblings next to
+      # the plugin's source PNGs so a backend restart skips the expensive
+      # Pillow resize on every study (tier-2 hit in _load_thumb).
+      - minipacs-thumbs:/srv/thumbs
     environment:
       SECRET_KEY: "${SECRET_KEY}"
       ORTHANC_URL: "http://orthanc:8042"
