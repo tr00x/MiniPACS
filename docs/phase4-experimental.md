@@ -125,6 +125,55 @@ the remaining unlock — not worth the build-maintenance tax until the
 clinic explicitly asks for sub-second first-pixel on huge CT series we
 don't currently have in the archive.
 
+### POC results — 2026-04-26 (DEEPER FAIL than encoder layer)
+
+Re-attempted HTJ2K with the assumption that pre-transcoding at ingest would unblock
+both Stone and OHIF. Built a hand-rolled HTJ2K transcoder (`scripts/htj2k_repack.py`,
+OpenJPH 0.27.0 via brew), pushed an HTJ2K instance into local Orthanc, then tested
+all viewer-relevant paths via Playwright:
+
+```
+GET /dicom-web/.../instances/{HTJ2K-UID}/metadata           → 200 (metadata fine)
+GET /dicom-web/.../instances/{HTJ2K-UID}/frames/1           → 500 "Not implemented yet"
+GET /dicom-web/.../instances/{HTJ2K-UID}/frames/1/rendered  → 400 "Parameter out of range"
+```
+
+Stone console confirms its fallback chain: `"Trying to decode a compressed image
+by transcoding it to Little Endian Explicit"` → `"Switching to server-side
+transcoding"` → 500 from server → black canvas.
+
+**Stock orthancteam/orthanc:latest has NO HTJ2K codec at all** — neither encoder
+nor decoder. Memory observation 7341 ("Now Ships OpenJPH with 3 HTJ2K UIDs")
+was misleading: Orthanc lists `1.2.840.10008.1.2.4.{201,202,203}` in
+`/tools/accepted-transfer-syntaxes` only for INGEST validation, not for serving
+or transcoding. The serving path on every endpoint (`/instances/{id}/file`,
+`/dicom-web/.../frames/{n}`, Stone's transcode-to-LE fallback) lacks the codec.
+
+**Implication:** Stone CANNOT render stored HTJ2K. OHIF CANNOT either.
+Pre-transcoding at ingest is wasted unless we control the Orthanc image.
+
+**Two real unlocks (and only two):**
+
+1. **Custom Orthanc Docker image** linked against OpenJPH — fork
+   `orthancteam/orthanc` Dockerfile, add `--with-openjph`, maintain rebuild
+   on every upstream release. ~2-3 days first build, then ongoing churn.
+
+2. **Wait for upstream** — the orthancteam team may bundle OpenJPH in a
+   future release. No timeline.
+
+**HTJ2K is dead in this codebase until one of those two ships.** Pivoting to
+other speed wins (advanced-storage §4.2, prefetch, service-worker caching,
+OHIF tuning per `docs/ohif-speedup.md`) — see `docs/superpowers/plans/2026-04-26-htj2k-baseline.md`
+for the empirical record + the bonus bugs found en route (auth cookie,
+local nginx Stone proxy missing).
+
+Investigation artifacts (kept for the next attempt):
+- `scripts/htj2k_repack.py` — pure-pydicom transcoder helper
+- `scripts/htj2k_smoke.sh` — end-to-end reproducer
+- `scripts/htj2k_wado_check.sh` — WADO-RS serving probe
+- `docs/superpowers/plans/2026-04-26-htj2k-pipeline.md` — full plan (now superseded)
+- `docs/superpowers/plans/2026-04-26-htj2k-baseline.md` — empirical results
+
 ---
 
 ## 4.2 orthanc-advanced-storage plugin (multi-tier)
