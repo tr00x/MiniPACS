@@ -1,0 +1,109 @@
+STONE_VERIFICATION_PENDING — manual browser check required to close Task 0.2.
+
+================================================================
+HTJ2K SMOKE TEST — Task 0.2 of 2026-04-26-htj2k-pipeline.md
+================================================================
+
+Date:        2026-04-26
+Stack:       local docker compose (orthanc, postgres, redis, backend, frontend)
+Encoder:     OpenJPH 0.27.0 (brew, ojph_compress on host PATH)
+Helper:      scripts/htj2k_repack.py (pydicom 3.0.2, numpy 2.4.4 in /tmp/htj2k_venv)
+
+----------------------------------------------------------------
+1. Source instance (already in local Orthanc, uncompressed)
+----------------------------------------------------------------
+Orthanc instance ID:  7fbc4cdc-6f555eaa-bd5a10b8-4ad318bd-5f990f45
+TransferSyntax:       1.2.840.10008.1.2.1  (Explicit VR Little Endian)
+SOPInstanceUID:       1.2.826.0.1.3680043.8.498.70557661996839203751456164277935370086
+Geometry:             64 x 64, BitsStored=12, MONOCHROME2, 1 frame
+Original file size:   8982 bytes
+
+----------------------------------------------------------------
+2. HTJ2K-encoded instance (newly POSTed)
+----------------------------------------------------------------
+Orthanc instance ID:  8db94882-771b0e41-71148d1c-0203c976-7a38e0ba
+TransferSyntax:       1.2.840.10008.1.2.4.201  (HTJ2K Reversible Filter — lossless only)
+SOPInstanceUID:       1.2.826.0.1.3680043.8.498.91575830460297584858972199863051402008
+Encoded file size:    7872 bytes  (87.6% of original — small image, modest savings)
+ParentSeries:         d2dff04d-4ee3e484-59024be2-c4f436fe-ccf3fa20
+ParentStudy:          207e9fd8-a11e59dc-1a043c83-c9b65fe9-9cfe7d9e
+ParentPatient:        8cb2237d-0679ca88-db6464ea-c60da963-45513964
+Study UID (DICOM):    1.2.826.0.1.3680043.8.498.89660403630396210808681955639703008310
+Series UID (DICOM):   1.2.826.0.1.3680043.8.498.11196342524154857620201920211982916259
+
+----------------------------------------------------------------
+3. Orthanc upload response (POST /instances)
+----------------------------------------------------------------
+HTTP 200, body:
+{
+   "ID" : "8db94882-771b0e41-71148d1c-0203c976-7a38e0ba",
+   "ParentPatient" : "8cb2237d-0679ca88-db6464ea-c60da963-45513964",
+   "ParentSeries" : "d2dff04d-4ee3e484-59024be2-c4f436fe-ccf3fa20",
+   "ParentStudy" : "207e9fd8-a11e59dc-1a043c83-c9b65fe9-9cfe7d9e",
+   "Path" : "/instances/8db94882-771b0e41-71148d1c-0203c976-7a38e0ba",
+   "Status" : "Success"
+}
+
+----------------------------------------------------------------
+4. dcmdump verification (round-tripped via /instances/{id}/file)
+----------------------------------------------------------------
+(0002,0010) UI =HighThroughputJPEG2000ImageCompressionLosslessOnly  TransferSyntaxUID
+# Used TransferSyntax: High-Throughput JPEG 2000 Image Compression (Lossless Only)
+(7fe0,0010) OB (PixelSequence #=2)                      # u/l, 1 PixelData
+
+No "Wrong VR" warnings (PixelData is OB as required for encapsulated bytes).
+
+First-frame codestream magic = FF 4F FF 51 (SOC + SIZ) — valid JPEG 2000.
+Frame 0: 7002 bytes (1 byte of encapsulation pad to even length).
+
+----------------------------------------------------------------
+5. Outcome (server-side checks)
+----------------------------------------------------------------
+[PASS] Orthanc accepted the HTJ2K instance with Status: Success.
+[PASS] Orthanc reports TransferSyntax = 1.2.840.10008.1.2.4.201 in metadata.
+[PASS] dcmdump confirms HTJ2K codestream in encapsulated pixel data.
+[PASS] Helper script is reproducible (scripts/htj2k_repack.py + ojph_compress on PATH).
+
+----------------------------------------------------------------
+6. Stone visual verification — USER HOMEWORK
+----------------------------------------------------------------
+This step requires a real browser and human eyeballs and was NOT performed
+by the agent. To close Task 0.2, please:
+
+  a. Open https://localhost:48921/ (accept the self-signed cert).
+  b. Log in (admin / minipacs2026 — or whichever local creds are active).
+  c. Navigate to study "Test CT Scan" (Patient: Test^Patient).
+       Orthanc Study ID:     207e9fd8-a11e59dc-1a043c83-c9b65fe9-9cfe7d9e
+       Orthanc Series ID:    d2dff04d-4ee3e484-59024be2-c4f436fe-ccf3fa20
+       Study UID (DICOM):    1.2.826.0.1.3680043.8.498.89660403630396210808681955639703008310
+  d. Open the series in the Stone Web Viewer. The series now has 2 instances:
+       - InstanceNumber 1, original (TS 1.2.840.10008.1.2.1)
+       - InstanceNumber 1, HTJ2K  (TS 1.2.840.10008.1.2.4.201, new SOPInstanceUID)
+       Scroll between them and confirm BOTH render as the same picture.
+  e. Watch DevTools Network for any 4xx/5xx and the canvas for any black/garbage.
+
+Then update the verdict line at the top of this file to one of:
+  STONE_HTJ2K_VERDICT: PASS — both instances render identically in Stone 3.0
+  STONE_HTJ2K_VERDICT: FAIL — <details, error msgs, screenshots>
+
+If FAIL: HALT the entire HTJ2K plan and surface to controller — Stone 3.0
+docs would have lied about HTJ2K progressive support, and the plan must
+pivot to OHIF-only (or be abandoned).
+
+----------------------------------------------------------------
+7. Notes / concerns
+----------------------------------------------------------------
+- OpenJPH version is 0.27.0 (brew bottle), plan called for 0.16.0 source build.
+  0.27.0 is API-compatible for the CLI flags used here and emits standard
+  HTJ2K codestreams; chose brew for speed (no 5-10 min Docker build).
+  When the prod transcoder service container is built (Task 1.x), pin the
+  exact version and rebuild from source for reproducibility.
+- Encoded file is 87.6% of original — modest savings on a 64x64 toy image,
+  expected. Real DX/CT studies (1MP+ tiles) typically hit 30-40% with
+  reversible HTJ2K. Phase 6 baseline run will measure on real data.
+- ojph_compress emitted no warnings on stderr.
+- pydicom defaults the encapsulated PixelData VR to OW; helper forces OB
+  per DICOM PS3.5 §A.4.
+- Orthanc dedupes on SOPInstanceUID → helper supports --new-sop-uid for
+  smoke tests. Do NOT use --new-sop-uid for real production transcoding;
+  prod must preserve UIDs to keep WADO/Stone consistent across views.
