@@ -24,6 +24,9 @@ interface Transfer {
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
+  // Inlined by /api/transfers — replaces the old per-row /api/studies/{id} fan-out.
+  study_description?: string;
+  patient_name?: string;
 }
 
 const PAGE_SIZE = 50;
@@ -72,11 +75,6 @@ function humanizeError(raw: string): string {
   return "Transfer failed. See technical details below.";
 }
 
-interface StudyInfo {
-  description: string;
-  patientName: string;
-}
-
 export function TransfersPage() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [total, setTotal] = useState(0);
@@ -86,36 +84,10 @@ export function TransfersPage() {
   const [retrying, setRetrying] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
-  const [studyNames, setStudyNames] = useState<Record<string, StudyInfo>>({});
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Error detail dialog
   const [errorDetail, setErrorDetail] = useState<Transfer | null>(null);
-
-  const resolveStudyNames = async (items: Transfer[]) => {
-    const uniqueIds = [...new Set(items.map((t) => t.orthanc_study_id))];
-    // Only resolve IDs we haven't seen yet
-    const newIds = uniqueIds.filter((sid) => !studyNames[sid]);
-    if (newIds.length === 0) return;
-    const names: Record<string, StudyInfo> = {};
-    await Promise.all(
-      newIds.map(async (sid) => {
-        try {
-          const { data } = await api.get(`/studies/${sid}`);
-          const study = data.study || data;
-          const tags = study.MainDicomTags || {};
-          const patTags = study.PatientMainDicomTags || {};
-          names[sid] = {
-            description: tags.StudyDescription || "Untitled Study",
-            patientName: patTags.PatientName || "",
-          };
-        } catch {
-          names[sid] = { description: sid.slice(0, 8) + "\u2026", patientName: "" };
-        }
-      })
-    );
-    setStudyNames((prev) => ({ ...prev, ...names }));
-  };
 
   const fetchAll = (signal?: AbortSignal) => {
     api
@@ -123,7 +95,6 @@ export function TransfersPage() {
       .then(({ data }) => {
         const items = data.items ?? data;
         setAllTransfers(items);
-        resolveStudyNames(items);
       })
       .catch(() => {});
   };
@@ -345,7 +316,6 @@ export function TransfersPage() {
               {transfers.map((t) => {
                 const cfg = statusConfig[t.status];
                 const StatusIcon = cfg.icon;
-                const info = studyNames[t.orthanc_study_id];
                 return (
                   <TableRow key={t.id} className={t.status === "failed" ? "bg-destructive/5" : t.status === "pending" ? "bg-amber-50/50 dark:bg-amber-950/10" : ""}>
                     <TableCell>
@@ -359,10 +329,10 @@ export function TransfersPage() {
                     <TableCell>
                       <div className="flex flex-col">
                         <Link to={`/studies/${t.orthanc_study_id}`} className="text-primary hover:underline text-sm font-medium">
-                          {info?.description || t.orthanc_study_id.slice(0, 12) + "\u2026"}
+                          {t.study_description || t.orthanc_study_id.slice(0, 12) + "\u2026"}
                         </Link>
-                        {info?.patientName && (
-                          <span className="text-xs text-muted-foreground">{info.patientName.replace(/\^/g, " ")}</span>
+                        {t.patient_name && (
+                          <span className="text-xs text-muted-foreground">{t.patient_name.replace(/\^/g, " ")}</span>
                         )}
                       </div>
                     </TableCell>

@@ -30,6 +30,9 @@ interface Share {
   expires_at: string | null;
   created_by_username: string | null;
   has_pin?: boolean | number | null;
+  // Inlined by /api/shares — avoids the broken patients-lookup-table approach
+  // that silently lost names for any patient past the first 100.
+  patient_name?: string;
 }
 
 interface Patient {
@@ -104,14 +107,19 @@ export function SharesPage() {
 
   useEffect(() => { setPage(1); }, [search]);
 
-  const getPatientName = (orthanc_patient_id: string) => {
-    const p = patients.find((pt) => pt.ID === orthanc_patient_id);
+  // Prefer the patient_name inlined by /api/shares; fall back to the
+  // patients-list lookup only when backend didn't resolve it (Orthanc miss
+  // mid-ingest, etc.). The patients fetch above stays — it still feeds the
+  // Create dialog dropdown.
+  const getPatientName = (s: Share) => {
+    if (s.patient_name) return formatDicomName(s.patient_name);
+    const p = patients.find((pt) => pt.ID === s.orthanc_patient_id);
     return p ? formatDicomName(p.MainDicomTags?.PatientName || "") : null;
   };
 
   const filtered = shares.filter((s) => {
     if (!search.trim()) return true;
-    const name = getPatientName(s.orthanc_patient_id) ?? s.orthanc_patient_id;
+    const name = getPatientName(s) ?? s.orthanc_patient_id;
     return name.toLowerCase().includes(search.toLowerCase());
   });
 
@@ -258,7 +266,7 @@ export function SharesPage() {
           <div className="space-y-2">
             {paginated.map((s) => {
               const status = getShareStatus(s);
-              const patientName = getPatientName(s.orthanc_patient_id) ?? ((s.orthanc_patient_id ?? "").slice(0, 12) + "\u2026");
+              const patientName = getPatientName(s) ?? ((s.orthanc_patient_id ?? "").slice(0, 12) + "\u2026");
               return (
                 <div key={s.id} className="flex items-center justify-between gap-4 rounded-lg border p-4 hover:bg-accent/30 transition-colors">
                   <div className="min-w-0 flex-1">
@@ -493,7 +501,7 @@ export function SharesPage() {
             {editShare && (
               <div className="rounded-md bg-muted p-3 space-y-1">
                 <p className="text-sm font-medium">
-                  {getPatientName(editShare.orthanc_patient_id) || "Patient"}
+                  {getPatientName(editShare) || "Patient"}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Created {formatTimestamp(editShare.created_at)} · {editShare.view_count} views
