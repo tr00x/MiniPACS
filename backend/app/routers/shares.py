@@ -65,8 +65,10 @@ async def list_shares(
     # fan-out.
     unique_pids = list({it.get("orthanc_patient_id") for it in items if it.get("orthanc_patient_id")})
     if unique_pids:
+        # bounded_get_patient: shared semaphore + warning on Orthanc errors,
+        # so transient 5xx don't silently blank patient names for the page.
         patients = await asyncio.gather(
-            *(orthanc.get_patient(pid) for pid in unique_pids),
+            *(orthanc.bounded_get_patient(pid) for pid in unique_pids),
             return_exceptions=True,
         )
         name_by_pid: dict[str, str] = {}
