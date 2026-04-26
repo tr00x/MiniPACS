@@ -417,15 +417,16 @@ async def patient_portal_download_series_images(
     instance_ids = series_data.get("Instances", [])
     series_desc = series_data.get("MainDicomTags", {}).get("SeriesDescription", "series")
 
+    previews = await asyncio.gather(
+        *(orthanc.bounded_get_instance_preview(iid) for iid in instance_ids),
+        return_exceptions=False,
+    )
+
     buf = io.BytesIO()
     with zipfile_mod.ZipFile(buf, "w", zipfile_mod.ZIP_DEFLATED) as zf:
-        for i, iid in enumerate(instance_ids, 1):
-            try:
-                resp = await orthanc._http().get(f"/instances/{iid}/preview")
-                if resp.status_code == 200:
-                    zf.writestr(f"{series_desc}_{i:04d}.jpg", resp.content)
-            except Exception:
-                pass
+        for i, content in enumerate(previews, 1):
+            if content:
+                zf.writestr(f"{series_desc}_{i:04d}.jpg", content)
 
     buf.seek(0)
     return StreamingResponse(

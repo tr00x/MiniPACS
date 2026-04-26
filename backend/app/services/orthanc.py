@@ -325,6 +325,25 @@ async def bounded_get_patient(patient_id: str):
             return None
 
 
+async def bounded_get_instance_preview(instance_id: str) -> bytes | None:
+    """Semaphore-gated /instances/{id}/preview fetch returning JPEG bytes.
+
+    Used by series-image ZIP downloads (clinician + patient portal) where a
+    single series can have 100+ instances. Sequential per-instance fetch turned
+    a cold-cache 100-frame download into ~10s of stalled HTTP; gather'd through
+    _BATCH_SEM(20) it collapses to ~5 round-trips.
+    """
+    async with _BATCH_SEM:
+        try:
+            resp = await _http().get(f"/instances/{instance_id}/preview")
+            if resp.status_code == 200:
+                return resp.content
+            return None
+        except Exception as exc:
+            _log.warning("bounded_get_instance_preview(%s) failed: %s", instance_id, exc)
+            return None
+
+
 async def get_patient_studies(patient_id: str):
     """All studies for a patient — scoped /tools/find, no N+1, no truncation.
 
