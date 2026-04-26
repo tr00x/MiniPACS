@@ -40,7 +40,11 @@ services:
       start_period: 10s
 
   orthanc:
-    image: orthancteam/orthanc
+    # Pin to a stable release. The "latest" tag tracks mainline (bleeding-
+    # edge), which shipped a Stone Web Viewer build with a WASM stack
+    # overflow during CinePlay (CineCallback → IncrementFrame). 26.4.2
+    # is the latest stable release as of 2026-04-26.
+    image: orthancteam/orthanc:26.4.2-full
     restart: unless-stopped
     volumes:
       - orthanc-data:/var/lib/orthanc/db

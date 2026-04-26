@@ -50,7 +50,10 @@ services:
       start_period: 10s
 
   orthanc:
-    image: orthancteam/orthanc
+    # Pin to a stable release. The unpinned "latest" tag tracks mainline
+    # which has shipped builds with Stone WebViewer WASM stack overflow
+    # during CinePlay. 26.4.2 = latest stable as of 2026-04-26.
+    image: orthancteam/orthanc:26.4.2-full
     restart: unless-stopped
     logging: *default-logging
     volumes:
