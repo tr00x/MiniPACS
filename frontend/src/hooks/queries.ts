@@ -64,6 +64,7 @@ export function useStudies(params: {
   date_to?: string;
   limit?: number;
   offset?: number;
+  include?: string;
 }) {
   return useQuery({
     queryKey: qk.studies(params),

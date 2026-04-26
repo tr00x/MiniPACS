@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import io
 import os
 import time
@@ -37,6 +38,64 @@ _THUMB_CACHE_MAX = 500
 _thumb_cache: dict[str, tuple[float, bytes]] = {}
 
 
+async def _load_thumb(study_id: str) -> bytes | None:
+    """Resolve a study's PNG thumbnail through the 3-tier cache.
+
+    Returns PNG bytes on success, None when the study has no renderable
+    series (new study mid-ingest, deleted instances, etc.). Caller decides
+    how to surface the absence (404 for the dedicated endpoint, null for
+    the inline batch path).
+    """
+    hit = _thumb_cache.get(study_id)
+    now = time.time()
+    if hit and now - hit[0] < _THUMB_TTL:
+        return hit[1]
+
+    disk_path = os.path.join(_THUMB_DIR, f"{study_id}.png")
+    try:
+        if os.path.isfile(disk_path):
+            with open(disk_path, "rb") as f:
+                png_disk = f.read()
+            _thumb_cache[study_id] = (now, png_disk)
+            if len(_thumb_cache) > _THUMB_CACHE_MAX:
+                _thumb_cache.pop(next(iter(_thumb_cache)))
+            return png_disk
+    except OSError:
+        pass
+
+    try:
+        series_list = await orthanc.get_study_series(study_id)
+    except Exception:
+        return None
+    if not series_list:
+        return None
+
+    def _series_num(s):
+        try:
+            return int(s.get("MainDicomTags", {}).get("SeriesNumber") or 999)
+        except ValueError:
+            return 999
+
+    first_series = sorted(series_list, key=_series_num)[0]
+    instances = first_series.get("Instances") or []
+    if not instances:
+        return None
+    instance_id = instances[len(instances) // 2]
+
+    try:
+        resp = await orthanc._http().get(f"/instances/{instance_id}/preview")
+    except Exception:
+        return None
+    if resp.status_code != 200:
+        return None
+    png = resp.content
+
+    _thumb_cache[study_id] = (now, png)
+    if len(_thumb_cache) > _THUMB_CACHE_MAX:
+        _thumb_cache.pop(next(iter(_thumb_cache)))
+    return png
+
+
 @router.get("")
 async def list_studies(
     request: Request,
@@ -46,6 +105,7 @@ async def list_studies(
     date_to: str = "",
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    include: str = "",
     user: dict = Depends(get_current_user),
 ):
     await log_audit("list_studies", user_id=user["id"], ip_address=request.client.host)
@@ -58,6 +118,17 @@ async def list_studies(
         )
     except Exception as exc:
         raise HTTPException(502, f"PACS server unavailable: {exc}") from exc
+
+    # Inline thumbnails — collapses the worklist's per-study GET fan-out
+    # (50 cards × ~400 ms CF Tunnel overhead) into one bulk fetch. Callers
+    # opt in via ?include=thumbs so plain list views don't pay the payload.
+    if "thumbs" in {tok.strip() for tok in include.split(",") if tok.strip()}:
+        ids = [s.get("ID") for s in page if s.get("ID")]
+        thumbs = await asyncio.gather(*(_load_thumb(sid) for sid in ids))
+        thumb_map = {sid: png for sid, png in zip(ids, thumbs)}
+        for s in page:
+            png = thumb_map.get(s.get("ID"))
+            s["thumb_b64"] = base64.b64encode(png).decode("ascii") if png else None
 
     return {"items": page, "total": total}
 
@@ -178,69 +249,13 @@ async def get_study_thumbnail(
 ):
     """PNG thumbnail for the worklist grid view.
 
-    Resolves the first series' middle instance (more representative than the
-    very first slice) and proxies Orthanc's /instances/{id}/preview. Cached
-    in-process for 1h — grid reopens and back navigation never re-render.
+    Single-study fallback path. The grid normally pulls thumbnails inline
+    via `/api/studies?include=thumbs`; this endpoint stays for detail views,
+    cache misses, and any consumer that hasn't migrated to the bulk path.
     """
-    hit = _thumb_cache.get(study_id)
-    now = time.time()
-    if hit and now - hit[0] < _THUMB_TTL:
-        return Response(
-            content=hit[1],
-            media_type="image/png",
-            headers={"Cache-Control": "private, max-age=3600"},
-        )
-
-    # Fast path: Orthanc plugin already wrote this one to disk. Single fs stat
-    # + read, no PACS round-trip. We still populate the in-memory cache so
-    # subsequent hits skip even the syscalls.
-    disk_path = os.path.join(_THUMB_DIR, f"{study_id}.png")
-    try:
-        if os.path.isfile(disk_path):
-            with open(disk_path, "rb") as f:
-                png_disk = f.read()
-            _thumb_cache[study_id] = (now, png_disk)
-            if len(_thumb_cache) > _THUMB_CACHE_MAX:
-                _thumb_cache.pop(next(iter(_thumb_cache)))
-            return Response(
-                content=png_disk,
-                media_type="image/png",
-                headers={"Cache-Control": "private, max-age=3600"},
-            )
-    except OSError:
-        # Volume missing or permission oddity — fall through to on-demand.
-        pass
-
-    series_list = await orthanc.get_study_series(study_id)
-    if not series_list:
-        raise HTTPException(status_code=404, detail="Study has no series")
-
-    def _series_num(s):
-        try:
-            return int(s.get("MainDicomTags", {}).get("SeriesNumber") or 999)
-        except ValueError:
-            return 999
-
-    first_series = sorted(series_list, key=_series_num)[0]
-    instances = first_series.get("Instances") or []
-    if not instances:
-        raise HTTPException(status_code=404, detail="Series has no instances")
-    # Middle slice ≈ diagnostic preview. First slice on CT/MR is often a scout
-    # or localizer, which makes a confusing grid tile.
-    instance_id = instances[len(instances) // 2]
-
-    try:
-        resp = await orthanc._http().get(f"/instances/{instance_id}/preview")
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Orthanc preview failed: {exc}") from exc
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Orthanc preview HTTP {resp.status_code}")
-    png = resp.content
-
-    _thumb_cache[study_id] = (now, png)
-    if len(_thumb_cache) > _THUMB_CACHE_MAX:
-        _thumb_cache.pop(next(iter(_thumb_cache)))
-
+    png = await _load_thumb(study_id)
+    if png is None:
+        raise HTTPException(status_code=404, detail="No renderable thumbnail")
     return Response(
         content=png,
         media_type="image/png",
