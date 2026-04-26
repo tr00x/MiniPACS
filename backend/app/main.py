@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +27,24 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.boot import router as boot_router
 from app.routers.ws import router as ws_router
 from app.routers.import_studies import router as import_router
-from app.routers.received import router as received_router
+from app.routers.received import router as received_router, prewarm_received
+from app.services.orthanc import find_studies, find_patients
+
+
+async def _prewarm_caches() -> None:
+    """Background task: prime the three hot listing caches so the first
+    user request after a backend restart hits warm Redis/in-proc state.
+    Browser audit caught /api/received at 7.9s TTFB cold; this drops it
+    back into the 200ms-warm path before anyone sees the cold version."""
+    try:
+        await asyncio.gather(
+            prewarm_received(50),
+            find_studies(limit=50, offset=0),
+            find_patients(limit=25, offset=0),
+            return_exceptions=True,
+        )
+    except Exception:
+        pass
 
 
 @asynccontextmanager
@@ -35,6 +53,8 @@ async def lifespan(app: FastAPI):
     await init_db()
     await init_cache(settings.redis_url)
     await init_orthanc()
+    # Fire-and-forget — never block startup waiting on Orthanc.
+    asyncio.create_task(_prewarm_caches())
     yield
     await close_orthanc()
     await close_cache()
