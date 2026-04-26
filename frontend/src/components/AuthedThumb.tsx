@@ -56,7 +56,7 @@ export function AuthedThumb({
   if (inlineB64) {
     return (
       <img
-        src={`data:image/png;base64,${inlineB64}`}
+        src={`data:image/webp;base64,${inlineB64}`}
         alt=""
         className="h-full w-full object-contain"
       />

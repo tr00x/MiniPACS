@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import io
 import os
 import re
 import time
@@ -8,6 +9,7 @@ from datetime import datetime, timezone
 from app.db import PgConnection
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
+from PIL import Image
 from stream_zip import async_stream_zip, ZIP_64
 
 from app.database import get_db
@@ -39,13 +41,40 @@ _THUMB_CACHE_MAX = 500
 _thumb_cache: dict[str, tuple[float, bytes]] = {}
 
 
-async def _load_thumb(study_id: str) -> bytes | None:
-    """Resolve a study's PNG thumbnail through the 3-tier cache.
+# Thumbnail target: 96 px square is plenty for grid view (cards are 64-80
+# px on screen at 1x), WebP @ q=70 lands at 2-5 KB per thumb. The Orthanc
+# Python plugin writes raw `/instances/{id}/preview` PNGs to disk — those
+# can run 1-2 MB each on full-resolution scans, so we always re-encode
+# before serving. Without this resize a 50-study worklist returned 27 MB
+# and stalled CF Tunnel ~20 s.
+_THUMB_TARGET_PX = 96
+_THUMB_QUALITY = 70
 
-    Returns PNG bytes on success, None when the study has no renderable
-    series (new study mid-ingest, deleted instances, etc.). Caller decides
-    how to surface the absence (404 for the dedicated endpoint, null for
-    the inline batch path).
+
+def _resize_to_webp(raw: bytes) -> bytes:
+    """Decode any common image format Orthanc returns and re-encode as a
+    96 px WebP. Synchronous (Pillow has no async API) — callers must
+    dispatch via asyncio.to_thread. Returns the original bytes if the
+    decode fails so we never serve nothing when something is better."""
+    try:
+        with Image.open(io.BytesIO(raw)) as im:
+            im.thumbnail((_THUMB_TARGET_PX, _THUMB_TARGET_PX), Image.Resampling.LANCZOS)
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            out = io.BytesIO()
+            im.save(out, format="WEBP", quality=_THUMB_QUALITY, method=6)
+            return out.getvalue()
+    except Exception:
+        return raw
+
+
+async def _load_thumb(study_id: str) -> bytes | None:
+    """Resolve a study's WebP thumbnail through the 3-tier cache.
+
+    Returns small (~2-5 KB) WebP bytes on success, None when the study has
+    no renderable series. Disk-tier PNGs from the Orthanc plugin are
+    re-encoded on first hit and the WebP is what gets cached, so the
+    expensive resize runs at most once per study per backend lifetime.
     """
     hit = _thumb_cache.get(study_id)
     now = time.time()
@@ -57,14 +86,15 @@ async def _load_thumb(study_id: str) -> bytes | None:
         if os.path.isfile(disk_path):
             with open(disk_path, "rb") as f:
                 png_disk = f.read()
+            webp = await asyncio.to_thread(_resize_to_webp, png_disk)
             # Pop-then-set so a re-insert of an existing key moves it to the
             # tail of the insertion order. Without the pop, FIFO eviction
             # below could throw out the entry we just refreshed.
             _thumb_cache.pop(study_id, None)
-            _thumb_cache[study_id] = (now, png_disk)
+            _thumb_cache[study_id] = (now, webp)
             if len(_thumb_cache) > _THUMB_CACHE_MAX:
                 _thumb_cache.pop(next(iter(_thumb_cache)))
-            return png_disk
+            return webp
     except OSError:
         pass
 
@@ -93,13 +123,13 @@ async def _load_thumb(study_id: str) -> bytes | None:
         return None
     if resp.status_code != 200:
         return None
-    png = resp.content
+    webp = await asyncio.to_thread(_resize_to_webp, resp.content)
 
     _thumb_cache.pop(study_id, None)
-    _thumb_cache[study_id] = (now, png)
+    _thumb_cache[study_id] = (now, webp)
     if len(_thumb_cache) > _THUMB_CACHE_MAX:
         _thumb_cache.pop(next(iter(_thumb_cache)))
-    return png
+    return webp
 
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -194,14 +224,16 @@ async def list_studies(
 
         thumbs = await asyncio.gather(*(_bounded(sid) for sid in ids), return_exceptions=True)
         thumb_map: dict[str, bytes | None] = {}
-        for sid, png in zip(ids, thumbs):
-            if isinstance(png, BaseException) or not png:
+        for sid, webp in zip(ids, thumbs):
+            if isinstance(webp, BaseException) or not webp:
                 thumb_map[sid] = None
             else:
-                thumb_map[sid] = png
+                thumb_map[sid] = webp
         for s in page:
-            png = thumb_map.get(s.get("ID"))
-            s["thumb_b64"] = base64.b64encode(png).decode("ascii") if png else None
+            webp = thumb_map.get(s.get("ID"))
+            # Bare base64; the frontend wraps with data:image/webp;base64,
+            # before binding to <img src>.
+            s["thumb_b64"] = base64.b64encode(webp).decode("ascii") if webp else None
 
     return {"items": page, "total": total}
 
@@ -326,16 +358,16 @@ async def get_study_thumbnail(
     via `/api/studies?include=thumbs`; this endpoint stays for detail views,
     cache misses, and any consumer that hasn't migrated to the bulk path.
     """
-    png = await _load_thumb(study_id)
-    if png is None:
+    webp = await _load_thumb(study_id)
+    if webp is None:
         raise HTTPException(status_code=404, detail="No renderable thumbnail")
     # Thumbnails are derived from a Study's middle-instance preview; the
-    # underlying SOP Instance UID is immutable, so a once-rendered PNG is
+    # underlying SOP Instance UID is immutable, so a once-rendered image is
     # safe to pin as immutable. Year-long max-age tells the browser to skip
     # revalidation entirely — 0 RTT on every worklist re-render.
     return Response(
-        content=png,
-        media_type="image/png",
+        content=webp,
+        media_type="image/webp",
         headers={"Cache-Control": "private, immutable, max-age=31536000"},
     )
 
