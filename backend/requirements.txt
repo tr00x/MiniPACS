@@ -10,3 +10,4 @@ orjson==3.10.7
 pydantic==2.12.5
 pydantic-settings==2.13.1
 redis[hiredis]==5.2.1
+stream-zip==0.0.83

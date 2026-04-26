@@ -1,13 +1,14 @@
 import asyncio
 import base64
-import io
 import os
+import re
 import time
-import zipfile as zipfile_mod
+from datetime import datetime, timezone
 
 from app.db import PgConnection
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
+from stream_zip import async_stream_zip, ZIP_64
 
 from app.database import get_db
 from app.routers.auth import get_current_user
@@ -99,6 +100,61 @@ async def _load_thumb(study_id: str) -> bytes | None:
     if len(_thumb_cache) > _THUMB_CACHE_MAX:
         _thumb_cache.pop(next(iter(_thumb_cache)))
     return png
+
+
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _sanitize_filename(name: str | None) -> str:
+    """Strip path separators / control chars from a DICOM tag before using
+    it in Content-Disposition. Without this, a SeriesDescription containing
+    `/` or `\\0` would produce a broken header and a corrupt download."""
+    if not name:
+        return "series"
+    cleaned = _SAFE_FILENAME_RE.sub("_", name).strip("._-")
+    return cleaned[:80] or "series"
+
+
+async def _zip_series_previews(instance_ids: list[str], safe_desc: str):
+    """Streaming ZIP generator for series-image downloads.
+
+    Issues all preview fetches in parallel through bounded_get_instance_preview
+    (gated by _BATCH_SEM(20)) and yields zip entries via asyncio.as_completed —
+    so the first byte of the zip ships as soon as the *fastest* preview lands,
+    not after every one. Order of files in the archive matches arrival order;
+    the 4-digit index in the filename preserves clinical sequencing for
+    extracted-folder views regardless of zip storage order.
+    """
+    modified = datetime.now(timezone.utc)
+    tasks = [
+        asyncio.create_task(_fetch_preview_with_index(idx, iid))
+        for idx, iid in enumerate(instance_ids, 1)
+    ]
+    try:
+        for coro in asyncio.as_completed(tasks):
+            idx, content = await coro
+            if not content:
+                continue
+
+            async def chunks(data: bytes = content):
+                yield data
+
+            yield (
+                f"{safe_desc}_{idx:04d}.jpg",
+                modified,
+                0o644,
+                ZIP_64,
+                chunks(),
+            )
+    finally:
+        # Cancel any in-flight fetches if the client disconnects mid-stream.
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+
+
+async def _fetch_preview_with_index(idx: int, iid: str) -> tuple[int, bytes | None]:
+    return idx, await orthanc.bounded_get_instance_preview(iid)
 
 
 @router.get("")
@@ -273,10 +329,14 @@ async def get_study_thumbnail(
     png = await _load_thumb(study_id)
     if png is None:
         raise HTTPException(status_code=404, detail="No renderable thumbnail")
+    # Thumbnails are derived from a Study's middle-instance preview; the
+    # underlying SOP Instance UID is immutable, so a once-rendered PNG is
+    # safe to pin as immutable. Year-long max-age tells the browser to skip
+    # revalidation entirely — 0 RTT on every worklist re-render.
     return Response(
         content=png,
         media_type="image/png",
-        headers={"Cache-Control": "private, max-age=3600"},
+        headers={"Cache-Control": "private, immutable, max-age=31536000"},
     )
 
 
@@ -347,21 +407,10 @@ async def download_series_images(
     series_data = await orthanc.get_series(series_id)
     instance_ids = series_data.get("Instances", [])
     series_desc = series_data.get("MainDicomTags", {}).get("SeriesDescription", "series")
+    safe_desc = _sanitize_filename(series_desc)
 
-    previews = await asyncio.gather(
-        *(orthanc.bounded_get_instance_preview(iid) for iid in instance_ids),
-        return_exceptions=True,
-    )
-
-    buf = io.BytesIO()
-    with zipfile_mod.ZipFile(buf, "w", zipfile_mod.ZIP_DEFLATED) as zf:
-        for i, content in enumerate(previews, 1):
-            if isinstance(content, (bytes, bytearray)) and content:
-                zf.writestr(f"{series_desc}_{i:04d}.jpg", content)
-
-    buf.seek(0)
     return StreamingResponse(
-        iter([buf.read()]),
+        async_stream_zip(_zip_series_previews(instance_ids, safe_desc)),
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename={series_desc}-images.zip"},
+        headers={"Content-Disposition": f'attachment; filename="{safe_desc}-images.zip"'},
     )

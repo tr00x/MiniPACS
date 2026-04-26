@@ -1,8 +1,9 @@
 import asyncio
 import hashlib
-import io
-import zipfile as zipfile_mod
 from datetime import datetime, timezone
+
+from app.routers.studies import _sanitize_filename, _zip_series_previews
+from stream_zip import async_stream_zip
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -416,23 +417,12 @@ async def patient_portal_download_series_images(
     series_data = await orthanc.get_series(series_id)
     instance_ids = series_data.get("Instances", [])
     series_desc = series_data.get("MainDicomTags", {}).get("SeriesDescription", "series")
+    safe_desc = _sanitize_filename(series_desc)
 
-    previews = await asyncio.gather(
-        *(orthanc.bounded_get_instance_preview(iid) for iid in instance_ids),
-        return_exceptions=True,
-    )
-
-    buf = io.BytesIO()
-    with zipfile_mod.ZipFile(buf, "w", zipfile_mod.ZIP_DEFLATED) as zf:
-        for i, content in enumerate(previews, 1):
-            if isinstance(content, (bytes, bytearray)) and content:
-                zf.writestr(f"{series_desc}_{i:04d}.jpg", content)
-
-    buf.seek(0)
     return StreamingResponse(
-        iter([buf.read()]),
+        async_stream_zip(_zip_series_previews(instance_ids, safe_desc)),
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename={series_desc}-images.zip"},
+        headers={"Content-Disposition": f'attachment; filename="{safe_desc}-images.zip"'},
     )
 
 

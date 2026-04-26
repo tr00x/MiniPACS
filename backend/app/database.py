@@ -100,6 +100,18 @@ CREATE INDEX IF NOT EXISTS idx_patient_shares_pid ON patient_shares(orthanc_pati
 CREATE INDEX IF NOT EXISTS idx_transfer_log_sid ON transfer_log(orthanc_study_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_user_time ON audit_log(user_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_log_time ON audit_log(timestamp);
+-- Dashboard polls /api/transfers + /api/dashboard every 5-15s, ordering
+-- transfer_log by created_at DESC. Without this index, even LIMIT 25 forces
+-- a full Seq Scan + heapsort on the whole table (2.5 ms on 10k rows in
+-- audit, scales linearly).
+CREATE INDEX IF NOT EXISTS idx_transfer_log_created_at ON transfer_log(created_at DESC);
+-- Partial index for login-rate-limit checks (auth.py:_check_rate_limit).
+-- Failed logins are <1% of audit_log writes, so the index stays tiny while
+-- giving brute-force checks O(log n) instead of bitmap-recheck on the
+-- generic timestamp index.
+CREATE INDEX IF NOT EXISTS idx_audit_log_login_failed
+    ON audit_log(ip_address, timestamp DESC)
+    WHERE action = 'login_failed';
 """
 
 
