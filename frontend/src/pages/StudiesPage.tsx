@@ -32,6 +32,7 @@ interface Study {
     PatientID?: string;
   };
   Series?: string[];
+  thumb_b64?: string | null;
 }
 
 const PAGE_SIZE = 50;
@@ -157,6 +158,7 @@ export function StudiesPage() {
   const queryParams = {
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
+    include: "thumbs",
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(modFilter ? { modality: modFilter } : {}),
     ...(fromParam ? { date_from: fromParam } : {}),
@@ -473,7 +475,7 @@ export function StudiesPage() {
                   onMouseEnter={() => prefetchStudy(s.ID)}
                 >
                   <div className="relative aspect-square w-full overflow-hidden bg-black">
-                    <AuthedThumb studyId={s.ID} />
+                    <AuthedThumb studyId={s.ID} inlineB64={s.thumb_b64} />
                     {mod && (
                       <div className="absolute left-2 top-2">
                         <ModalityBadgeList modalities={mod.replace(/\\/g, "/").split("/")} />
