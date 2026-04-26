@@ -19,6 +19,20 @@ from app.middleware.audit import log_audit
 
 router = APIRouter(tags=["shares"])
 
+
+def _coerce_dt(val) -> datetime:
+    """Normalize an expires_at value into a tz-aware datetime.
+
+    asyncpg returns datetime for TIMESTAMPTZ columns post-migration; legacy
+    rows still expose ISO strings while a backfill is in progress. Either
+    way, naive datetimes are assumed UTC (matches old TEXT-column writes).
+    """
+    if isinstance(val, datetime):
+        return val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+    parsed = datetime.fromisoformat(val)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 # ─── Authenticated endpoints ─────────────────────────────────────────────────
 auth_router = APIRouter(prefix="/api/shares")
 
@@ -93,7 +107,7 @@ async def create_share(
     db: PgConnection = Depends(get_db),
 ):
     token = generate_share_token()
-    expires_at = body.expires_at.isoformat() if body.expires_at else None
+    expires_at = body.expires_at
 
     pin_hash = None
     if body.pin:
@@ -144,7 +158,7 @@ async def update_share(
     if "expires_at" in updates:
         val = updates["expires_at"]
         set_clauses.append("expires_at = ?")
-        params.append(val.isoformat() if val else None)
+        params.append(val if val else None)
     if "is_active" in updates:
         set_clauses.append("is_active = ?")
         params.append(int(updates["is_active"]) if updates["is_active"] is not None else 0)
@@ -212,10 +226,7 @@ async def _validate_share(token: str, db: PgConnection) -> dict:
         raise HTTPException(410, "This link has been revoked. Please contact the clinic.")
 
     if share["expires_at"]:
-        expires = datetime.fromisoformat(share["expires_at"])
-        # Handle naive datetimes from sqlite by assuming UTC
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
+        expires = _coerce_dt(share["expires_at"])
         if datetime.now(timezone.utc) > expires:
             raise HTTPException(410, "This link has expired. Please contact the clinic.")
 
@@ -241,9 +252,7 @@ async def share_info(
         raise HTTPException(410, "This link has been revoked.")
 
     if share["expires_at"]:
-        expires = datetime.fromisoformat(share["expires_at"])
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
+        expires = _coerce_dt(share["expires_at"])
         if datetime.now(timezone.utc) > expires:
             raise HTTPException(410, "This link has expired.")
 
@@ -305,7 +314,7 @@ async def patient_portal(
             raise HTTPException(403, "PIN verification required")
 
     # Update view tracking
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     if share["first_viewed_at"] is None:
         await db.execute(
             "UPDATE patient_shares SET view_count = view_count + 1, first_viewed_at = ?, last_viewed_at = ? WHERE id = ?",

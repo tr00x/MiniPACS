@@ -59,7 +59,7 @@ async def put_settings(
     db: PgConnection = Depends(get_db),
 ):
     updates = body.model_dump(exclude_none=True)
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     for key, value in updates.items():
         await db.execute(
             "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "

@@ -96,7 +96,7 @@ async def _last_received():
 
 
 async def _db_counts(db: PgConnection):
-    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
     cur = await db.execute(
         "SELECT COUNT(*) FROM transfer_log WHERE created_at >= ?", (week_ago,)
     )

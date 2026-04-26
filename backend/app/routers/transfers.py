@@ -122,7 +122,7 @@ async def create_transfer(
     transfer_id = cursor.lastrowid
 
     # Execute the transfer
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     try:
         await orthanc.send_to_modality(modality, [body.study_id])
         await db.execute(
@@ -201,7 +201,7 @@ async def retry_transfer(
     await db.commit()
 
     # Retry the transfer
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     try:
         await orthanc.send_to_modality(modality, [transfer["orthanc_study_id"]])
         await db.execute(

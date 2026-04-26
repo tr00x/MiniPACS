@@ -11,26 +11,31 @@ from app.db import pool, get_db  # re-export for existing imports
 
 
 SCHEMA_SQL = """
+-- Trusted extension since PG 13: lets the database owner enable it without
+-- superuser. Used by ops to diagnose slow queries (SELECT ... FROM
+-- pg_stat_statements ORDER BY mean_exec_time DESC). Free fixed cost.
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     token_version INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'),
-    last_login TEXT
+    created_at TIMESTAMPTZ DEFAULT now(),
+    last_login TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS patient_shares (
     id SERIAL PRIMARY KEY,
     orthanc_patient_id TEXT NOT NULL,
     token TEXT UNIQUE NOT NULL,
-    expires_at TEXT,
+    expires_at TIMESTAMPTZ,
     created_by INTEGER REFERENCES users(id),
-    created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'),
+    created_at TIMESTAMPTZ DEFAULT now(),
     is_active INTEGER DEFAULT 1,
     view_count INTEGER DEFAULT 0,
-    first_viewed_at TEXT,
-    last_viewed_at TEXT,
+    first_viewed_at TIMESTAMPTZ,
+    last_viewed_at TIMESTAMPTZ,
     pin_hash TEXT
 );
 
@@ -42,7 +47,7 @@ CREATE TABLE IF NOT EXISTS pacs_nodes (
     port INTEGER NOT NULL,
     description TEXT,
     is_active INTEGER DEFAULT 1,
-    last_echo_at TEXT
+    last_echo_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS transfer_log (
@@ -52,8 +57,8 @@ CREATE TABLE IF NOT EXISTS transfer_log (
     initiated_by INTEGER REFERENCES users(id),
     status TEXT DEFAULT 'pending',
     error_message TEXT,
-    created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'),
-    completed_at TEXT
+    created_at TIMESTAMPTZ DEFAULT now(),
+    completed_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -64,7 +69,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     resource_type TEXT,
     resource_id TEXT,
     ip_address TEXT,
-    timestamp TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')
+    timestamp TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS external_viewers (
@@ -81,7 +86,7 @@ CREATE TABLE IF NOT EXISTS external_viewers (
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT,
-    updated_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS study_reports (
@@ -92,8 +97,75 @@ CREATE TABLE IF NOT EXISTS study_reports (
     content TEXT,
     filename TEXT,
     created_by INTEGER REFERENCES users(id),
-    created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')
+    created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Idempotent TEXT → TIMESTAMPTZ migration. Old installs were created with
+-- TEXT timestamp columns (lex-sortable ISO 8601 string). New installs hit
+-- the CREATE TABLE definitions above and skip the type-conversion. The
+-- second pass reasserts the correct default state — covers the case where
+-- a previous migration over-applied DEFAULT now() to columns that should
+-- be nullable on insert (e.g. expires_at, completed_at, *_viewed_at).
+DO $$
+DECLARE
+    -- Columns whose canonical default is now() (write timestamps).
+    insert_defaults CONSTANT text[] := ARRAY[
+        'users.created_at',
+        'patient_shares.created_at',
+        'transfer_log.created_at',
+        'audit_log.timestamp',
+        'settings.updated_at',
+        'study_reports.created_at'
+    ];
+    -- Columns that must stay NULL until explicitly populated. Forcing
+    -- DEFAULT now() here would silently expire patient links / mark
+    -- transfers as completed at insert time.
+    null_defaults CONSTANT text[] := ARRAY[
+        'users.last_login',
+        'patient_shares.expires_at',
+        'patient_shares.first_viewed_at',
+        'patient_shares.last_viewed_at',
+        'pacs_nodes.last_echo_at',
+        'transfer_log.completed_at'
+    ];
+    spec text;
+    tbl  text;
+    col  text;
+BEGIN
+    -- Pass 1: convert any remaining TEXT columns to TIMESTAMPTZ. The
+    -- DROP DEFAULT step is required because PG would otherwise try to
+    -- cast the legacy to_char()-text default into timestamptz and bail
+    -- with DatatypeMismatchError.
+    FOREACH spec IN ARRAY (insert_defaults || null_defaults) LOOP
+        tbl := split_part(spec, '.', 1);
+        col := split_part(spec, '.', 2);
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = tbl
+               AND column_name = col
+               AND data_type = 'text'
+        ) THEN
+            EXECUTE format('ALTER TABLE %I ALTER COLUMN %I DROP DEFAULT', tbl, col);
+            EXECUTE format(
+                'ALTER TABLE %I ALTER COLUMN %I TYPE TIMESTAMPTZ USING %I::TIMESTAMPTZ',
+                tbl, col, col
+            );
+        END IF;
+    END LOOP;
+
+    -- Pass 2: reassert correct defaults. Idempotent — re-runs are a no-op.
+    FOREACH spec IN ARRAY insert_defaults LOOP
+        tbl := split_part(spec, '.', 1);
+        col := split_part(spec, '.', 2);
+        EXECUTE format('ALTER TABLE %I ALTER COLUMN %I SET DEFAULT now()', tbl, col);
+    END LOOP;
+    FOREACH spec IN ARRAY null_defaults LOOP
+        tbl := split_part(spec, '.', 1);
+        col := split_part(spec, '.', 2);
+        EXECUTE format('ALTER TABLE %I ALTER COLUMN %I DROP DEFAULT', tbl, col);
+    END LOOP;
+END$$;
 
 CREATE INDEX IF NOT EXISTS idx_study_reports_sid ON study_reports(orthanc_study_id);
 CREATE INDEX IF NOT EXISTS idx_patient_shares_pid ON patient_shares(orthanc_patient_id);
@@ -112,6 +184,17 @@ CREATE INDEX IF NOT EXISTS idx_transfer_log_created_at ON transfer_log(created_a
 CREATE INDEX IF NOT EXISTS idx_audit_log_login_failed
     ON audit_log(ip_address, timestamp DESC)
     WHERE action = 'login_failed';
+-- Dashboard "failed transfers" badge polls SELECT COUNT(*) FROM transfer_log
+-- WHERE status = 'failed'. Partial index covers only the rows that matter
+-- (10-20 % of the table at worst) so the badge stays sub-ms even at 100 k+
+-- transfers logged.
+CREATE INDEX IF NOT EXISTS idx_transfer_log_status
+    ON transfer_log(status, created_at DESC)
+    WHERE status IN ('failed', 'pending');
+-- audit_log filter by action+time (e.g. /api/audit-log?action=login). Becomes
+-- the dominant cost once audit_log crosses ~100 k rows; cheap to add now.
+CREATE INDEX IF NOT EXISTS idx_audit_log_action_time
+    ON audit_log(action, timestamp DESC);
 """
 
 
