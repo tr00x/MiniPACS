@@ -56,6 +56,10 @@ async def _load_thumb(study_id: str) -> bytes | None:
         if os.path.isfile(disk_path):
             with open(disk_path, "rb") as f:
                 png_disk = f.read()
+            # Pop-then-set so a re-insert of an existing key moves it to the
+            # tail of the insertion order. Without the pop, FIFO eviction
+            # below could throw out the entry we just refreshed.
+            _thumb_cache.pop(study_id, None)
             _thumb_cache[study_id] = (now, png_disk)
             if len(_thumb_cache) > _THUMB_CACHE_MAX:
                 _thumb_cache.pop(next(iter(_thumb_cache)))
@@ -90,6 +94,7 @@ async def _load_thumb(study_id: str) -> bytes | None:
         return None
     png = resp.content
 
+    _thumb_cache.pop(study_id, None)
     _thumb_cache[study_id] = (now, png)
     if len(_thumb_cache) > _THUMB_CACHE_MAX:
         _thumb_cache.pop(next(iter(_thumb_cache)))
@@ -124,8 +129,20 @@ async def list_studies(
     # opt in via ?include=thumbs so plain list views don't pay the payload.
     if "thumbs" in {tok.strip() for tok in include.split(",") if tok.strip()}:
         ids = [s.get("ID") for s in page if s.get("ID")]
-        thumbs = await asyncio.gather(*(_load_thumb(sid) for sid in ids))
-        thumb_map = {sid: png for sid, png in zip(ids, thumbs)}
+
+        async def _bounded(sid: str):
+            # Share the global Orthanc batch budget so worklist + transfers
+            # + shares can't collectively storm Orthanc.
+            async with orthanc._BATCH_SEM:
+                return await _load_thumb(sid)
+
+        thumbs = await asyncio.gather(*(_bounded(sid) for sid in ids), return_exceptions=True)
+        thumb_map: dict[str, bytes | None] = {}
+        for sid, png in zip(ids, thumbs):
+            if isinstance(png, BaseException) or not png:
+                thumb_map[sid] = None
+            else:
+                thumb_map[sid] = png
         for s in page:
             png = thumb_map.get(s.get("ID"))
             s["thumb_b64"] = base64.b64encode(png).decode("ascii") if png else None

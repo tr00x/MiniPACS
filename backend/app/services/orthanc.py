@@ -297,6 +297,34 @@ async def get_patient(patient_id: str):
     return resp.json()
 
 
+# Bounded concurrency for batch enrich paths (worklist thumbs, transfers
+# study lookup, shares patient lookup). Without this, a single
+# /api/transfers?limit=1000 page could fan out 1000 simultaneous GETs into
+# Orthanc — fine on warm cache, brutal on cold. 20 in flight keeps the
+# Orthanc connection pool happy and bounds tail latency.
+_BATCH_SEM = asyncio.Semaphore(20)
+
+
+async def bounded_get_study(study_id: str):
+    """Semaphore-gated get_study. Use inside asyncio.gather for batches."""
+    async with _BATCH_SEM:
+        try:
+            return await get_study(study_id)
+        except Exception as exc:
+            _log.warning("bounded_get_study(%s) failed: %s", study_id, exc)
+            return None
+
+
+async def bounded_get_patient(patient_id: str):
+    """Semaphore-gated get_patient. Use inside asyncio.gather for batches."""
+    async with _BATCH_SEM:
+        try:
+            return await get_patient(patient_id)
+        except Exception as exc:
+            _log.warning("bounded_get_patient(%s) failed: %s", patient_id, exc)
+            return None
+
+
 async def get_patient_studies(patient_id: str):
     """All studies for a patient — scoped /tools/find, no N+1, no truncation.
 

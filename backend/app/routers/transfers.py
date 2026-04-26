@@ -66,8 +66,10 @@ async def list_transfers(
     # whole fan-out into the single /api/transfers response.
     unique_sids = list({it.get("orthanc_study_id") for it in items if it.get("orthanc_study_id")})
     if unique_sids:
+        # bounded_get_study: shared semaphore (20 concurrent) + warning logs
+        # on Orthanc errors, so a 503 spike doesn't silently blank every row.
         studies = await asyncio.gather(
-            *(orthanc.get_study(sid) for sid in unique_sids),
+            *(orthanc.bounded_get_study(sid) for sid in unique_sids),
             return_exceptions=True,
         )
         study_meta: dict[str, tuple[str, str]] = {}
