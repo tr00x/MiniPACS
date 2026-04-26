@@ -25,7 +25,11 @@ if (-not $vm) {
 }
 
 Set-VM -Name $VMName -AutomaticStartAction Start -AutomaticStartDelay 60
-Set-VM -Name $VMName -AutomaticStopAction Save
+# ShutDown (clean Linux shutdown via integration services) instead of Save —
+# saving 16 GB of guest RAM to disk and restoring it after a host reboot
+# risks corrupting Orthanc's WAL / attachment store; Postgres handles its
+# own crash recovery, so a clean shutdown + cold start is safer.
+Set-VM -Name $VMName -AutomaticStopAction ShutDown
 
 $updated = Get-VM -Name $VMName
 Write-Host "VM '$VMName' configured:" -ForegroundColor Green

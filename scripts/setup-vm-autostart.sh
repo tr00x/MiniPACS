@@ -12,10 +12,18 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# 1. Docker daemon at boot.
-systemctl enable docker
-systemctl enable containerd 2>/dev/null || true
-echo "Docker daemon enabled at boot."
+# 1. Docker daemon at boot — only if it's actually a systemd unit. Snap
+#    or manually-installed binary docker have no docker.service and would
+#    abort the script via `set -e`.
+if systemctl list-unit-files 2>/dev/null | grep -q '^docker\.service'; then
+    systemctl enable docker
+    systemctl enable containerd 2>/dev/null || true
+    echo "Docker daemon enabled at boot."
+else
+    echo "WARNING: docker.service systemd unit not found." >&2
+    echo "Install Docker via apt/dnf (not snap) or enable manually." >&2
+    exit 1
+fi
 
 # 2. Cloudflared (if installed as a systemd service) — make sure it
 #    follows Docker, not the other way around. Tunnel needs the origin
@@ -31,12 +39,18 @@ fi
 #    they'll come up when the daemon starts. Verify the project directory
 #    is in a known place and add a one-shot oneline systemd unit only if
 #    docker compose isn't auto-restoring on its own (rare on docker-ce).
-COMPOSE_DIR="${MINIPACS_DIR:-/home/$(logname 2>/dev/null || echo pacs-user)/minipacs}"
+# Resolve the compose dir. logname is unreliable in non-tty contexts
+# (cloud-init, ansible, automated provisioning) and silently returns ""
+# → "/home//minipacs". SUDO_USER is set by sudo and stays empty when not.
+USER_NAME="${SUDO_USER:-pacs-user}"
+COMPOSE_DIR="${MINIPACS_DIR:-/home/$USER_NAME/minipacs}"
+COMPOSE_DIR="$(realpath -m "$COMPOSE_DIR" 2>/dev/null || echo "$COMPOSE_DIR")"
 if [[ ! -f "$COMPOSE_DIR/docker-compose.yml" ]]; then
-    echo "WARNING: $COMPOSE_DIR/docker-compose.yml not found." >&2
-    echo "Set MINIPACS_DIR=/path/to/repo and re-run if location differs." >&2
+    echo "ERROR: $COMPOSE_DIR/docker-compose.yml not found." >&2
+    echo "Set MINIPACS_DIR=/abs/path/to/repo explicitly and re-run." >&2
     exit 1
 fi
+echo "Compose directory: $COMPOSE_DIR"
 
 cat > /etc/systemd/system/minipacs-stack.service <<EOF
 [Unit]
