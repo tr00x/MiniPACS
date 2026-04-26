@@ -206,13 +206,7 @@ export function TransfersPage() {
     const failed = allTransfers.filter((t) => t.status === "failed");
     if (failed.length === 0) return;
     toast.info(`Retrying ${failed.length} failed transfer${failed.length > 1 ? "s" : ""}...`);
-    for (const t of failed) {
-      try {
-        await api.post(`/transfers/${t.id}/retry`);
-      } catch {
-        // individual errors handled on refresh
-      }
-    }
+    await Promise.allSettled(failed.map((t) => api.post(`/transfers/${t.id}/retry`)));
     fetchAll();
     fetchPage();
   };
