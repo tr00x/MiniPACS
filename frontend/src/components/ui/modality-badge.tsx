@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +23,7 @@ interface ModalityBadgeProps {
   className?: string;
 }
 
-export function ModalityBadge({ modality, className }: ModalityBadgeProps) {
+export const ModalityBadge = memo(function ModalityBadge({ modality, className }: ModalityBadgeProps) {
   const color = MODALITY_COLORS[modality] || DEFAULT_COLOR;
   return (
     <Badge
@@ -36,15 +37,24 @@ export function ModalityBadge({ modality, className }: ModalityBadgeProps) {
       {modality}
     </Badge>
   );
-}
+});
 
-export function ModalityBadgeList({ modalities, className }: { modalities: string[]; className?: string }) {
-  if (!modalities?.length) return null;
-  return (
-    <div className={cn("flex gap-1 flex-wrap", className)}>
-      {modalities.map((m) => (
-        <ModalityBadge key={m} modality={m} />
-      ))}
-    </div>
-  );
-}
+// Equality compares the modality list by value, not by reference — the parent
+// re-derives this array from API data on every render, so a default shallow
+// compare would invalidate every frame and defeat memoization.
+export const ModalityBadgeList = memo(
+  function ModalityBadgeList({ modalities, className }: { modalities: string[]; className?: string }) {
+    if (!modalities?.length) return null;
+    return (
+      <div className={cn("flex gap-1 flex-wrap", className)}>
+        {modalities.map((m) => (
+          <ModalityBadge key={m} modality={m} />
+        ))}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.className === next.className &&
+    prev.modalities.length === next.modalities.length &&
+    prev.modalities.every((m, i) => m === next.modalities[i]),
+);

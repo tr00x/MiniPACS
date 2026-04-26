@@ -68,25 +68,48 @@ def _resize_to_webp(raw: bytes) -> bytes:
         return raw
 
 
+def _persist_webp(study_id: str, webp: bytes) -> None:
+    """Write a WebP sibling next to the plugin-generated PNG so a backend
+    restart doesn't re-pay the resize cost on every study. Atomic via
+    rename — the read path tolerates a brief tmp file."""
+    path = os.path.join(_THUMB_DIR, f"{study_id}.webp")
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(webp)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 async def _load_thumb(study_id: str) -> bytes | None:
-    """Resolve a study's WebP thumbnail through the 3-tier cache.
+    """Resolve a study's WebP thumbnail through the 4-tier cache.
 
     Returns small (~2-5 KB) WebP bytes on success, None when the study has
-    no renderable series. Disk-tier PNGs from the Orthanc plugin are
-    re-encoded on first hit and the WebP is what gets cached, so the
-    expensive resize runs at most once per study per backend lifetime.
+    no renderable series.
+
+    Lookup order:
+      1. in-memory FIFO cache (~1ms)
+      2. disk WebP (~5ms, written by us on previous hit) — survives restart
+      3. disk PNG (~50ms, written by Orthanc plugin) — resize + persist WebP
+      4. Orthanc /preview fallback (~100-300ms) — resize + persist WebP
     """
     hit = _thumb_cache.get(study_id)
     now = time.time()
     if hit and now - hit[0] < _THUMB_TTL:
         return hit[1]
 
-    disk_path = os.path.join(_THUMB_DIR, f"{study_id}.png")
+    webp_path = os.path.join(_THUMB_DIR, f"{study_id}.webp")
+    png_path = os.path.join(_THUMB_DIR, f"{study_id}.png")
+
+    # Tier 2: pre-rendered WebP from a previous backend lifetime.
     try:
-        if os.path.isfile(disk_path):
-            with open(disk_path, "rb") as f:
-                png_disk = f.read()
-            webp = await asyncio.to_thread(_resize_to_webp, png_disk)
+        if os.path.isfile(webp_path):
+            with open(webp_path, "rb") as f:
+                webp = f.read()
             # Pop-then-set so a re-insert of an existing key moves it to the
             # tail of the insertion order. Without the pop, FIFO eviction
             # below could throw out the entry we just refreshed.
@@ -98,6 +121,22 @@ async def _load_thumb(study_id: str) -> bytes | None:
     except OSError:
         pass
 
+    # Tier 3: plugin PNG → resize + persist.
+    try:
+        if os.path.isfile(png_path):
+            with open(png_path, "rb") as f:
+                png_disk = f.read()
+            webp = await asyncio.to_thread(_resize_to_webp, png_disk)
+            await asyncio.to_thread(_persist_webp, study_id, webp)
+            _thumb_cache.pop(study_id, None)
+            _thumb_cache[study_id] = (now, webp)
+            if len(_thumb_cache) > _THUMB_CACHE_MAX:
+                _thumb_cache.pop(next(iter(_thumb_cache)))
+            return webp
+    except OSError:
+        pass
+
+    # Tier 4: ondemand fallback against Orthanc.
     try:
         series_list = await orthanc.get_study_series(study_id)
     except Exception:
@@ -124,6 +163,7 @@ async def _load_thumb(study_id: str) -> bytes | None:
     if resp.status_code != 200:
         return None
     webp = await asyncio.to_thread(_resize_to_webp, resp.content)
+    await asyncio.to_thread(_persist_webp, study_id, webp)
 
     _thumb_cache.pop(study_id, None)
     _thumb_cache[study_id] = (now, webp)
