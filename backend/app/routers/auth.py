@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from app.config import settings
 from app.db import PgConnection
 
 from app.database import get_db
@@ -18,6 +19,28 @@ security = HTTPBearer()
 
 MAX_ATTEMPTS = 5
 WINDOW_MINUTES = 5
+
+# HttpOnly cookie used solely by nginx auth_request to gate viewer/orthanc/
+# dicom-web paths. Same JWT as the Bearer access token; only the delivery
+# channel differs (cookie travels on iframe + new-tab requests, Authorization
+# header does not).
+VIEWER_COOKIE = "viewer_session"
+
+
+def _set_viewer_cookie(response: Response, access_token: str) -> None:
+    response.set_cookie(
+        key=VIEWER_COOKIE,
+        value=access_token,
+        max_age=settings.access_token_expire_minutes * 60,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_viewer_cookie(response: Response) -> None:
+    response.delete_cookie(key=VIEWER_COOKIE, path="/")
 
 
 async def _check_rate_limit(ip: str, db: PgConnection):
@@ -51,7 +74,7 @@ async def get_current_user(
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, request: Request, db: PgConnection = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, response: Response, db: PgConnection = Depends(get_db)):
     ip = request.client.host
     await _check_rate_limit(ip, db)
 
@@ -74,10 +97,10 @@ async def login(body: LoginRequest, request: Request, db: PgConnection = Depends
     # rendering the post-login redirect while this runs — it does not block login.
     _schedule_post_login_warmup()
 
-    return TokenResponse(
-        access_token=create_access_token(user["id"], user["token_version"]),
-        refresh_token=create_refresh_token(user["id"], user["token_version"]),
-    )
+    access = create_access_token(user["id"], user["token_version"])
+    refresh = create_refresh_token(user["id"], user["token_version"])
+    _set_viewer_cookie(response, access)
+    return TokenResponse(access_token=access, refresh_token=refresh)
 
 
 import asyncio as _asyncio
@@ -104,7 +127,7 @@ def _schedule_post_login_warmup():
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(body: RefreshRequest, db: PgConnection = Depends(get_db)):
+async def refresh(body: RefreshRequest, response: Response, db: PgConnection = Depends(get_db)):
     payload = decode_token(body.refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(401, "Invalid refresh token")
@@ -116,15 +139,16 @@ async def refresh(body: RefreshRequest, db: PgConnection = Depends(get_db)):
         raise HTTPException(401, "Token revoked")
 
     user = dict(user)
-    return TokenResponse(
-        access_token=create_access_token(user["id"], user["token_version"]),
-        refresh_token=create_refresh_token(user["id"], user["token_version"]),
-    )
+    access = create_access_token(user["id"], user["token_version"])
+    refresh_tok = create_refresh_token(user["id"], user["token_version"])
+    _set_viewer_cookie(response, access)
+    return TokenResponse(access_token=access, refresh_token=refresh_tok)
 
 
 @router.post("/logout")
 async def logout(
     request: Request,
+    response: Response,
     user: dict = Depends(get_current_user),
     db: PgConnection = Depends(get_db),
 ):
@@ -134,9 +158,30 @@ async def logout(
     )
     await db.commit()
     await log_audit("logout", user_id=user["id"], ip_address=request.client.host, wait=True)
+    _clear_viewer_cookie(response)
     return {"status": "ok"}
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(user: dict = Depends(get_current_user)):
+async def me(response: Response, user: dict = Depends(get_current_user)):
+    # Sliding cookie refresh: every /me call (frontend pings on app load and
+    # after token refresh) re-stamps the viewer cookie so an active session
+    # never loses iframe access while REST stays alive.
+    access = create_access_token(user["id"], user["token_version"])
+    _set_viewer_cookie(response, access)
     return UserResponse(**user)
+
+
+@router.get("/verify-viewer", include_in_schema=False)
+async def verify_viewer(viewer_session: str | None = Cookie(default=None)):
+    """nginx auth_request target. JWT-only check (no DB) — must stay <1ms so
+    that 200+ DICOMweb subrequests during a study open don't accumulate cost.
+    Trade-off: a logged-out user keeps viewer access until the JWT exp
+    (≤30 min). Acceptable for V1 — the alternative is a per-subrequest DB hit.
+    """
+    if not viewer_session:
+        raise HTTPException(401, "No session")
+    payload = decode_token(viewer_session)
+    if not payload or payload.get("type") != "access":
+        raise HTTPException(401, "Invalid session")
+    return {"ok": True}
