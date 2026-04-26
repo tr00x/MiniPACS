@@ -32,6 +32,21 @@ export function useStudiesWebSocket(userLoggedIn: boolean) {
     refreshingRef.current = false;
 
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    // Debounce cache invalidations: in a busy clinic 5+ new-study events
+    // can arrive inside one second (CT batches, DX flood). Without
+    // coalescing, each event invalidates studies/patients/dashboard
+    // independently and triggers refetches per active hook — hammers the
+    // API. 500 ms window batches the burst into one refetch cycle.
+    let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushInvalidations = () => {
+      qc.invalidateQueries({ queryKey: ["studies"] });
+      qc.invalidateQueries({ queryKey: ["patients"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    };
+    const scheduleInvalidate = () => {
+      if (invalidateTimer) clearTimeout(invalidateTimer);
+      invalidateTimer = setTimeout(flushInvalidations, 500);
+    };
 
     const scheduleReconnect = () => {
       if (cancelledRef.current) return;
@@ -86,9 +101,7 @@ export function useStudiesWebSocket(userLoggedIn: boolean) {
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === "new-study") {
-            qc.invalidateQueries({ queryKey: ["studies"] });
-            qc.invalidateQueries({ queryKey: ["patients"] });
-            qc.invalidateQueries({ queryKey: ["dashboard"] });
+            scheduleInvalidate();
             const name = msg.patient_name || "Unknown";
             const desc = msg.study_description ? ` — ${msg.study_description}` : "";
             toast.info(`New study: ${name}${desc}`);
@@ -121,6 +134,12 @@ export function useStudiesWebSocket(userLoggedIn: boolean) {
     return () => {
       cancelledRef.current = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (invalidateTimer) {
+        clearTimeout(invalidateTimer);
+        // Flush pending invalidations on unmount so a tab-switch in the
+        // middle of a burst doesn't leave the cache lagging behind.
+        flushInvalidations();
+      }
       if (wsRef.current) {
         try {
           wsRef.current.close();

@@ -1,16 +1,20 @@
-import { useState, useEffect, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import api from "@/lib/api";
-import { OpulentoBackground } from "@/components/OpulentoBackground";
-import { qk } from "@/hooks/queries";
+
+// uvcanvas + the WebGL shader is ~100-150 KB gzipped — kept out of the
+// LoginPage critical path so authenticated users (the 99% case after the
+// first visit) never download it. Falls back to the same dark backdrop
+// the wrapper already paints, so there's no visual flash.
+const OpulentoBackground = lazy(() =>
+  import("@/components/OpulentoBackground").then((m) => ({ default: m.OpulentoBackground })),
+);
 
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -37,18 +41,9 @@ export function LoginPage() {
     setLoading(true);
     try {
       await login(username, password);
-      // Warm dashboard + worklist queries so the next page mounts with
-      // data already in cache.
-      Promise.allSettled([
-        queryClient.prefetchQuery({
-          queryKey: qk.dashboard(),
-          queryFn: async () => (await api.get("/dashboard")).data,
-        }),
-        queryClient.prefetchQuery({
-          queryKey: qk.studies({ limit: 25, offset: 0 }),
-          queryFn: async () => (await api.get("/studies", { params: { limit: 25, offset: 0 } })).data,
-        }),
-      ]);
+      // AuthProvider.login already kicks off warmupAfterBoot() — duplicating
+      // the prefetch here just doubled the network traffic. Trust the
+      // provider and navigate.
       navigate("/");
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number } };
@@ -77,7 +72,9 @@ export function LoginPage() {
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
       className="relative flex min-h-screen items-center justify-center overflow-hidden text-white"
     >
-      <OpulentoBackground />
+      <Suspense fallback={null}>
+        <OpulentoBackground />
+      </Suspense>
 
       <motion.div
         key={shakeKey}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import api from "@/lib/api";
 
 /**
@@ -13,8 +13,12 @@ import api from "@/lib/api";
  *    without firing a doomed extra request.
  *  - `inlineB64 === undefined`: caller hasn't opted into the bulk path —
  *    fall back to per-study async fetch (detail pages, legacy callers).
+ *
+ * memo'd: 50 cards × 50 hovers/scroll-frames per second on the worklist
+ * was the dominant render cost; props are scalar so shallow compare is
+ * a clean fit.
  */
-export function AuthedThumb({
+function AuthedThumbImpl({
   studyId,
   inlineB64,
 }: {
@@ -71,3 +75,5 @@ export function AuthedThumb({
   }
   return <img src={src} alt="" className="h-full w-full object-contain" />;
 }
+
+export const AuthedThumb = memo(AuthedThumbImpl);
