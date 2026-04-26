@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -55,7 +56,38 @@ async def list_transfers(
         params + [limit, offset],
     )
     rows = await cursor.fetchall()
-    return {"items": [dict(row) for row in rows], "total": total}
+    items = [dict(row) for row in rows]
+
+    # Inline study description + patient name. Without this, the frontend
+    # had to issue one GET /api/studies/{id} per unique transfer — on a page
+    # with 30 unique studies that was 30 round-trips through CF Tunnel
+    # (~400 ms each), repeating every 5 s while any transfer was pending.
+    # Resolving here, in-Docker (Orthanc round-trip ~5 ms), collapses the
+    # whole fan-out into the single /api/transfers response.
+    unique_sids = list({it.get("orthanc_study_id") for it in items if it.get("orthanc_study_id")})
+    if unique_sids:
+        studies = await asyncio.gather(
+            *(orthanc.get_study(sid) for sid in unique_sids),
+            return_exceptions=True,
+        )
+        study_meta: dict[str, tuple[str, str]] = {}
+        for sid, study in zip(unique_sids, studies):
+            if isinstance(study, BaseException) or not study:
+                study_meta[sid] = ("", "")
+                continue
+            tags = study.get("MainDicomTags", {}) or {}
+            pat_tags = study.get("PatientMainDicomTags", {}) or {}
+            study_meta[sid] = (
+                tags.get("StudyDescription") or "",
+                pat_tags.get("PatientName") or "",
+            )
+        for it in items:
+            sid = it.get("orthanc_study_id")
+            desc, pname = study_meta.get(sid, ("", ""))
+            it["study_description"] = desc
+            it["patient_name"] = pname
+
+    return {"items": items, "total": total}
 
 
 @router.post("", status_code=201)

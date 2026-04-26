@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import io
 import zipfile as zipfile_mod
@@ -54,7 +55,31 @@ async def list_shares(
                ORDER BY s.created_at DESC""",
         )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    items = [dict(row) for row in rows]
+
+    # Inline patient name. The old frontend pulled /api/patients?limit=100
+    # to build a local lookup table — that broke once the archive grew past
+    # 100 patients (everything after that just rendered as a raw orthanc id).
+    # Resolving here scales with shares-on-page (typically <50), is one
+    # in-Docker round-trip per unique patient, and removes a bug, not just a
+    # fan-out.
+    unique_pids = list({it.get("orthanc_patient_id") for it in items if it.get("orthanc_patient_id")})
+    if unique_pids:
+        patients = await asyncio.gather(
+            *(orthanc.get_patient(pid) for pid in unique_pids),
+            return_exceptions=True,
+        )
+        name_by_pid: dict[str, str] = {}
+        for pid, patient in zip(unique_pids, patients):
+            if isinstance(patient, BaseException) or not patient:
+                name_by_pid[pid] = ""
+                continue
+            tags = patient.get("MainDicomTags", {}) or {}
+            name_by_pid[pid] = tags.get("PatientName") or ""
+        for it in items:
+            it["patient_name"] = name_by_pid.get(it.get("orthanc_patient_id"), "")
+
+    return items
 
 
 @auth_router.post("", status_code=201)
