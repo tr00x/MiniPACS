@@ -95,6 +95,7 @@ services:
       # the plugin's source PNGs so a backend restart skips the expensive
       # Pillow resize on every study (tier-2 hit in _load_thumb).
       - minipacs-thumbs:/srv/thumbs
+      - minipacs-staging:/app/data/import-staging
     environment:
       # Local dev only — allows the placeholder secrets in the shipped
       # .env.docker template to run without tripping the prod startup gate
@@ -142,3 +143,4 @@ volumes:
   orthanc-pg:
   minipacs-db:
   minipacs-thumbs:
+  minipacs-staging:
