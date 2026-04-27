@@ -139,7 +139,9 @@ async def create_upload(req: CreateUploadRequest, user: dict = Depends(get_curre
     job = await import_jobs_repo.get(req.job_id)
     if not job or job["user_id"] != user["id"]:
         raise HTTPException(404, "job not found")
-    upload_id = await upload_staging.create(req.name, req.size, req.sha256, req.total_chunks)
+    upload_id = await upload_staging.create(
+        req.name, req.size, req.sha256, req.total_chunks, user["id"],
+    )
     await import_jobs_repo.attach_upload(req.job_id, upload_id)
     return {"upload_id": upload_id}
 
@@ -150,6 +152,14 @@ async def upload_chunk(upload_id: str, idx: int, request: Request,
     body = await request.body()
     if not body:
         raise HTTPException(400, "empty chunk")
+    # Multi-tenant guard: 404 (not 403) so we don't leak whether the
+    # upload_id exists for another user.
+    try:
+        await upload_staging.assert_owner(upload_id, user["id"])
+    except FileNotFoundError:
+        raise HTTPException(404, "unknown upload_id")
+    except PermissionError:
+        raise HTTPException(404, "unknown upload_id")
     try:
         await upload_staging.write_chunk(upload_id, idx, body)
     except FileNotFoundError:
@@ -160,8 +170,10 @@ async def upload_chunk(upload_id: str, idx: int, request: Request,
 @router.get("/uploads/{upload_id}", response_model=UploadStatusResponse)
 async def upload_status(upload_id: str, user: dict = Depends(get_current_user)):
     try:
-        meta = await upload_staging.received(upload_id)
+        meta = await upload_staging.assert_owner(upload_id, user["id"])
     except FileNotFoundError:
+        raise HTTPException(404, "unknown upload_id")
+    except PermissionError:
         raise HTTPException(404, "unknown upload_id")
     return {
         "upload_id": upload_id,
@@ -177,7 +189,12 @@ async def finalize(req: FinalizeRequest, user: dict = Depends(get_current_user))
     """Triggers extract+upload-to-Orthanc for one assembled file. Returns
     immediately; progress is polled via GET /api/studies/import/{job_id}."""
     try:
-        meta = await upload_staging.received(req.upload_id)
+        meta = await upload_staging.assert_owner(req.upload_id, user["id"])
+    except FileNotFoundError:
+        raise HTTPException(404, "unknown upload_id")
+    except PermissionError:
+        raise HTTPException(404, "unknown upload_id")
+    try:
         assembled = await upload_staging.finalize(req.upload_id)
     except FileNotFoundError:
         raise HTTPException(404, "unknown upload_id")
@@ -254,6 +271,11 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
         instance_study_ids: list[str] = []
         new_count = 0
         dup_count = 0
+        # Mutable cell so failure branches inside _one can mutate it under the
+        # lock without `nonlocal` gymnastics. Used below to gate the hash
+        # record — partial failures must NOT mark the file as cached, or the
+        # next precheck will lie about what's in PACS.
+        file_failed = [0]
         local_lock = asyncio.Lock()
 
         async def _one(p: Path):
@@ -266,6 +288,8 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
                         headers={"Content-Type": "application/dicom"},
                     )
                     if resp.status_code >= 300:
+                        async with local_lock:
+                            file_failed[0] += 1
                         await import_jobs_repo.increment(
                             job_id, failed=1,
                             error=f"{p.name}: orthanc {resp.status_code}",
@@ -296,14 +320,26 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
                         current_file=p.name,
                     )
                 except Exception as exc:  # noqa: BLE001
+                    async with local_lock:
+                        file_failed[0] += 1
                     await import_jobs_repo.increment(
                         job_id, failed=1, error=f"{p.name}: {exc}", current_file=p.name,
                     )
 
         await asyncio.gather(*(_one(p) for p in dicom_files))
 
-        # Record file hash (idempotent) for future precheck.
-        await import_hashes_repo.record(sha, len(dicom_files), list(set(instance_study_ids)))
+        # Record file hash (idempotent) for future precheck — but only if
+        # every DICOM in this file landed cleanly. A partial Orthanc 5xx
+        # would otherwise teach the dedup table that the file is fully
+        # stored, and the next /precheck would skip the re-upload and
+        # silently lose data.
+        if file_failed[0] == 0:
+            await import_hashes_repo.record(sha, len(dicom_files), list(set(instance_study_ids)))
+        else:
+            log.warning(
+                "import: skipping hash record for %s — %d/%d files failed",
+                name, file_failed[0], len(dicom_files),
+            )
 
         # Bust QIDO cache.
         try:
