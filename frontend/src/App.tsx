@@ -26,6 +26,7 @@ const ReceivedPage = lazy(() => import("@/pages/ReceivedPage").then(m => ({ defa
 const SharesPage = lazy(() => import("@/pages/SharesPage").then(m => ({ default: m.SharesPage })));
 const PacsNodesPage = lazy(() => import("@/pages/PacsNodesPage").then(m => ({ default: m.PacsNodesPage })));
 const AuditPage = lazy(() => import("@/pages/AuditPage").then(m => ({ default: m.AuditPage })));
+const ImportsPage = lazy(() => import("@/pages/ImportsPage").then(m => ({ default: m.ImportsPage })));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
 const PatientPortalPage = lazy(() => import("@/pages/PatientPortalPage").then(m => ({ default: m.PatientPortalPage })));
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage").then(m => ({ default: m.NotFoundPage })));
@@ -58,6 +59,7 @@ function AnimatedRoutes() {
           <Route path="/received" element={<ReceivedPage />} />
           <Route path="/shares" element={<SharesPage />} />
           <Route path="/pacs-nodes" element={<PacsNodesPage />} />
+          <Route path="/imports" element={<ImportsPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

@@ -4,7 +4,7 @@ import { useTheme } from "next-themes";
 import {
   LayoutDashboard, Users, ClipboardList, Send, Inbox, Share2,
   Network, Settings, ScrollText, LogOut, ChevronDown, ChevronUp,
-  Menu, PanelLeftClose, PanelLeft, Sun, Moon,
+  Menu, PanelLeftClose, PanelLeft, Sun, Moon, Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -16,6 +16,7 @@ const mainNav = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/studies", icon: ClipboardList, label: "Worklist" },
   { to: "/patients", icon: Users, label: "Patients" },
+  { to: "/imports", icon: Upload, label: "Imports" },
   { to: "/transfers", icon: Send, label: "Transfers" },
   { to: "/received", icon: Inbox, label: "Received" },
   { to: "/shares", icon: Share2, label: "Shares" },
