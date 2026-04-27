@@ -8,7 +8,10 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useImportJob, isTerminal, type FileError } from "@/hooks/useImportJob";
-import { useImports } from "@/providers/ImportsProvider";
+import {
+  useImports, computeRate, computeEta, computeFileStats,
+} from "@/providers/ImportsProvider";
+import { ImportPhaseTimeline } from "@/components/ImportPhaseTimeline";
 import { toast } from "sonner";
 
 interface Props {
@@ -27,6 +30,24 @@ function fmtBytes(n: number): string {
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function fmtRate(bps: number): string {
+  if (bps <= 0) return "—";
+  const mbps = (bps * 8) / 1_000_000;
+  if (mbps >= 1) return `${mbps.toFixed(1)} Mbps`;
+  return `${(bps / 1024).toFixed(0)} KB/s`;
+}
+
+function fmtEta(secs: number | null): string {
+  if (secs === null) return "—";
+  if (secs <= 1) return "<1s";
+  if (secs < 60) return `${secs}s`;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  if (m < 60) return `${m}m ${s}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
 }
 
 export function ImportDialog({ open, onOpenChange, attachJobId }: Props) {
@@ -169,6 +190,11 @@ export function ImportDialog({ open, onOpenChange, attachJobId }: Props) {
           </div>
         )}
 
+        {/* Phase timeline — what's running now AND what's coming next */}
+        {job.status && (
+          <ImportPhaseTimeline job={job.status} local={localUpload} />
+        )}
+
         {composeMode && (
           <div
             onDragEnter={(e) => { e.preventDefault(); setDragInside(true); }}
@@ -223,6 +249,23 @@ export function ImportDialog({ open, onOpenChange, attachJobId }: Props) {
               )}
             </div>
           </div>
+        )}
+
+        {/* Live throughput tiles — only meaningful while local upload is in flight */}
+        {localUpload && localUpload.uploading && (
+          (() => {
+            const stats = computeFileStats(localUpload);
+            const rate = computeRate(localUpload);
+            const eta = computeEta(localUpload);
+            return (
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <Tile label="Speed" value={fmtRate(rate)} />
+                <Tile label="ETA" value={fmtEta(eta)} />
+                <Tile label="Skipped (dup)" value={stats.skipped} />
+                <Tile label="In flight" value={stats.uploading + stats.finalizing} />
+              </div>
+            );
+          })()
         )}
 
         {/* Per-file local upload progress (client-driven phase) */}
@@ -430,5 +473,14 @@ export function ImportDialog({ open, onOpenChange, attachJobId }: Props) {
       </AlertDialogContent>
     </AlertDialog>
     </>
+  );
+}
+
+function Tile({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="border rounded p-2">
+      <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</div>
+      <div className="text-sm font-medium tabular-nums">{value}</div>
+    </div>
   );
 }
