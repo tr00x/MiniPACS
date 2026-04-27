@@ -195,6 +195,37 @@ CREATE INDEX IF NOT EXISTS idx_transfer_log_status
 -- the dominant cost once audit_log crosses ~100 k rows; cheap to add now.
 CREATE INDEX IF NOT EXISTS idx_audit_log_action_time
     ON audit_log(action, timestamp DESC);
+
+-- Persisted import jobs — replace in-memory _jobs dict so jobs survive
+-- backend restarts and are visible across browser tabs / devices.
+CREATE TABLE IF NOT EXISTS import_jobs (
+    job_id              TEXT PRIMARY KEY,
+    user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status              TEXT NOT NULL,
+    total_files         INTEGER NOT NULL DEFAULT 0,
+    processed           INTEGER NOT NULL DEFAULT 0,
+    failed              INTEGER NOT NULL DEFAULT 0,
+    new_instances       INTEGER NOT NULL DEFAULT 0,
+    duplicate_instances INTEGER NOT NULL DEFAULT 0,
+    study_ids           TEXT[] NOT NULL DEFAULT '{}',
+    errors              TEXT[] NOT NULL DEFAULT '{}',
+    current_file        TEXT NOT NULL DEFAULT '',
+    upload_ids          TEXT[] NOT NULL DEFAULT '{}',
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_import_jobs_user_active
+    ON import_jobs (user_id) WHERE finished_at IS NULL;
+
+-- File-level dedup: SHA-256 of the raw bytes user uploaded (a .dcm, a
+-- .zip, an .iso). Lets precheck answer "we have this exact file" before
+-- the user pays bandwidth for a duplicate transfer.
+CREATE TABLE IF NOT EXISTS import_file_hashes (
+    sha256          CHAR(64) PRIMARY KEY,
+    first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    instance_count  INTEGER NOT NULL DEFAULT 0,
+    study_ids       TEXT[] NOT NULL DEFAULT '{}'
+);
 """
 
 
