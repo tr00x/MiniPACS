@@ -300,6 +300,8 @@ async def list_studies(
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     include: str = "",
+    sort_by: str = Query(default="", pattern="^(date|patient|description|)$"),
+    sort_dir: str = Query(default="desc", pattern="^(asc|desc)$"),
     user: dict = Depends(get_current_user),
 ):
     await log_audit("list_studies", user_id=user["id"], ip_address=request.client.host)
@@ -309,6 +311,7 @@ async def list_studies(
             search=search, modality=modality,
             date_from=date_from, date_to=date_to,
             limit=limit, offset=offset,
+            sort_by=sort_by, sort_dir=sort_dir,
         )
     except Exception as exc:
         raise HTTPException(502, f"PACS server unavailable: {exc}") from exc

@@ -65,6 +65,8 @@ export function useStudies(params: {
   limit?: number;
   offset?: number;
   include?: string;
+  sort_by?: string;
+  sort_dir?: string;
 }) {
   return useQuery({
     queryKey: qk.studies(params),
@@ -88,7 +90,7 @@ export function useStudyFull(id: string | undefined) {
   });
 }
 
-export function usePatients(params: { search?: string; limit?: number; offset?: number }) {
+export function usePatients(params: { search?: string; limit?: number; offset?: number; sort_by?: string; sort_dir?: string }) {
   return useQuery({
     queryKey: qk.patients(params),
     queryFn: () => get<{ items: any[]; total: number }>("/patients", params),

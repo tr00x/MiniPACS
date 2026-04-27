@@ -17,12 +17,17 @@ async def list_patients(
     search: str = None,
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    sort_by: str = Query(default="", pattern="^(name|dob|id|)$"),
+    sort_dir: str = Query(default="asc", pattern="^(asc|desc)$"),
     user: dict = Depends(get_current_user),
 ):
     await log_audit("list_patients", user_id=user["id"], ip_address=request.client.host)
 
     try:
-        page, total = await orthanc.find_patients(search=search or "", limit=limit, offset=offset)
+        page, total = await orthanc.find_patients(
+            search=search or "", limit=limit, offset=offset,
+            sort_by=sort_by, sort_dir=sort_dir,
+        )
     except Exception as exc:
         raise HTTPException(502, f"PACS server unavailable: {exc}") from exc
 

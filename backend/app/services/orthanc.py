@@ -12,10 +12,91 @@ from app.services.search_parser import parse_search
 # we issue one request per field and merge. PatientName is the hottest — listed
 # first so its cache key stays warm across related queries.
 _TEXT_SEARCH_FIELDS = ("PatientName", "PatientID", "StudyDescription", "AccessionNumber")
+# Patient-level wildcard-safe fan-out fields. PatientBirthDate is added
+# dynamically as a DICOM date range when the input parses as a date —
+# Orthanc rejects `*1985*` against date VR fields, so it can't live here.
+# Source-of-truth for `_multi_field_find_patients`'s wildcard fan-out.
+_PATIENT_TEXT_SEARCH_FIELDS: tuple[str, ...] = ("PatientName", "PatientID")
 # Upper bound on per-field fetch so multi-field merge stays under a second even
 # on a 10k-study archive. 500 covers any realistic name/description collision;
 # if someone actually types "a" we accept that the merged set may be truncated.
 _TEXT_FANOUT_LIMIT = 500
+
+# Sort key → DICOM tag mapping. Maps the small allow-listed UI sort keys onto
+# the actual DICOM tag names that Orthanc /tools/find OrderBy understands.
+# OrderBy is supported by Orthanc core 1.12.5+ — our base image
+# orthancteam/orthanc:26.4.2-full ships 1.12.6+, so this is safe.
+_STUDY_SORT_TAGS = {
+    "date": "StudyDate",
+    "patient": "PatientName",
+    # ModalitiesInStudy is a computed/synthetic tag in Orthanc — using it in
+    # /tools/find OrderBy returns 500. Modality filtering is already handled
+    # by the chip filter at the UI level.
+    "description": "StudyDescription",
+}
+_PATIENT_SORT_TAGS = {
+    "name": "PatientName",
+    "dob": "PatientBirthDate",
+    "id": "PatientID",
+}
+
+
+def _order_by(tag: str | None, direction: str) -> list[dict] | None:
+    """Build an Orthanc OrderBy clause. Returns None if the tag is empty —
+    callers omit the field from the request body in that case so Orthanc
+    falls back to its default ordering (insertion order)."""
+    if not tag:
+        return None
+    return [{"Type": "DicomTag", "Key": tag, "Direction": "DESC" if direction == "desc" else "ASC"}]
+
+
+def _resolve_sort(table: dict[str, str], sort_by: str, sort_dir: str) -> tuple[str, str]:
+    """Validate (sort_by, sort_dir) against an allow-list. Empty sort_by
+    means "use Orthanc default order"; an unknown key is silently coerced
+    to default rather than 500'ing a UI request."""
+    tag = table.get(sort_by, "") if sort_by else ""
+    direction = "desc" if sort_dir == "desc" else "asc"
+    return tag, direction
+
+
+def _dob_query_range(text: str) -> str | None:
+    """Convert a user DOB token into a DICOM date-range string for
+    /tools/find. Orthanc rejects wildcards on date VR fields, but accepts
+    `YYYYMMDD-YYYYMMDD` ranges. Returns None if the input doesn't look like
+    a date — the caller skips PatientBirthDate fan-out in that case so we
+    never 400 Orthanc.
+
+    Accepts `1985`, `1985-03`, `1985-03-15`, `19850315`, with `/` or `.` as
+    separators. Returns the DICOM range that covers the implied window:
+    a year-only token spans Jan 1 — Dec 31, year+month spans the full month.
+    """
+    if not text:
+        return None
+    digits = "".join(ch for ch in text if ch.isdigit())
+    n = len(digits)
+    # Reject anything with non-digit + non-separator chars (e.g. names).
+    allowed = set("0123456789-/.")
+    if not all(ch in allowed for ch in text):
+        return None
+    if n == 8:
+        return f"{digits}-{digits}"
+    if n == 6:
+        y, m = digits[:4], digits[4:6]
+        if not (1 <= int(m) <= 12):
+            return None
+        # Feb gets a fixed "29" — leap-year correctness is not needed because
+        # Orthanc /tools/find compares date-range bounds *lexically* against
+        # YYYYMMDD-stored values. Over-shooting non-leap Feb by one day
+        # cannot match a non-existent record, only widens the window.
+        last = "31" if m in {"01", "03", "05", "07", "08", "10", "12"} else ("30" if m != "02" else "29")
+        return f"{y}{m}01-{y}{m}{last}"
+    if n == 4:
+        # Years before 1900 likely aren't DOBs — skip to avoid matching
+        # accession-number-like tokens. 19xx/20xx are real DOBs.
+        if digits[:2] not in ("19", "20"):
+            return None
+        return f"{digits}0101-{digits}1231"
+    return None
 
 _client: httpx.AsyncClient | None = None
 
@@ -69,26 +150,42 @@ def _http() -> httpx.AsyncClient:
     return _client
 
 
-async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
-    """Server-side patient search and pagination via Orthanc /tools/find."""
-    key = ("p", search, limit, offset)
+async def find_patients(search: str = "", limit: int = 25, offset: int = 0, sort_by: str = "", sort_dir: str = "asc"):
+    """Server-side patient search and pagination via Orthanc /tools/find.
+
+    `search` accepts free-text that is fanned out across PatientName,
+    PatientID, and PatientBirthDate so a single input box matches name
+    fragments, MRN substrings, and DOB tokens (1985, 1985-03, 1985-03-15)
+    via wildcard against YYYYMMDD storage.
+
+    `sort_by` is one of `_PATIENT_SORT_TAGS` keys (or empty for default
+    insertion order). Unknown keys silently fall back to default.
+    """
+    sort_tag, sort_direction = _resolve_sort(_PATIENT_SORT_TAGS, sort_by, sort_dir)
+    key = ("p", search, sort_tag, sort_direction, limit, offset)
     hit = await cache.get("patients", key, _PATIENTS_FRESH_TTL)
     if hit is not None and hit[1]:
         return tuple(hit[0])
 
-    query = {}
-    if search:
-        query["PatientName"] = f"*{search}*"
+    order_clause = _order_by(sort_tag, sort_direction)
+
     try:
-        resp = await _http().post("/tools/find", json={
-            "Level": "Patient",
-            "Query": query,
-            "Expand": True,
-            "Limit": limit,
-            "Since": offset,
-        })
-        resp.raise_for_status()
-        items = resp.json()
+        if search:
+            items, total = await _multi_field_find_patients(search, limit, offset, sort_tag, sort_direction)
+        else:
+            req_body: dict = {
+                "Level": "Patient",
+                "Query": {},
+                "Expand": True,
+                "Limit": limit,
+                "Since": offset,
+            }
+            if order_clause:
+                req_body["OrderBy"] = order_clause
+            resp = await _http().post("/tools/find", json=req_body)
+            resp.raise_for_status()
+            items = resp.json()
+            total = None
     except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
         # Stale-while-error: if Orthanc is slow or timing out, return the last
         # known good cache entry for this key (past TTL) so the UI keeps
@@ -97,6 +194,14 @@ async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
             _log.warning("find_patients: serving stale cache (Orthanc error: %s)", exc)
             return tuple(hit[0])
         raise Exception(f"PACS server unreachable: {exc}") from exc
+
+    if search:
+        # Fan-out path already knows the merged total exactly; no Orthanc
+        # round-trip needed for a count.
+        filter_key = ("p_total", search)
+        await cache.set("patients", filter_key, total)
+        await cache.set("patients", key, [items, total])
+        return items, total
 
     filter_key = ("p_total", search)
     total: int | None = None
@@ -108,21 +213,12 @@ async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
             total = int(total_hit[0])
     if total is None:
         try:
-            if not query:
-                # Unfiltered worklist — ask Orthanc for the true archive count
-                # instead of /tools/find, which is globally capped by
-                # LimitFindResults (=1000) and would silently under-report.
-                stat_resp = await _http().get("/statistics")
-                stat_resp.raise_for_status()
-                total = int(stat_resp.json().get("CountPatients", 0))
-            else:
-                count_resp = await _http().post("/tools/find", json={
-                    "Level": "Patient",
-                    "Query": query,
-                    "Expand": False,
-                })
-                count_resp.raise_for_status()
-                total = len(count_resp.json())
+            # Unfiltered patients list — ask Orthanc for the true archive
+            # count instead of /tools/find, which is globally capped by
+            # LimitFindResults (=1000) and would silently under-report.
+            stat_resp = await _http().get("/statistics")
+            stat_resp.raise_for_status()
+            total = int(stat_resp.json().get("CountPatients", 0))
         except Exception:
             total = offset + len(items)
     await cache.set("patients", filter_key, total)
@@ -130,7 +226,76 @@ async def find_patients(search: str = "", limit: int = 25, offset: int = 0):
     return items, total
 
 
-async def find_studies(search: str = "", modality: str = "", date_from: str = "", date_to: str = "", limit: int = 25, offset: int = 0):
+async def _multi_field_find_patients(text: str, limit: int, offset: int, sort_tag: str = "", sort_direction: str = "asc"):
+    """Fan-out free-text search across PatientName/PatientID and (when the
+    input parses as a date) PatientBirthDate, merging results by Patient.ID.
+
+    PatientName / PatientID accept Orthanc's `*text*` wildcard. PatientBirthDate
+    does NOT — Orthanc rejects wildcards on date VR fields with 400 — so DOB
+    is only queried when the input parses to a year (`1985`), year+month
+    (`1985-03`), or full date (`1985-03-15`), and is sent as a DICOM
+    `YYYYMMDD-YYYYMMDD` range.
+    """
+    wildcard = f"*{text}*"
+    dob_range = _dob_query_range(text)
+
+    async def _fetch_text(field: str):
+        try:
+            r = await _http().post("/tools/find", json={
+                "Level": "Patient",
+                "Query": {field: wildcard},
+                "Expand": True,
+                "Limit": _TEXT_FANOUT_LIMIT,
+            })
+            r.raise_for_status()
+            return r.json()
+        except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
+            _log.warning("multi_field_patients: %s query failed: %s", field, exc)
+            return []
+
+    async def _fetch_dob(rng: str):
+        try:
+            r = await _http().post("/tools/find", json={
+                "Level": "Patient",
+                "Query": {"PatientBirthDate": rng},
+                "Expand": True,
+                "Limit": _TEXT_FANOUT_LIMIT,
+            })
+            r.raise_for_status()
+            return r.json()
+        except (httpx.HTTPError, httpx.TimeoutException, httpx.ConnectError) as exc:
+            _log.warning("multi_field_patients: PatientBirthDate range query failed: %s", exc)
+            return []
+
+    fetches = [_fetch_text(f) for f in _PATIENT_TEXT_SEARCH_FIELDS]
+    if dob_range:
+        fetches.append(_fetch_dob(dob_range))
+    results = await asyncio.gather(*fetches)
+
+    merged: dict[str, dict] = {}
+    for rs in results:
+        for p in rs:
+            pid = p.get("ID")
+            if pid and pid not in merged:
+                merged[pid] = p
+
+    effective_tag = sort_tag or "PatientName"
+    effective_dir = sort_direction if sort_tag else "asc"
+
+    def _sort_key(p: dict) -> str:
+        return ((p.get("MainDicomTags", {}) or {}).get(effective_tag, "") or "").lower()
+
+    descending = effective_dir == "desc"
+    has_value = [p for p in merged.values() if _sort_key(p)]
+    blanks = [p for p in merged.values() if not _sort_key(p)]
+    has_value.sort(key=_sort_key, reverse=descending)
+    ordered = has_value + blanks
+    total = len(ordered)
+    page = ordered[offset:offset + limit]
+    return page, total
+
+
+async def find_studies(search: str = "", modality: str = "", date_from: str = "", date_to: str = "", limit: int = 25, offset: int = 0, sort_by: str = "", sort_dir: str = "desc"):
     """Server-side study search and pagination via Orthanc /tools/find.
 
     `search` is parsed: modality codes (CT, MR, ...) and date tokens (2024,
@@ -138,6 +303,10 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
     anything left over is fanned out across PatientName/PatientID/
     StudyDescription/AccessionNumber so typing `CT 2024 ivanov` finds all
     CT studies from 2024 where the patient name or description matches.
+
+    `sort_by` is one of `_STUDY_SORT_TAGS` keys (or empty for Orthanc's
+    default insertion order). Unknown keys are silently dropped to default —
+    we never 500 the worklist on a stale localStorage value.
     """
     # Explicit modality/date params still win — they come from UI filter chips.
     parsed = parse_search(search)
@@ -146,7 +315,9 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
     date_from = date_from or parsed.date_from
     date_to = date_to or parsed.date_to
 
-    key = (text, modality, date_from, date_to, limit, offset)
+    sort_tag, sort_direction = _resolve_sort(_STUDY_SORT_TAGS, sort_by, sort_dir)
+
+    key = (text, modality, date_from, date_to, sort_tag, sort_direction, limit, offset)
     hit = await cache.get("studies", key, _STUDIES_FRESH_TTL)
     if hit is not None and hit[1]:
         return tuple(hit[0])
@@ -161,19 +332,24 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
     elif date_to:
         base_query["StudyDate"] = f"-{date_to}"
 
+    order_clause = _order_by(sort_tag, sort_direction)
+
     try:
         if text:
-            items, total = await _multi_field_find(text, base_query, limit, offset)
+            items, total = await _multi_field_find(text, base_query, limit, offset, sort_tag, sort_direction)
         else:
             # Single query — no fanout needed. Use Orthanc's own pagination.
-            resp = await _http().post("/tools/find", json={
+            req_body: dict = {
                 "Level": "Study",
                 "Query": base_query,
                 "Expand": True,
                 "RequestedTags": ["ModalitiesInStudy"],
                 "Limit": limit,
                 "Since": offset,
-            })
+            }
+            if order_clause:
+                req_body["OrderBy"] = order_clause
+            resp = await _http().post("/tools/find", json=req_body)
             resp.raise_for_status()
             items = resp.json()
             total = None  # filled in below
@@ -226,14 +402,19 @@ async def find_studies(search: str = "", modality: str = "", date_from: str = ""
     return items, total
 
 
-async def _multi_field_find(text: str, base_query: dict, limit: int, offset: int):
+async def _multi_field_find(text: str, base_query: dict, limit: int, offset: int, sort_tag: str = "", sort_direction: str = "desc"):
     """Fan out a free-text search across name-like fields and merge by Study.ID.
 
     Orthanc /tools/find ANDs keys within one Query, so we issue one request
     per field in parallel and dedupe. Per-field fetches are capped at
-    `_TEXT_FANOUT_LIMIT`; the merged set is sorted by StudyDate desc and
-    paginated in-memory. Trade-off: extremely common tokens (`a`, `b`) may
-    truncate — acceptable because such searches return noise anyway.
+    `_TEXT_FANOUT_LIMIT`; the merged set is then sorted in-memory by the
+    requested sort tag (default StudyDate desc) and paginated. Trade-off:
+    extremely common tokens (`a`, `b`) may truncate — acceptable because such
+    searches return noise anyway.
+
+    In-memory sort is correct even for the merged set because each per-field
+    fetch has Limit=500, so the merged superset is bounded — pagination over
+    the same merged ordering across pages stays consistent.
     """
     wildcard = f"*{text}*"
 
@@ -263,12 +444,25 @@ async def _multi_field_find(text: str, base_query: dict, limit: int, offset: int
             if sid and sid not in merged:
                 merged[sid] = s
 
-    def _sort_key(s: dict) -> str:
-        # StudyDate is YYYYMMDD — lexical desc = chronological desc. Missing
-        # dates sort last (they're usually malformed or legacy imports).
-        return s.get("MainDicomTags", {}).get("StudyDate") or "00000000"
+    # Default sort: StudyDate desc (matches user expectation — most-recent
+    # imaging first when typing a name search).
+    effective_tag = sort_tag or "StudyDate"
+    effective_dir = sort_direction if sort_tag else "desc"
 
-    ordered = sorted(merged.values(), key=_sort_key, reverse=True)
+    def _sort_key(s: dict) -> str:
+        # All our supported tags are strings; YYYYMMDD dates are lexically
+        # ordered correctly. Missing values sort last in desc, first in asc —
+        # to keep consistent "missing always at the bottom" we coerce empty
+        # to a sentinel that lands at the bottom for both directions.
+        val = (s.get("MainDicomTags", {}) or {}).get(effective_tag, "") or ""
+        return val.lower()
+
+    descending = effective_dir == "desc"
+    # Two-pass: blanks always go last regardless of direction.
+    has_value = [s for s in merged.values() if _sort_key(s)]
+    blanks = [s for s in merged.values() if not _sort_key(s)]
+    has_value.sort(key=_sort_key, reverse=descending)
+    ordered = has_value + blanks
     total = len(ordered)
     page = ordered[offset:offset + limit]
     page = _propagate_modalities(page)

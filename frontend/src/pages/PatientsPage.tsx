@@ -8,11 +8,21 @@ import {
 import { TableSkeleton } from "@/components/TableSkeleton";
 import { PageError } from "@/components/page-error";
 import { ModalityBadgeList } from "@/components/ui/modality-badge";
-import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ExternalLink } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { SortMenu, readPersistedSort, type SortValue } from "@/components/SortMenu";
 import { usePatients, usePrefetchPatientFull, usePrefetchStudyFull } from "@/hooks/queries";
 import { formatDicomName, formatDicomDate, calculateAge } from "@/lib/dicom";
 
 const PAGE_SIZE = 50;
+
+type PatientSortKey = "name" | "dob" | "id";
+const PATIENT_SORT_OPTIONS = [
+  { key: "name" as const, label: "Name" },
+  { key: "dob" as const, label: "Date of birth" },
+  { key: "id" as const, label: "Patient ID" },
+];
+const PATIENT_SORT_KEYSET = new Set<PatientSortKey>(["name", "dob", "id"]);
+const PATIENT_SORT_DEFAULT: SortValue<PatientSortKey> = { by: "name", dir: "asc" };
 
 interface Patient {
   ID: string;
@@ -30,9 +40,6 @@ interface Patient {
   };
 }
 
-type SortKey = "name" | "dob" | "studies";
-type SortDir = "asc" | "desc";
-
 export function PatientsPage() {
   const navigate = useNavigate();
   const prefetchPatient = usePrefetchPatientFull();
@@ -40,8 +47,9 @@ export function PatientsPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [sort, setSort] = useState<SortValue<PatientSortKey>>(() =>
+    readPersistedSort("patients.sort", PATIENT_SORT_DEFAULT, PATIENT_SORT_KEYSET),
+  );
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounce search into a separate state so the React Query key stays stable
@@ -58,6 +66,8 @@ export function PatientsPage() {
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
+    sort_by: sort.by,
+    sort_dir: sort.dir,
   });
   const patients: Patient[] = (patientsQuery.data?.items as Patient[]) ?? [];
   const total: number = patientsQuery.data?.total ?? 0;
@@ -74,37 +84,6 @@ export function PatientsPage() {
 
   const tag = (p: Patient, key: keyof Patient["MainDicomTags"]) =>
     p.MainDicomTags?.[key] || "";
-
-  const toggleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir(sortDir === "asc" ? "desc" : "asc");
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
-  };
-
-  const SortIcon = ({ col }: { col: SortKey }) => {
-    if (sortKey !== col) return <ChevronUp className="h-3 w-3 opacity-0 group-hover:opacity-30" />;
-    return sortDir === "asc"
-      ? <ChevronUp className="h-3 w-3" />
-      : <ChevronDown className="h-3 w-3" />;
-  };
-
-  // Client-side sort of current page only
-  const sorted = [...patients].sort((a, b) => {
-    const dir = sortDir === "asc" ? 1 : -1;
-    if (sortKey === "name") {
-      return dir * (formatDicomName(tag(a, "PatientName"))).localeCompare(formatDicomName(tag(b, "PatientName")));
-    }
-    if (sortKey === "dob") {
-      return dir * (tag(a, "PatientBirthDate") || "").localeCompare(tag(b, "PatientBirthDate") || "");
-    }
-    if (sortKey === "studies") {
-      return dir * ((a.Studies?.length || 0) - (b.Studies?.length || 0));
-    }
-    return 0;
-  });
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -128,13 +107,21 @@ export function PatientsPage() {
         </div>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Search by name or ID..."
-          value={search}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          className="pl-9"
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative max-w-sm flex-1 min-w-[260px]">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search by name, ID, or DOB (e.g. 1985-03-15)..."
+            value={search}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <SortMenu<PatientSortKey>
+          options={PATIENT_SORT_OPTIONS}
+          value={sort}
+          onChange={(next) => { setSort(next); setPage(1); }}
+          persistKey="patients.sort"
         />
       </div>
 
@@ -146,19 +133,15 @@ export function PatientsPage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50">
-                  <TableHead className="cursor-pointer group" onClick={() => toggleSort("name")}>
-                    <span className="flex items-center gap-1">Patient <SortIcon col="name" /></span>
-                  </TableHead>
+                  <TableHead>Patient</TableHead>
                   <TableHead>Details</TableHead>
                   <TableHead>Last Study</TableHead>
-                  <TableHead className="text-center cursor-pointer group" onClick={() => toggleSort("studies")}>
-                    <span className="flex items-center gap-1 justify-center">Studies <SortIcon col="studies" /></span>
-                  </TableHead>
+                  <TableHead className="text-center">Studies</TableHead>
                   <TableHead className="w-[80px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sorted.map((p) => {
+                {patients.map((p) => {
                   const rawName = tag(p, "PatientName");
                   const studyCount = p.Studies?.length || 0;
                   const dob = tag(p, "PatientBirthDate");
