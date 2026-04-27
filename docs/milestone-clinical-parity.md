@@ -43,6 +43,9 @@ Reuse `study_reports`. Add `report_templates(id, name, modality, body_part, sche
 ### 2.3 Critical findings workflow
 Radiologist toggles "critical" on a report → backend queues notification (email first, SMS later). Referring physician clicks link, lands on a one-study view, acknowledges. `critical_findings(study_id, report_id, flagged_by, flagged_at, acknowledged_by, acknowledged_at)`. Audit trail is the whole point — medico-legal cover.
 
+### 2.4 Study export (ISO + portable viewer)
+Patient or referring physician needs a takeaway copy of the study. Backend builds an ISO 9660 image on demand from Orthanc `/studies/{id}/media` (DICOMDIR-included, IHE PDI compliant) plus a baked-in DWV (HTML5 DICOM Web Viewer, MIT) and minimal autorun, streams it via `GET /api/studies/{id}/burn-iso` with audit action `export_study_iso`. Radiologist clicks "Burn to CD/USB" on `StudyDetailPage`, downloads the `.iso`, then either burns to disc via Windows "Burn files to disc" or writes to USB via Rufus / balenaEtcher. Patient opens `index.html` in any browser (Win/Mac/Linux/iPad) — no Java, no install. Closes the "burn disc" feature gap that commercial PACS sell on. Concurrency capped at 2 builds (disk-spike control); no pre-cached ISOs.
+
 ---
 
 ## Block 3 — "Referring doctor stops calling"
