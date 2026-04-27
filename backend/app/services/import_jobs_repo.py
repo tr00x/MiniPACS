@@ -143,6 +143,7 @@ def _to_dict(row) -> dict[str, Any]:
     finished = row["finished_at"].timestamp() if row["finished_at"] else None
     return {
         "job_id": row["job_id"],
+        "user_id": row["user_id"],
         "status": row["status"],
         "total_files": row["total_files"],
         "processed": row["processed"],
