@@ -52,5 +52,12 @@ class FinalizeRequest(BaseModel):
     upload_id: str
 
 
+class StartJobRequest(BaseModel):
+    # Human label like "cd2.iso, cd3.iso, cd4.iso · 4.7 GB" — purely
+    # for the history page. Empty string is valid (back-compat with old
+    # frontends that called start-job without a body).
+    source_label: str = Field(default="", max_length=512)
+
+
 class StartJobResponse(BaseModel):
     job_id: str

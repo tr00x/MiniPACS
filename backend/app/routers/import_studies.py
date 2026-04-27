@@ -30,8 +30,13 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 from pathlib import Path
+
+
+def _now() -> float:
+    return time.time()
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -41,7 +46,7 @@ from app.models.import_api import (
     CreateUploadRequest, CreateUploadResponse,
     FinalizeRequest,
     PrecheckRequest, PrecheckResponse, PrecheckEntry,
-    StartJobResponse, UploadStatusResponse,
+    StartJobRequest, StartJobResponse, UploadStatusResponse,
 )
 from app.routers.auth import get_current_user
 from app.services import import_hashes_repo, import_jobs_repo, orthanc, upload_staging
@@ -107,9 +112,15 @@ def _walk_dicom(root: Path):
 # ---- routes ----
 
 @router.post("/start-job", response_model=StartJobResponse)
-async def start_job(request: Request, user: dict = Depends(get_current_user)):
+async def start_job(
+    request: Request,
+    body: StartJobRequest | None = None,
+    user: dict = Depends(get_current_user),
+):
+    # body is optional so old frontends (no JSON payload) still work.
+    source_label = (body.source_label.strip() if body else "")[:512]
     job_id = uuid.uuid4().hex
-    await import_jobs_repo.create(job_id, user["id"])
+    await import_jobs_repo.create(job_id, user["id"], source_label=source_label)
     await log_audit(
         "study_import_start", "import", job_id,
         user_id=user["id"],
@@ -170,6 +181,12 @@ async def upload_chunk(upload_id: str, idx: int, request: Request,
         await upload_staging.write_chunk(upload_id, idx, body)
     except FileNotFoundError:
         raise HTTPException(404, "unknown upload_id")
+    # Heartbeat the parent job so the stale-sweeper doesn't reap a job
+    # that's still actively receiving chunks (status stays 'queued'
+    # until /finalize fires).
+    job_id = await _find_job_for_upload(upload_id, user["id"])
+    if job_id:
+        await import_jobs_repo.touch(job_id)
     return {"ok": True, "bytes": len(body)}
 
 
@@ -239,7 +256,10 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
         if _has_archive_suffix(name):
             ok, err = _extract_archive(assembled, work)
             if not ok:
-                await import_jobs_repo.increment(job_id, failed=1, error=f"{name}: {err}")
+                await import_jobs_repo.increment(
+                    job_id, failed=1, error=f"{name}: {err}",
+                    file_error={"name": name, "reason": err, "kind": "extract", "ts": _now()},
+                )
                 return
             seen: set[Path] = set()
             for p in _walk_dicom(work):
@@ -255,14 +275,18 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
             # outer `finally`, but walk runs first.
             dicom_files = [assembled]
         else:
+            reason = "not a DICOM file or recognized archive"
             await import_jobs_repo.increment(
-                job_id, failed=1, error=f"{name}: not a DICOM file or recognized archive",
+                job_id, failed=1, error=f"{name}: {reason}",
+                file_error={"name": name, "reason": reason, "kind": "format", "ts": _now()},
             )
             return
 
         if not dicom_files:
+            reason = "no DICOM files found inside"
             await import_jobs_repo.increment(
-                job_id, failed=1, error=f"{name}: no DICOM files found inside",
+                job_id, failed=1, error=f"{name}: {reason}",
+                file_error={"name": name, "reason": reason, "kind": "empty", "ts": _now()},
             )
             return
 
@@ -296,10 +320,14 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
                     if resp.status_code >= 300:
                         async with local_lock:
                             file_failed[0] += 1
+                        reason = f"PACS rejected (HTTP {resp.status_code})"
                         await import_jobs_repo.increment(
                             job_id, failed=1,
-                            error=f"{p.name}: PACS rejected (HTTP {resp.status_code})",
+                            error=f"{p.name}: {reason}",
                             current_file=p.name,
+                            file_error={"name": p.name, "reason": reason,
+                                         "kind": "pacs_reject", "http": resp.status_code,
+                                         "ts": _now()},
                         )
                         return
                     payload = resp.json()
@@ -330,6 +358,8 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
                         file_failed[0] += 1
                     await import_jobs_repo.increment(
                         job_id, failed=1, error=f"{p.name}: {exc}", current_file=p.name,
+                        file_error={"name": p.name, "reason": str(exc),
+                                     "kind": "internal", "ts": _now()},
                     )
 
         await asyncio.gather(*(_one(p) for p in dicom_files))
@@ -355,7 +385,11 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
 
     except Exception as exc:  # noqa: BLE001
         log.exception("file processing failed")
-        await import_jobs_repo.increment(job_id, failed=1, error=f"internal: {exc}")
+        await import_jobs_repo.increment(
+            job_id, failed=1, error=f"internal: {exc}",
+            file_error={"name": name, "reason": str(exc),
+                         "kind": "internal", "ts": _now()},
+        )
     finally:
         shutil.rmtree(work, ignore_errors=True)
         await upload_staging.cleanup(upload_id)
@@ -390,6 +424,26 @@ async def active(user: dict = Depends(get_current_user)):
     return {"jobs": rows}
 
 
+@router.get("/jobs")
+async def list_jobs(
+    user: dict = Depends(get_current_user),
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """History endpoint — every job for the user, newest first.
+
+    `status` filter: a literal status string (queued/uploading/done/error/cancelled),
+    or one of the buckets "active" / "terminal". Pagination via limit+offset;
+    UI keeps a header total to render a page count."""
+    limit = max(1, min(200, limit))
+    offset = max(0, offset)
+    rows, total = await import_jobs_repo.history_for_user(
+        user["id"], status=status, limit=limit, offset=offset,
+    )
+    return {"jobs": rows, "total": total, "limit": limit, "offset": offset}
+
+
 @router.get("/{job_id}")
 async def get_status(job_id: str, user: dict = Depends(get_current_user)):
     job = await import_jobs_repo.get(job_id)
@@ -398,6 +452,94 @@ async def get_status(job_id: str, user: dict = Depends(get_current_user)):
     if (await _job_owner(job_id)) != user["id"]:
         raise HTTPException(403, "not your import job")
     return job
+
+
+@router.get("/{job_id}/uploads-progress")
+async def uploads_progress(job_id: str, user: dict = Depends(get_current_user)):
+    """Aggregate chunk-receipt totals across every upload_id attached
+    to the job. Lets the pill render a real upload-phase % even before
+    the server has started processing files (status='queued')."""
+    if (await _job_owner(job_id)) != user["id"]:
+        raise HTTPException(403, "not your import job")
+    job = await import_jobs_repo.get(job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+
+    chunks_total = 0
+    chunks_received = 0
+    bytes_total = 0
+    bytes_received_est = 0
+    files: list[dict] = []
+    for uid in job["upload_ids"]:
+        try:
+            meta = await upload_staging.received(uid)
+        except FileNotFoundError:
+            # Already finalized & cleaned up. Treat as fully done so the
+            # %-bar reaches 100 even after staging cleanup.
+            continue
+        tc = int(meta.get("total_chunks") or 0)
+        rc = len(meta.get("received_chunks") or [])
+        size = int(meta.get("size") or 0)
+        chunks_total += tc
+        chunks_received += rc
+        bytes_total += size
+        # Approximate bytes-received: rc/tc * size — avoids stat()ing every
+        # chunk file on disk. Off by at most one chunk-size at the tail.
+        if tc > 0:
+            bytes_received_est += int(size * rc / tc)
+        files.append({
+            "upload_id": uid,
+            "name": meta.get("name") or "",
+            "size": size,
+            "total_chunks": tc,
+            "received_chunks": rc,
+        })
+    return {
+        "chunks_total": chunks_total,
+        "chunks_received": chunks_received,
+        "bytes_total": bytes_total,
+        "bytes_received_est": bytes_received_est,
+        "files": files,
+    }
+
+
+@router.delete("/{job_id}")
+async def cancel_job(
+    job_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """User-issued cancel. Flips job → 'cancelled' (terminal) and
+    schedules cleanup of every staging dir attached to the job. Returns
+    409 if the job is already terminal so the UI can refresh and stop
+    showing the dialog instead of looping the cancel."""
+    if (await _job_owner(job_id)) != user["id"]:
+        raise HTTPException(403, "not your import job")
+    job = await import_jobs_repo.get(job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    if import_jobs_repo.is_terminal(job["status"]) or job["finished_at"] is not None:
+        raise HTTPException(409, f"job is already {job['status']}, cannot cancel")
+
+    flipped = await import_jobs_repo.cancel(job_id, reason="cancelled by user")
+    if not flipped:
+        # Lost the race to another tab — surface as 409 so UI re-polls.
+        raise HTTPException(409, "job already terminal")
+
+    # Best-effort chunk cleanup. Errors are logged but don't fail the
+    # response — the staging GC will sweep any leftovers within 24 h.
+    for uid in job["upload_ids"]:
+        try:
+            await upload_staging.cleanup(uid)
+        except Exception:  # noqa: BLE001
+            log.exception("cancel: failed to clean upload %s for job %s", uid, job_id)
+
+    await log_audit(
+        "study_import_cancel", "import", job_id,
+        user_id=user["id"],
+        ip_address=request.client.host if request.client else None,
+    )
+    return {"cancelled": True}
 
 
 @router.post("/{job_id}/retry")

@@ -214,8 +214,19 @@ CREATE TABLE IF NOT EXISTS import_jobs (
     started_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at         TIMESTAMPTZ
 );
+-- Additive columns shipped after the initial table — guarded by IF NOT EXISTS
+-- so re-applies on existing installs are a no-op.
+ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS source_label TEXT NOT NULL DEFAULT '';
+ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS last_progress_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS file_errors JSONB NOT NULL DEFAULT '[]'::jsonb;
 CREATE INDEX IF NOT EXISTS idx_import_jobs_user_active
     ON import_jobs (user_id) WHERE finished_at IS NULL;
+-- History page lists every job (not just active), ordered by recency.
+CREATE INDEX IF NOT EXISTS idx_import_jobs_user_history
+    ON import_jobs (user_id, started_at DESC);
+-- Stale-job sweeper scans non-terminal jobs by last_progress_at.
+CREATE INDEX IF NOT EXISTS idx_import_jobs_stale
+    ON import_jobs (last_progress_at) WHERE finished_at IS NULL;
 
 -- File-level dedup: SHA-256 of the raw bytes user uploaded (a .dcm, a
 -- .zip, an .iso). Lets precheck answer "we have this exact file" before

@@ -12,7 +12,7 @@ from app.db import init_pool, close_pool
 from app.database import init_db
 from app.services.cache import init_cache, close_cache
 from app.services.orthanc import init_client as init_orthanc, close_client as close_orthanc
-from app.services import upload_staging, import_jobs_repo
+from app.services import upload_staging, import_jobs_repo, import_sweeper
 
 log = logging.getLogger(__name__)
 from app.routers.auth import router as auth_router
@@ -68,6 +68,10 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_prewarm_caches())
     # Background sweep of abandoned chunk-staging dirs older than 24h.
     asyncio.create_task(upload_staging.gc_loop())
+    # Stale-job sweeper: flip non-terminal jobs to 'error' when no
+    # progress for 30 min. Without this, browser-closed-mid-upload
+    # leaves the dialog showing forever-Queued across every device.
+    asyncio.create_task(import_sweeper.loop())
     yield
     await close_orthanc()
     await close_cache()
