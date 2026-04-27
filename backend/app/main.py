@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +12,9 @@ from app.db import init_pool, close_pool
 from app.database import init_db
 from app.services.cache import init_cache, close_cache
 from app.services.orthanc import init_client as init_orthanc, close_client as close_orthanc
+from app.services import upload_staging, import_jobs_repo
+
+log = logging.getLogger(__name__)
 from app.routers.auth import router as auth_router
 from app.routers.patients import router as patients_router
 from app.routers.studies import router as studies_router
@@ -51,10 +55,19 @@ async def _prewarm_caches() -> None:
 async def lifespan(app: FastAPI):
     await init_pool()
     await init_db()
+    # Resilient import: ensure staging dir exists, then flip any
+    # non-terminal job to 'error' (chunks remain on disk; operator
+    # hits Retry to dedup-skip what landed and re-process the rest).
+    upload_staging.init()
+    interrupted = await import_jobs_repo.mark_interrupted_on_startup()
+    if interrupted:
+        log.warning("import: marked %d non-terminal jobs as interrupted", interrupted)
     await init_cache(settings.redis_url)
     await init_orthanc()
     # Fire-and-forget — never block startup waiting on Orthanc.
     asyncio.create_task(_prewarm_caches())
+    # Background sweep of abandoned chunk-staging dirs older than 24h.
+    asyncio.create_task(upload_staging.gc_loop())
     yield
     await close_orthanc()
     await close_cache()
