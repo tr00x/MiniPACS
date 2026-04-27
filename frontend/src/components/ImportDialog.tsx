@@ -3,66 +3,66 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useImportJob } from "@/hooks/useImportJob";
+import { useChunkedUpload } from "@/hooks/useChunkedUpload";
 import { toast } from "sonner";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Files that started the flow (e.g. from a window-level drop). Optional. */
   initialFiles?: File[];
+  /** When set, dialog opens read-only attached to an existing job (used by ImportIndicator click). */
+  attachJobId?: string;
 }
 
 const ACCEPT =
-  // Everything the backend can ingest. Browsers use this as a filter in the
-  // file picker; drag-drop ignores it (by spec) so the backend is still the
-  // authoritative gate.
-  ".dcm,.dicom,.zip,.tar,.tgz,.tar.gz,.tbz2,.tar.bz2,.txz,.tar.xz,.7z,.iso,.img,application/dicom,application/zip,application/x-tar,application/x-7z-compressed";
+  ".dcm,.dicom,.zip,.tar,.tgz,.tar.gz,.tbz2,.tar.bz2,.txz,.tar.xz,.7z,.iso,.img," +
+  "application/dicom,application/zip,application/x-tar,application/x-7z-compressed";
 
-function formatBytes(n: number): string {
+function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
-export function ImportDialog({ open, onOpenChange, initialFiles }: Props) {
-  const { status, uploading, progressPct, error, submit, reset } = useImportJob();
+export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: Props) {
+  const job = useImportJob();
+  const upload = useChunkedUpload();
   const [queued, setQueued] = useState<File[]>([]);
   const [dragInside, setDragInside] = useState(false);
 
-  // If the parent opened us with pre-dropped files, seed the queue.
+  // Attach mode: pre-existing job from ImportIndicator click.
   useEffect(() => {
-    if (open && initialFiles && initialFiles.length > 0) {
-      setQueued(initialFiles);
-    }
-  }, [open, initialFiles]);
-
-  // Clean up when the dialog closes.
-  useEffect(() => {
+    if (open && attachJobId) job.attach(attachJobId);
     if (!open) {
+      job.reset();
+      upload.reset();
       setQueued([]);
       setDragInside(false);
-      reset();
     }
-  }, [open, reset]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, attachJobId]);
 
-  // Toast on terminal state so the user sees the result even after closing.
   useEffect(() => {
-    if (!status) return;
-    if (status.status === "done") {
-      const ok = status.processed;
-      const fail = status.failed;
-      const studies = status.studies_created;
-      toast.success(
-        `Import complete: ${ok} instance${ok === 1 ? "" : "s"}, ${studies} ${studies === 1 ? "study" : "studies"}` +
-        (fail ? ` · ${fail} failed` : ""),
-      );
-    } else if (status.status === "error") {
-      toast.error(`Import failed: ${status.errors.slice(-1)[0] || "unknown error"}`);
+    if (open && initialFiles && initialFiles.length > 0 && !attachJobId) {
+      setQueued(initialFiles);
     }
-  }, [status?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, initialFiles, attachJobId]);
+
+  // Toast on terminal state.
+  useEffect(() => {
+    if (!job.status) return;
+    if (job.status.status === "done") {
+      toast.success(
+        `Import complete: ${job.status.new_instances} new, ${job.status.duplicate_instances} duplicates, ${job.status.studies_created} ${job.status.studies_created === 1 ? "study" : "studies"}` +
+        (job.status.failed ? ` · ${job.status.failed} failed` : ""),
+      );
+    } else if (job.status.status === "error") {
+      toast.error(`Import failed: ${job.status.errors.slice(-1)[0] || "unknown error"}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job.status?.status]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -78,9 +78,7 @@ export function ImportDialog({ open, onOpenChange, initialFiles }: Props) {
         }
       }
     } else {
-      for (let i = 0; i < e.dataTransfer.files.length; i++) {
-        files.push(e.dataTransfer.files[i]);
-      }
+      for (let i = 0; i < e.dataTransfer.files.length; i++) files.push(e.dataTransfer.files[i]);
     }
     if (files.length) setQueued((prev) => [...prev, ...files]);
   }, []);
@@ -90,32 +88,33 @@ export function ImportDialog({ open, onOpenChange, initialFiles }: Props) {
     const arr: File[] = [];
     for (let i = 0; i < e.target.files.length; i++) arr.push(e.target.files[i]);
     setQueued((prev) => [...prev, ...arr]);
-    // reset input so the same file can be re-picked
     e.target.value = "";
   };
 
   const start = async () => {
     if (queued.length === 0) return;
-    await submit(queued);
+    const jobId = await job.startJob();
+    await upload.start(queued, jobId);
   };
 
   const totalBytes = queued.reduce((a, f) => a + f.size, 0);
-  const inProgress = !!status && status.status !== "done" && status.status !== "error";
-  const terminal = !!status && (status.status === "done" || status.status === "error");
+  const inProgress = !!job.status && job.status.status !== "done" && job.status.status !== "error";
+  const terminal = !!job.status && (job.status.status === "done" || job.status.status === "error");
+  const readOnly = !!attachJobId;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Import studies</DialogTitle>
+          <DialogTitle>{readOnly ? "Import in progress" : "Import studies"}</DialogTitle>
           <DialogDescription>
-            Drop DICOM files, archives (ZIP / TAR / 7Z) or ISO images into the
-            area below. Whole folders work too. Files go straight into the
-            PACS via Orthanc.
+            {readOnly
+              ? "Tracking an active import. You can close this — progress is preserved."
+              : "Drop DICOM files, archives (ZIP / TAR / 7Z) or ISO images. Whole folders work too. Files go straight into the PACS via Orthanc."}
           </DialogDescription>
         </DialogHeader>
 
-        {!status && (
+        {!job.status && !readOnly && (
           <div
             onDragEnter={(e) => { e.preventDefault(); setDragInside(true); }}
             onDragOver={(e) => { e.preventDefault(); setDragInside(true); }}
@@ -123,9 +122,7 @@ export function ImportDialog({ open, onOpenChange, initialFiles }: Props) {
             onDrop={onDrop}
             className={[
               "rounded-lg border-2 border-dashed transition-colors px-6 py-10 text-center",
-              dragInside
-                ? "border-primary bg-primary/5"
-                : "border-muted-foreground/30 bg-muted/20",
+              dragInside ? "border-primary bg-primary/5" : "border-muted-foreground/30 bg-muted/20",
             ].join(" ")}
           >
             <div className="text-lg font-medium mb-2">
@@ -134,38 +131,22 @@ export function ImportDialog({ open, onOpenChange, initialFiles }: Props) {
             <div className="text-sm text-muted-foreground mb-4">
               DICOM · ZIP · TAR · 7Z · ISO · whole folders
             </div>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button asChild variant="outline">
-                    <label className="cursor-pointer">
-                      Choose files
-                      <input
-                        type="file"
-                        className="hidden"
-                        multiple
-                        accept={ACCEPT}
-                        onChange={onPick}
-                      />
-                    </label>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  Drop hundreds of files at once — extraction happens server-side
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Button asChild variant="outline">
+              <label className="cursor-pointer">
+                Choose files
+                <input type="file" className="hidden" multiple accept={ACCEPT} onChange={onPick} />
+              </label>
+            </Button>
             <div className="text-xs text-muted-foreground mt-4">
-              Upload cap: 20 GB per job. For larger archives use{" "}
-              <code>scripts/import_archive.py</code>.
+              Files are checked for duplicates before upload. Resumes after dropped connections. 20 GB job cap.
             </div>
           </div>
         )}
 
-        {queued.length > 0 && !status && (
+        {queued.length > 0 && !job.status && (
           <div className="border rounded-md">
             <div className="px-3 py-2 border-b bg-muted/40 text-sm font-medium flex justify-between">
-              <span>Queued: {queued.length} file{queued.length === 1 ? "" : "s"}, {formatBytes(totalBytes)}</span>
+              <span>Queued: {queued.length} file{queued.length === 1 ? "" : "s"}, {fmtBytes(totalBytes)}</span>
               <button
                 className="text-muted-foreground hover:text-foreground text-xs"
                 onClick={() => setQueued([])}
@@ -177,7 +158,7 @@ export function ImportDialog({ open, onOpenChange, initialFiles }: Props) {
               {queued.slice(0, 50).map((f, i) => (
                 <div key={i} className="px-3 py-1.5 border-b last:border-b-0 flex justify-between">
                   <span className="truncate">{f.name}</span>
-                  <span className="text-muted-foreground">{formatBytes(f.size)}</span>
+                  <span className="text-muted-foreground">{fmtBytes(f.size)}</span>
                 </div>
               ))}
               {queued.length > 50 && (
@@ -189,61 +170,92 @@ export function ImportDialog({ open, onOpenChange, initialFiles }: Props) {
           </div>
         )}
 
-        {status && (
+        {/* Per-file upload progress (during upload phase) */}
+        {upload.files.length > 0 && !readOnly && (
+          <div className="border rounded-md">
+            <div className="px-3 py-2 border-b bg-muted/40 text-sm font-medium flex justify-between">
+              <span>Uploading: {fmtBytes(upload.bytesSent)} / {fmtBytes(upload.totalBytes)}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {upload.totalBytes > 0
+                  ? `${Math.round((upload.bytesSent / upload.totalBytes) * 100)}%`
+                  : ""}
+              </span>
+            </div>
+            <div className="max-h-40 overflow-auto text-sm">
+              {upload.files.map((f, i) => (
+                <div key={i} className="px-3 py-1.5 border-b last:border-b-0 flex justify-between">
+                  <span className="truncate flex-1">
+                    {f.name}
+                    {f.status === "skipped" && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        (already in PACS — {f.duplicate_instances} instances)
+                      </span>
+                    )}
+                    {f.status === "error" && (
+                      <span className="ml-2 text-xs text-destructive">{f.error}</span>
+                    )}
+                  </span>
+                  <span className="text-muted-foreground capitalize">{f.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Server-side job state (after upload, during extract+upload-to-Orthanc) */}
+        {job.status && (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="font-medium capitalize">
-                {status.status === "queued" && "Queued..."}
-                {status.status === "extracting" && "Extracting archive..."}
-                {status.status === "uploading" && "Uploading to Orthanc..."}
-                {status.status === "done" && "Done"}
-                {status.status === "error" && "Error"}
+                {job.status.status === "queued" && "Queued..."}
+                {job.status.status === "extracting" && "Extracting archive..."}
+                {job.status.status === "uploading" && "Uploading to Orthanc..."}
+                {job.status.status === "done" && "Done"}
+                {job.status.status === "error" && "Error"}
               </span>
               <span className="text-muted-foreground tabular-nums">
-                {status.total_files > 0
-                  ? `${status.processed + status.failed} / ${status.total_files}`
+                {job.status.total_files > 0
+                  ? `${job.status.processed + job.status.failed} / ${job.status.total_files}`
                   : ""}
               </span>
             </div>
             <div className="h-2 rounded-full bg-muted overflow-hidden">
               <div
-                className={[
-                  "h-full transition-all duration-300",
-                  status.status === "error" ? "bg-destructive" : "bg-primary",
-                ].join(" ")}
-                style={{ width: `${progressPct}%` }}
+                className={["h-full transition-all duration-300",
+                  job.status.status === "error" ? "bg-destructive" : "bg-primary"].join(" ")}
+                style={{ width: `${job.progressPct}%` }}
               />
             </div>
-            {status.current_file && !terminal && (
+            {job.status.current_file && !terminal && (
               <div className="text-xs text-muted-foreground truncate">
-                Current file: {status.current_file}
+                Current file: {job.status.current_file}
               </div>
             )}
             {terminal && (
               <div className="text-sm grid grid-cols-3 gap-2">
                 <div className="border rounded p-2 text-center">
-                  <div className="text-xs text-muted-foreground">Uploaded</div>
-                  <div className="text-lg font-medium">{status.processed}</div>
+                  <div className="text-xs text-muted-foreground">New instances</div>
+                  <div className="text-lg font-medium">{job.status.new_instances}</div>
                 </div>
                 <div className="border rounded p-2 text-center">
-                  <div className="text-xs text-muted-foreground">Studies</div>
-                  <div className="text-lg font-medium">{status.studies_created}</div>
+                  <div className="text-xs text-muted-foreground">Already in PACS</div>
+                  <div className="text-lg font-medium">{job.status.duplicate_instances}</div>
                 </div>
                 <div className="border rounded p-2 text-center">
                   <div className="text-xs text-muted-foreground">Failed</div>
-                  <div className={`text-lg font-medium ${status.failed ? "text-destructive" : ""}`}>
-                    {status.failed}
+                  <div className={`text-lg font-medium ${job.status.failed ? "text-destructive" : ""}`}>
+                    {job.status.failed}
                   </div>
                 </div>
               </div>
             )}
-            {status.errors.length > 0 && (
+            {job.status.errors.length > 0 && (
               <details className="text-xs">
                 <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                  Show errors ({status.errors.length})
+                  Show errors ({job.status.errors.length})
                 </summary>
                 <div className="mt-2 border rounded p-2 max-h-32 overflow-auto font-mono">
-                  {status.errors.map((e, i) => (
+                  {job.status.errors.map((e, i) => (
                     <div key={i} className="truncate">{e}</div>
                   ))}
                 </div>
@@ -252,30 +264,34 @@ export function ImportDialog({ open, onOpenChange, initialFiles }: Props) {
           </div>
         )}
 
-        {error && (
+        {job.error && (
           <div className="text-sm text-destructive border border-destructive/30 bg-destructive/10 rounded p-2">
-            {error}
+            {job.error}
           </div>
         )}
 
         <DialogFooter>
-          {!status ? (
+          {!job.status ? (
             <>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-              <Button disabled={queued.length === 0 || uploading} onClick={start}>
-                {uploading ? "Uploading..." : `Import (${queued.length})`}
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button disabled={queued.length === 0 || upload.uploading} onClick={start}>
+                {upload.uploading ? "Uploading..." : `Import (${queued.length})`}
               </Button>
             </>
           ) : (
-            <Button
-              variant={terminal ? "default" : "outline"}
-              disabled={inProgress}
-              onClick={() => onOpenChange(false)}
-            >
-              {inProgress ? "In progress..." : "Close"}
-            </Button>
+            <>
+              {job.status.status === "error" && job.status.upload_ids.length > 0 && (
+                <Button variant="default" onClick={() => job.retry(job.status!.job_id)}>
+                  Retry
+                </Button>
+              )}
+              <Button
+                variant={terminal ? "default" : "outline"}
+                onClick={() => onOpenChange(false)}
+              >
+                {inProgress ? "Hide (keeps running)" : "Close"}
+              </Button>
+            </>
           )}
         </DialogFooter>
       </DialogContent>
