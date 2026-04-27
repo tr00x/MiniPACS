@@ -66,14 +66,34 @@ _INDEX_HTML = b"""<!DOCTYPE html>
   with it (most viewers have a <em>File &rarr; Open DICOMDIR</em> menu, or accept
   the disc's drive letter).</p>
   <ul>
-    <li><strong>Windows:</strong> <a href="https://www.microdicom.com">MicroDICOM</a>
-        or <a href="https://www.radiantviewer.com">RadiAnt</a></li>
-    <li><strong>macOS:</strong> <a href="https://horosproject.org">Horos</a></li>
-    <li><strong>Linux / Cross-platform:</strong> <a href="https://weasis.org">Weasis</a>
-        (also runs on Windows and macOS; requires Java)</li>
-    <li><strong>Tablet / Phone:</strong> any DICOM viewer app from your app store
-        (search for "DICOM viewer"); copy the <code>DICOM</code> folder to the
-        device first.</li>
+    <li><strong>Windows:</strong>
+        <a href="https://www.microdicom.com">MicroDICOM</a> &middot;
+        <a href="https://www.radiantviewer.com">RadiAnt</a> &middot;
+        <a href="https://weasis.org">Weasis</a> &middot;
+        <a href="https://www.medixant.com">Medixant</a> &middot;
+        <a href="https://dicom.online">Online DICOM Viewer</a> (browser, no install)</li>
+    <li><strong>macOS:</strong>
+        <a href="https://horosproject.org">Horos</a> &middot;
+        <a href="https://www.osirix-viewer.com">OsiriX Lite</a> &middot;
+        <a href="https://weasis.org">Weasis</a> &middot;
+        <a href="https://www.santesoft.com/win/sante-dicom-viewer-free/sante-dicom-viewer-free.html">Sante DICOM Viewer Free</a></li>
+    <li><strong>Linux:</strong>
+        <a href="https://weasis.org">Weasis</a> &middot;
+        <a href="https://github.com/Crystalcave/Aeskulap">Aeskulap</a> &middot;
+        <a href="https://github.com/InsightSoftwareConsortium/itk-snap">ITK-SNAP</a> &middot;
+        <a href="https://github.com/ginkgocadx/ginkgocadx">Ginkgo CADx</a></li>
+    <li><strong>iOS / iPad:</strong>
+        OsiriX HD &middot; iMedicalView &middot; Symphony Free DICOM Viewer
+        (search "DICOM viewer" in App Store)</li>
+    <li><strong>Android:</strong>
+        DroidRender &middot; mRay &middot; DICOM Viewer (search "DICOM viewer" in Play Store)</li>
+    <li><strong>In a browser, no install:</strong>
+        <a href="https://www.imaios.com/en/imaios-dicom-viewer">IMAIOS DICOM Viewer</a> &middot;
+        <a href="https://dicom.online">dicom.online</a> &middot;
+        <a href="https://viewer.ohif.org">OHIF Viewer</a>
+        &mdash; copy your <code>DICOM</code> folder to the page</li>
+    <li><strong>Already have software</strong> from a previous radiologist visit?
+        It probably reads DICOMDIR &mdash; just point it at the disc.</li>
   </ul>
 
   <h2>What's on this disc</h2>
@@ -109,16 +129,34 @@ How to view the images
 Install a free DICOM viewer, then open this disc with it. Most viewers
 auto-discover the DICOMDIR file when you point them at the drive.
 
-  WINDOWS:  MicroDICOM      https://www.microdicom.com
-            RadiAnt         https://www.radiantviewer.com
+  WINDOWS:  MicroDICOM        https://www.microdicom.com
+            RadiAnt           https://www.radiantviewer.com
+            Weasis            https://weasis.org              (needs Java)
+            Sante DICOM Free  https://www.santesoft.com
 
-  MAC:      Horos           https://horosproject.org
-            Weasis          https://weasis.org   (needs Java)
+  MAC:      Horos             https://horosproject.org
+            OsiriX Lite       https://www.osirix-viewer.com
+            Weasis            https://weasis.org
+            Sante DICOM Free  https://www.santesoft.com
 
-  LINUX:    Weasis          https://weasis.org
+  LINUX:    Weasis            https://weasis.org
+            Aeskulap          https://github.com/Crystalcave/Aeskulap
+            Ginkgo CADx       https://github.com/ginkgocadx/ginkgocadx
+            ITK-SNAP          https://github.com/InsightSoftwareConsortium/itk-snap
 
-  TABLET:   Copy the DICOM folder to your device, then open it
-            with any "DICOM viewer" app from your app store.
+  IOS/IPAD: OsiriX HD, iMedicalView, Symphony Free DICOM Viewer
+            (search "DICOM viewer" in the App Store)
+
+  ANDROID:  DroidRender, mRay, DICOM Viewer
+            (search "DICOM viewer" in the Play Store)
+
+  BROWSER:  IMAIOS  https://www.imaios.com/en/imaios-dicom-viewer
+            OHIF    https://viewer.ohif.org
+            Online  https://dicom.online
+            (no install needed; upload the DICOM folder to the page)
+
+If you already have radiology software from a prior visit, it most
+likely reads DICOMDIR -- just point it at this disc.
 
 For more info, double-click index.html on this disc.
 """
