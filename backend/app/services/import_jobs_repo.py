@@ -10,10 +10,13 @@ place (to_dict in this module mirrors what useImportJob expects).
 """
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from app.db import pool
+
+_log = logging.getLogger(__name__)
 
 
 async def create(job_id: str, user_id: int) -> None:
@@ -80,7 +83,8 @@ async def increment(
                                               ELSE array_append(study_ids, $6) END,
                    errors              = CASE WHEN $7::text IS NULL
                                               THEN errors
-                                              ELSE array_append(errors, $7) END,
+                                              ELSE (array_append(errors, $7))[GREATEST(1, array_length(array_append(errors, $7), 1) - 19):]
+                                         END,
                    current_file        = COALESCE($8, current_file)
              WHERE job_id = $1
             """,
@@ -92,7 +96,7 @@ async def increment(
 async def finish(job_id: str, status: str) -> None:
     async with pool().acquire() as con:
         await con.execute(
-            "UPDATE import_jobs SET status = $2, finished_at = now() WHERE job_id = $1",
+            "UPDATE import_jobs SET status = $2, finished_at = now() WHERE job_id = $1 AND finished_at IS NULL",
             job_id, status,
         )
 
@@ -129,7 +133,8 @@ async def mark_interrupted_on_startup() -> int:
         # asyncpg returns "UPDATE N"; parse the count for logging.
         try:
             return int(result.split()[-1])
-        except Exception:
+        except Exception as exc:
+            _log.warning("mark_interrupted_on_startup: failed to parse asyncpg result %r (%s)", result, exc)
             return 0
 
 
@@ -146,7 +151,7 @@ def _to_dict(row) -> dict[str, Any]:
         "duplicate_instances": row["duplicate_instances"],
         "studies_created": len(row["study_ids"]),
         "study_ids": list(row["study_ids"]),
-        "errors": list(row["errors"])[-20:],
+        "errors": list(row["errors"]),
         "current_file": row["current_file"],
         "upload_ids": list(row["upload_ids"]),
         "started_at": started,
