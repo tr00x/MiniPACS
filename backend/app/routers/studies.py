@@ -518,12 +518,12 @@ async def burn_study_iso(
     except Exception:
         accession = None
 
-    iso_path, tempdir = await iso_builder.build_study_iso(study_id, accession)
-
     await log_audit(
         "export_study_iso", "study", study_id,
         user_id=user["id"], ip_address=request.client.host,
     )
+
+    iso_path, tempdir = await iso_builder.build_study_iso(study_id, accession)
 
     def _iter_iso():
         with iso_path.open("rb") as fh:
@@ -536,7 +536,7 @@ async def burn_study_iso(
     def _cleanup():
         shutil.rmtree(tempdir, ignore_errors=True)
 
-    safe_label = (accession or study_id[:8]).replace("/", "_")
+    safe_label = _sanitize_filename(accession or study_id[:8])
     return StreamingResponse(
         _iter_iso(),
         media_type="application/x-iso9660-image",
