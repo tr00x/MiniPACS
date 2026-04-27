@@ -1,30 +1,26 @@
-"""Study import — drag-and-drop upload path.
+"""Resumable, dedup-aware study import.
 
-Client POSTs one or more files to /api/studies/import. The request returns
-immediately with a job_id; extraction + per-instance upload to Orthanc runs
-on the backend event loop so the browser is never held on a single
-multi-GB request. Progress is polled via /api/studies/import/{job_id}.
+Frontend slices the file into 5 MB chunks, computes a streaming
+SHA-256, and asks /precheck whether we already have the bytes. For
+every "upload"-bound file it POSTs /uploads to get an upload_id, PUTs
+each chunk to /uploads/{id}/chunks/{idx}, then POSTs /finalize. Each
+finalize attaches the assembled file to a job_id; multiple files can
+share one job.
 
-Accepted shapes, transparently to the client:
+A separate /start-job POST creates the job_id up front so the upload
+endpoints have something to attach to. This keeps the protocol
+stateless from the chunk endpoints' perspective.
 
-  * Bare DICOM files (.dcm, or anything whose bytes start with the DICM
-    preamble at offset 128)
-  * ZIP / TAR / 7Z / ISO archives — unpacked server-side with the `7z` CLI
-    (p7zip-full), which understands all four formats plus RAR and UDF-ISO.
-  * Nested trees — the extract output is walked recursively; only files
-    matching the DICM magic are sent to Orthanc.
+Server-side per-instance dedup uses the Status field Orthanc returns
+in the /instances response ("Success" vs "AlreadyStored"). File-hash
+dedup uses import_file_hashes; we record the hash after a successful
+upload so the next attempt with the same bytes can short-circuit.
 
-Rejected files count toward `failed` and surface in the job's `errors[]`
-with a short reason.  Non-DICOM payloads inside an archive are silently
-skipped — we do not treat an archive that happens to also contain a PDF
-or a .zip-of-a-zip as a failure.
-
-Auth: standard JWT bearer (same as every other /api/* route).
-
-Upload lifecycle is best-effort durable — we keep the temp staging
-directory until the job reaches a terminal state (done / error), then
-clean up. The in-memory job dict is bounded by _JOB_RETAIN_SECONDS so a
-reconnecting client can still see the final summary for ~10 minutes.
+Job state lives in import_jobs (Postgres), survives backend restarts.
+The lifespan startup hook flips any non-terminal job to "error" with
+the reason "interrupted by backend restart" — the operator clicks
+Retry to redo from chunks (which are still on disk under the
+upload_ids attached to the job).
 """
 from __future__ import annotations
 
@@ -34,81 +30,34 @@ import os
 import shutil
 import subprocess
 import tempfile
-import time
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.routers.auth import get_current_user
-from app.services import orthanc
 from app.middleware.audit import log_audit
+from app.models.import_api import (
+    CreateUploadRequest, CreateUploadResponse,
+    FinalizeRequest,
+    PrecheckRequest, PrecheckResponse, PrecheckEntry,
+    StartJobResponse, UploadStatusResponse,
+)
+from app.routers.auth import get_current_user
+from app.services import import_hashes_repo, import_jobs_repo, orthanc, upload_staging
 
-router = APIRouter(prefix="/api/studies/import", tags=["import"])
 log = logging.getLogger(__name__)
 
-# How long a completed job remains queryable. 10 minutes is enough for a
-# radiologist who closed the tab mid-upload to reopen and see the final
-# summary without us growing the dict unboundedly.
-_JOB_RETAIN_SECONDS = 600.0
-# Per-file upload concurrency. Orthanc HttpThreadsCount = 50, but we share
-# that pool with every /api/studies worklist call — 8 parallel uploads
-# leaves plenty of headroom even under active viewing traffic.
-_UPLOAD_CONCURRENCY = 8
-# Hard cap per job so one runaway operator-initiated import can't exhaust
-# disk. 20 GB covers a full CD ISO of CT studies; beyond this the client
-# should run scripts/import_archive.py.
-_MAX_JOB_SIZE_BYTES = 20 * 1024**3
+router = APIRouter(prefix="/api/studies/import", tags=["import"])
 
+_UPLOAD_CONCURRENCY = 8
+_MAX_JOB_SIZE_BYTES = 20 * 1024**3
 _ARCHIVE_SUFFIXES = {
     ".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2",
     ".tar.xz", ".txz", ".7z", ".iso", ".img",
 }
 
 
-@dataclass
-class ImportJob:
-    job_id: str
-    user_id: int
-    status: str = "queued"          # queued | extracting | uploading | done | error
-    total_files: int = 0            # DICOM instances found across all inputs
-    processed: int = 0              # successfully uploaded
-    failed: int = 0
-    errors: list[str] = field(default_factory=list)
-    started_at: float = field(default_factory=time.time)
-    finished_at: float | None = None
-    current_file: str = ""
-    # Orthanc gives us back {ID, ParentPatient, ParentStudy, ParentSeries}
-    # per uploaded instance. Worklist cares about unique parent studies —
-    # track that set so the final summary reports how many *studies* the
-    # operator actually added, not instance count.
-    study_ids: set[str] = field(default_factory=set)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "job_id": self.job_id,
-            "status": self.status,
-            "total_files": self.total_files,
-            "processed": self.processed,
-            "failed": self.failed,
-            "errors": self.errors[-20:],   # cap on the wire
-            "current_file": self.current_file,
-            "studies_created": len(self.study_ids),
-            "study_ids": list(self.study_ids),
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "elapsed_seconds": (self.finished_at or time.time()) - self.started_at,
-        }
-
-
-_jobs: dict[str, ImportJob] = {}
-_jobs_lock = asyncio.Lock()
-
-
 def _is_dicom(path: Path) -> bool:
-    """DICOM Part 10 preamble: 128-byte pad + b'DICM' at offset 128."""
     try:
         with open(path, "rb") as f:
             f.seek(128)
@@ -123,7 +72,6 @@ def _has_archive_suffix(filename: str) -> bool:
 
 
 def _extract_archive(archive_path: Path, dest_dir: Path) -> tuple[bool, str]:
-    """Extract via `7z x` — handles zip, tar*, 7z, iso, udf, rar."""
     try:
         result = subprocess.run(
             ["7z", "x", "-y", f"-o{dest_dir}", str(archive_path)],
@@ -142,7 +90,6 @@ def _extract_archive(archive_path: Path, dest_dir: Path) -> tuple[bool, str]:
 
 
 def _walk_dicom(root: Path):
-    """Yield every DICOM file under `root` (any depth)."""
     for dirpath, _dirs, filenames in os.walk(root):
         for name in filenames:
             p = Path(dirpath) / name
@@ -150,185 +97,305 @@ def _walk_dicom(root: Path):
                 yield p
 
 
-async def _upload_one(job: ImportJob, path: Path, sem: asyncio.Semaphore) -> None:
-    async with sem:
-        job.current_file = path.name
-        try:
-            data = path.read_bytes()
-            resp = await orthanc._http().post("/instances", content=data,
-                                              headers={"Content-Type": "application/dicom"})
-            if resp.status_code >= 300:
-                job.failed += 1
-                job.errors.append(f"{path.name}: orthanc {resp.status_code}")
-                return
-            payload = resp.json()
-            # /instances returns either a dict or a list depending on the
-            # ingested transfer syntax; normalize.
-            items = payload if isinstance(payload, list) else [payload]
-            for item in items:
-                sid = item.get("ParentStudy")
-                if sid:
-                    job.study_ids.add(sid)
-            job.processed += 1
-        except Exception as exc:  # noqa: BLE001
-            job.failed += 1
-            job.errors.append(f"{path.name}: {exc}")
+# ---- routes ----
+
+@router.post("/start-job", response_model=StartJobResponse)
+async def start_job(request: Request, user: dict = Depends(get_current_user)):
+    job_id = uuid.uuid4().hex
+    await import_jobs_repo.create(job_id, user["id"])
+    await log_audit(
+        "study_import_start", "import", job_id,
+        user_id=user["id"],
+        ip_address=request.client.host if request.client else None,
+    )
+    return {"job_id": job_id}
 
 
-async def _run_job(job: ImportJob, staging: Path, source_files: list[Path]) -> None:
-    """Background driver: expand archives, collect DICOMs, upload concurrently."""
+@router.post("/precheck", response_model=PrecheckResponse)
+async def precheck(req: PrecheckRequest, user: dict = Depends(get_current_user)):
+    hashes = [f.sha256.lower() for f in req.files]
+    known = await import_hashes_repo.lookup_many(hashes)
+    results: dict[str, PrecheckEntry] = {}
+    for f in req.files:
+        h = f.sha256.lower()
+        if h in known:
+            results[h] = PrecheckEntry(
+                action="skip",
+                instance_count=known[h]["instance_count"],
+                study_ids=known[h]["study_ids"],
+            )
+        else:
+            results[h] = PrecheckEntry(action="upload")
+    return {"results": results}
+
+
+@router.post("/uploads", response_model=CreateUploadResponse)
+async def create_upload(req: CreateUploadRequest, user: dict = Depends(get_current_user)):
+    if req.size > _MAX_JOB_SIZE_BYTES:
+        raise HTTPException(413, f"file exceeds {_MAX_JOB_SIZE_BYTES // 1024**3} GB cap")
+    # Owner check on job_id — only the creator may attach uploads.
+    job = await import_jobs_repo.get(req.job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    upload_id = await upload_staging.create(req.name, req.size, req.sha256, req.total_chunks)
+    await import_jobs_repo.attach_upload(req.job_id, upload_id)
+    return {"upload_id": upload_id}
+
+
+@router.put("/uploads/{upload_id}/chunks/{idx}")
+async def upload_chunk(upload_id: str, idx: int, request: Request,
+                        user: dict = Depends(get_current_user)):
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "empty chunk")
     try:
-        job.status = "extracting"
+        await upload_staging.write_chunk(upload_id, idx, body)
+    except FileNotFoundError:
+        raise HTTPException(404, "unknown upload_id")
+    return {"ok": True, "bytes": len(body)}
 
-        # Expand archives in place. Bare DICOMs are left where they are;
-        # archives produce sibling extract/ dirs we then walk.
-        extract_roots: list[Path] = []
-        for src in source_files:
-            if _has_archive_suffix(src.name):
-                out = staging / f"extract-{src.stem}-{uuid.uuid4().hex[:8]}"
-                out.mkdir(parents=True, exist_ok=True)
-                ok, err = _extract_archive(src, out)
-                if not ok:
-                    job.failed += 1
-                    job.errors.append(f"{src.name}: {err}")
-                    continue
-                extract_roots.append(out)
-            else:
-                # bare upload candidate — _is_dicom filter applied below
-                extract_roots.append(src.parent)
 
-        # Dedup across all walk roots (extract dirs can share parents).
-        seen: set[Path] = set()
+@router.get("/uploads/{upload_id}", response_model=UploadStatusResponse)
+async def upload_status(upload_id: str, user: dict = Depends(get_current_user)):
+    try:
+        meta = await upload_staging.received(upload_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "unknown upload_id")
+    return {
+        "upload_id": upload_id,
+        "name": meta["name"],
+        "size": meta["size"],
+        "total_chunks": meta["total_chunks"],
+        "received_chunks": meta["received_chunks"],
+    }
+
+
+@router.post("/finalize")
+async def finalize(req: FinalizeRequest, user: dict = Depends(get_current_user)):
+    """Triggers extract+upload-to-Orthanc for one assembled file. Returns
+    immediately; progress is polled via GET /api/studies/import/{job_id}."""
+    try:
+        meta = await upload_staging.received(req.upload_id)
+        assembled = await upload_staging.finalize(req.upload_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "unknown upload_id")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    # Find the job_id this upload was attached to.
+    job_id = await _find_job_for_upload(req.upload_id, user["id"])
+    if not job_id:
+        raise HTTPException(404, "upload not attached to any job for this user")
+
+    asyncio.create_task(_process_one_file(job_id, req.upload_id, assembled, meta))
+    return {"queued": True}
+
+
+async def _find_job_for_upload(upload_id: str, user_id: int) -> str | None:
+    from app.db import pool
+    async with pool().acquire() as con:
+        row = await con.fetchrow(
+            """SELECT job_id FROM import_jobs
+                WHERE user_id = $1 AND $2 = ANY(upload_ids)
+                ORDER BY started_at DESC LIMIT 1""",
+            user_id, upload_id,
+        )
+    return row["job_id"] if row else None
+
+
+async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: dict) -> None:
+    """Extract (if archive) → upload each DICOM to Orthanc → record file hash."""
+    sha = meta["sha256"]
+    name = meta["name"]
+    work = Path(tempfile.mkdtemp(prefix="minipacs-import-work-"))
+    try:
+        await import_jobs_repo.set_status(job_id, "extracting", current_file=name)
+
+        if _has_archive_suffix(name):
+            ok, err = _extract_archive(assembled, work)
+            if not ok:
+                await import_jobs_repo.increment(job_id, failed=1, error=f"{name}: {err}")
+                return
+            roots = [work]
+        elif _is_dicom(assembled):
+            roots = [assembled.parent]
+        else:
+            await import_jobs_repo.increment(
+                job_id, failed=1, error=f"{name}: not a DICOM file or recognized archive",
+            )
+            return
+
         dicom_files: list[Path] = []
-        for root in extract_roots:
+        seen: set[Path] = set()
+        for root in roots:
             for p in _walk_dicom(root):
                 rp = p.resolve()
                 if rp not in seen:
                     seen.add(rp)
                     dicom_files.append(p)
-        # Also include any source file that is itself a DICOM (no archive,
-        # no extension trickery — just magic bytes).
-        for src in source_files:
-            if not _has_archive_suffix(src.name) and _is_dicom(src):
-                rp = src.resolve()
-                if rp not in seen:
-                    seen.add(rp)
-                    dicom_files.append(src)
+        if assembled.is_file() and _is_dicom(assembled) and assembled.resolve() not in seen:
+            dicom_files.append(assembled)
 
-        job.total_files = len(dicom_files)
-        if job.total_files == 0:
-            job.status = "done"
-            job.finished_at = time.time()
-            if not job.errors:
-                job.errors.append("no DICOM files found in the upload")
+        if not dicom_files:
+            await import_jobs_repo.increment(
+                job_id, failed=1, error=f"{name}: no DICOM files found inside",
+            )
             return
 
-        job.status = "uploading"
+        # update total_files atomically (additive — multiple files per job)
+        from app.db import pool
+        async with pool().acquire() as con:
+            await con.execute(
+                "UPDATE import_jobs SET total_files = total_files + $2, status = 'uploading' WHERE job_id = $1",
+                job_id, len(dicom_files),
+            )
+
         sem = asyncio.Semaphore(_UPLOAD_CONCURRENCY)
-        await asyncio.gather(*(_upload_one(job, p, sem) for p in dicom_files))
+        instance_study_ids: list[str] = []
+        new_count = 0
+        dup_count = 0
+        local_lock = asyncio.Lock()
 
-        job.status = "done" if job.failed == 0 else ("done" if job.processed > 0 else "error")
-        job.finished_at = time.time()
+        async def _one(p: Path):
+            nonlocal new_count, dup_count
+            async with sem:
+                try:
+                    data = p.read_bytes()
+                    resp = await orthanc._http().post(
+                        "/instances", content=data,
+                        headers={"Content-Type": "application/dicom"},
+                    )
+                    if resp.status_code >= 300:
+                        await import_jobs_repo.increment(
+                            job_id, failed=1,
+                            error=f"{p.name}: orthanc {resp.status_code}",
+                            current_file=p.name,
+                        )
+                        return
+                    payload = resp.json()
+                    items = payload if isinstance(payload, list) else [payload]
+                    item_new = 0
+                    item_dup = 0
+                    sid = None
+                    for item in items:
+                        sid = item.get("ParentStudy")
+                        if sid:
+                            instance_study_ids.append(sid)
+                        if item.get("Status") == "AlreadyStored":
+                            item_dup += 1
+                        else:
+                            item_new += 1
+                    async with local_lock:
+                        new_count += item_new
+                        dup_count += item_dup
+                    await import_jobs_repo.increment(
+                        job_id, processed=1,
+                        new_instances=item_new,
+                        duplicate_instances=item_dup,
+                        study_id=sid if sid else None,
+                        current_file=p.name,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    await import_jobs_repo.increment(
+                        job_id, failed=1, error=f"{p.name}: {exc}", current_file=p.name,
+                    )
 
-        # Bust the QIDO cache so the worklist reflects the new studies on
-        # the next refresh even if the Python-plugin STABLE_STUDY event has
-        # not yet fired (it will fire ~60s after the last instance anyway,
-        # but the UI user wants to see their uploads immediately).
+        await asyncio.gather(*(_one(p) for p in dicom_files))
+
+        # Record file hash (idempotent) for future precheck.
+        await import_hashes_repo.record(sha, len(dicom_files), list(set(instance_study_ids)))
+
+        # Bust QIDO cache.
         try:
             await orthanc.invalidate_study_caches()
         except Exception:
             pass
+
     except Exception as exc:  # noqa: BLE001
-        log.exception("import job %s crashed", job.job_id)
-        job.status = "error"
-        job.errors.append(f"internal: {exc}")
-        job.finished_at = time.time()
+        log.exception("file processing failed")
+        await import_jobs_repo.increment(job_id, failed=1, error=f"internal: {exc}")
     finally:
-        # Aggressive cleanup — staging dirs can be gigabytes.
+        shutil.rmtree(work, ignore_errors=True)
+        await upload_staging.cleanup(upload_id)
+        # Promote job to terminal if no more active uploads attached.
+        await _maybe_finish_job(job_id)
+
+
+async def _maybe_finish_job(job_id: str) -> None:
+    """If every upload_id attached to the job is gone from staging,
+    flip status to 'done' (or 'error' if anything failed)."""
+    job = await import_jobs_repo.get(job_id)
+    if not job or job["status"] in ("done", "error"):
+        return
+    # Any upload_id still on disk → not done yet.
+    for uid in job["upload_ids"]:
         try:
-            shutil.rmtree(staging, ignore_errors=True)
-        except Exception:
-            pass
+            await upload_staging.received(uid)
+            return  # still active
+        except FileNotFoundError:
+            continue
+    final = "done" if job["failed"] == 0 or job["processed"] > 0 else "error"
+    await import_jobs_repo.finish(job_id, final)
 
 
-async def _gc_old_jobs() -> None:
-    """Drop completed jobs older than the retention window."""
-    cutoff = time.time() - _JOB_RETAIN_SECONDS
-    async with _jobs_lock:
-        stale = [k for k, v in _jobs.items()
-                 if v.finished_at is not None and v.finished_at < cutoff]
-        for k in stale:
-            _jobs.pop(k, None)
-
-
-@router.post("")
-async def start_import(
-    request: Request,
-    files: list[UploadFile] = File(...),
-    user: dict = Depends(get_current_user),
-):
-    if not files:
-        raise HTTPException(400, "no files uploaded")
-
-    await _gc_old_jobs()
-
-    staging = Path(tempfile.mkdtemp(prefix="minipacs-import-"))
-    source_files: list[Path] = []
-    size_total = 0
-    try:
-        for uf in files:
-            if not uf.filename:
-                continue
-            # Normalize filename — strip any path component a multipart client
-            # might have set (Safari sends "folder/subfolder/file.dcm").
-            rel = Path(uf.filename).name or f"unnamed-{uuid.uuid4().hex[:8]}"
-            target = staging / rel
-            # If a multipart upload carried the same basename twice (webkit
-            # dir upload of a_nested/file.dcm + b_nested/file.dcm), keep both.
-            if target.exists():
-                target = staging / f"{uuid.uuid4().hex[:8]}-{rel}"
-            with open(target, "wb") as out:
-                while True:
-                    chunk = await uf.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    size_total += len(chunk)
-                    if size_total > _MAX_JOB_SIZE_BYTES:
-                        raise HTTPException(413, f"upload exceeds {_MAX_JOB_SIZE_BYTES // 1024**3} GB cap")
-                    out.write(chunk)
-            source_files.append(target)
-    except HTTPException:
-        shutil.rmtree(staging, ignore_errors=True)
-        raise
-    except Exception as exc:
-        shutil.rmtree(staging, ignore_errors=True)
-        raise HTTPException(500, f"staging write failed: {exc}") from exc
-
-    job = ImportJob(job_id=uuid.uuid4().hex, user_id=user["id"])
-    async with _jobs_lock:
-        _jobs[job.job_id] = job
-
-    await log_audit(
-        "study_import_start", "import", job.job_id,
-        user_id=user["id"], ip_address=request.client.host if request.client else None,
-    )
-
-    # Fire-and-forget; _run_job owns cleanup.
-    asyncio.create_task(_run_job(job, staging, source_files))
-
-    return {"job_id": job.job_id, "files_staged": len(source_files), "bytes_staged": size_total}
+@router.get("/active")
+async def active(user: dict = Depends(get_current_user)):
+    rows = await import_jobs_repo.active_for_user(user["id"])
+    return {"jobs": rows}
 
 
 @router.get("/{job_id}")
-async def get_import_status(
-    job_id: str,
-    user: dict = Depends(get_current_user),
-):
-    job = _jobs.get(job_id)
+async def get_status(job_id: str, user: dict = Depends(get_current_user)):
+    job = await import_jobs_repo.get(job_id)
     if not job:
-        raise HTTPException(404, "job not found (may have expired)")
-    # Mild authz — a job's status is scoped to its creator. Audit log still
-    # covers who did what on the write side.
-    if job.user_id != user["id"]:
+        raise HTTPException(404, "job not found")
+    if (await _job_owner(job_id)) != user["id"]:
         raise HTTPException(403, "not your import job")
-    return job.to_dict()
+    return job
+
+
+@router.post("/{job_id}/retry")
+async def retry(job_id: str, user: dict = Depends(get_current_user)):
+    if (await _job_owner(job_id)) != user["id"]:
+        raise HTTPException(403, "not your import job")
+    job = await import_jobs_repo.get(job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    if job["status"] != "error":
+        raise HTTPException(409, f"can only retry jobs in error state, got {job['status']}")
+    # Atomic flip → uploading; if another tab beat us, 409.
+    from app.db import pool
+    async with pool().acquire() as con:
+        result = await con.execute(
+            """UPDATE import_jobs
+                  SET status = 'uploading', finished_at = NULL,
+                      errors = array_append(errors, '--- retry ---')
+                WHERE job_id = $1 AND status = 'error'""",
+            job_id,
+        )
+    if result == "UPDATE 0":
+        raise HTTPException(409, "job already running in another tab")
+
+    # Re-process every upload_id that still has chunks on disk.
+    for uid in job["upload_ids"]:
+        try:
+            meta = await upload_staging.received(uid)
+        except FileNotFoundError:
+            continue
+        try:
+            assembled = await upload_staging.finalize(uid)
+        except ValueError:
+            await import_jobs_repo.increment(
+                job_id, failed=1,
+                error=f"retry: upload {uid} has missing chunks, please re-upload",
+            )
+            continue
+        asyncio.create_task(_process_one_file(job_id, uid, assembled, meta))
+    return {"retried": True}
+
+
+async def _job_owner(job_id: str) -> int | None:
+    from app.db import pool
+    async with pool().acquire() as con:
+        row = await con.fetchrow("SELECT user_id FROM import_jobs WHERE job_id = $1", job_id)
+    return row["user_id"] if row else None
