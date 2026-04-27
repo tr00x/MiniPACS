@@ -68,7 +68,7 @@ function formatRelativeTime(isoString: string): string {
 }
 
 function humanizeError(raw: string): string {
-  if (raw.includes("not found") || raw.includes("404")) return "PACS node not registered in Orthanc. Remove and re-add it in PACS Nodes settings.";
+  if (raw.includes("not found") || raw.includes("404")) return "PACS node not registered. Remove and re-add it in PACS Nodes settings.";
   if (raw.includes("timeout") || raw.includes("Timeout")) return "Connection timed out. The destination may be offline or unreachable.";
   if (raw.includes("refused") || raw.includes("Refused")) return "Connection refused. The destination is not accepting connections.";
   if (raw.includes("network") || raw.includes("Network")) return "Network error. Check that the destination IP and port are correct.";
