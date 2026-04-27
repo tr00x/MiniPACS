@@ -93,6 +93,12 @@ def _extract_archive(archive_path: Path, dest_dir: Path) -> tuple[bool, str]:
 def _walk_dicom(root: Path):
     for dirpath, _dirs, filenames in os.walk(root):
         for name in filenames:
+            # DICOMDIR is the DICOM Part 11 filesystem index — has DICM magic
+            # at offset 128 (it IS a Part 10 file with SOPClass = Media
+            # Storage Directory Storage), but Orthanc /instances rejects it
+            # since it's metadata, not an imaging instance. Skip silently.
+            if name.upper() == "DICOMDIR":
+                continue
             p = Path(dirpath) / name
             if _is_dicom(p):
                 yield p
