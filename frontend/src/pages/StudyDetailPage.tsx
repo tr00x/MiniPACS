@@ -275,9 +275,15 @@ export function StudyDetailPage() {
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `study-${id}.iso`;
+      // Prefer the backend's sanitized filename (Content-Disposition) over the raw UUID.
+      const cd = res.headers?.["content-disposition"] as string | undefined;
+      const m = cd?.match(/filename\s*=\s*"?([^";]+)"?/i);
+      a.download = m?.[1] ?? `study-${id}.iso`;
       a.click();
-      URL.revokeObjectURL(url);
+      // Defer revoke — Firefox/Safari can abort downloads of large blobs if the URL
+      // is revoked before the browser captures it. 1s is enough for the click handler
+      // to take ownership.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast.success("ISO download started");
     } catch (err: unknown) {
       toast.error(getErrorMessage(err, "Failed to build ISO"));
