@@ -4,14 +4,18 @@ import { useQueryClient } from "@tanstack/react-query";
 
 export interface ImportJobStatus {
   job_id: string;
+  user_id?: number;
   status: "queued" | "extracting" | "uploading" | "done" | "error";
   total_files: number;
   processed: number;
   failed: number;
+  new_instances: number;
+  duplicate_instances: number;
   errors: string[];
   current_file: string;
   studies_created: number;
   study_ids: string[];
+  upload_ids: string[];
   started_at: number;
   finished_at: number | null;
   elapsed_seconds: number;
@@ -19,41 +23,36 @@ export interface ImportJobStatus {
 
 export interface UseImportJobResult {
   status: ImportJobStatus | null;
-  uploading: boolean;          // true while the initial POST is in flight
-  progressPct: number;         // 0..100
+  progressPct: number;
   error: string | null;
-  submit: (files: File[]) => Promise<void>;
+  startJob: () => Promise<string>;       // creates job_id up front
+  attach: (jobId: string) => void;       // start polling an existing job (read-only mode)
+  retry: (jobId: string) => Promise<void>;
   reset: () => void;
 }
 
-/** Drive one drag-and-drop import: upload files, poll status until terminal. */
 export function useImportJob(): UseImportJobResult {
   const qc = useQueryClient();
   const [status, setStatus] = useState<ImportJobStatus | null>(null);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const currentJobRef = useRef<string | null>(null);
 
   const clearPoll = () => {
-    if (pollTimer.current) {
-      clearTimeout(pollTimer.current);
-      pollTimer.current = null;
-    }
+    if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; }
   };
 
   const reset = useCallback(() => {
     clearPoll();
-    abortRef.current?.abort();
-    abortRef.current = null;
+    currentJobRef.current = null;
     setStatus(null);
-    setUploading(false);
     setError(null);
   }, []);
 
-  const poll = useCallback(async (job_id: string) => {
+  const poll = useCallback(async (jobId: string) => {
+    if (currentJobRef.current !== jobId) return;
     try {
-      const { data } = await api.get<ImportJobStatus>(`/studies/import/${job_id}`);
+      const { data } = await api.get<ImportJobStatus>(`/studies/import/${jobId}`);
       setStatus(data);
       if (data.status === "done" || data.status === "error") {
         clearPoll();
@@ -62,9 +61,7 @@ export function useImportJob(): UseImportJobResult {
         qc.invalidateQueries({ queryKey: ["dashboard"] });
         return;
       }
-      // Exponential-ish — fast at first, settle at 1.5s for longer jobs.
-      const delay = data.status === "extracting" ? 500 : 1500;
-      pollTimer.current = setTimeout(() => poll(job_id), delay);
+      pollTimer.current = setTimeout(() => poll(jobId), 1500);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(`polling failed: ${msg}`);
@@ -72,58 +69,36 @@ export function useImportJob(): UseImportJobResult {
     }
   }, [qc]);
 
-  const submit = useCallback(async (files: File[]) => {
-    if (files.length === 0) return;
+  const startJob = useCallback(async (): Promise<string> => {
     reset();
-    setUploading(true);
-    setError(null);
-
-    const form = new FormData();
-    for (const f of files) {
-      // Preserve any nested path the browser gave us (webkitdirectory drag),
-      // backend strips it back down to basename but keeps the intent if the
-      // archive itself is the relevant unit.
-      const name = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-      form.append("files", f, name);
-    }
-
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-
-    try {
-      const { data } = await api.post<{ job_id: string; files_staged: number; bytes_staged: number }>(
-        "/studies/import",
-        form,
-        { signal: ctrl.signal, headers: { "Content-Type": "multipart/form-data" } },
-      );
-      setUploading(false);
-      // Seed a "queued" status so the UI has something to render before
-      // the first poll lands.
-      setStatus({
-        job_id: data.job_id,
-        status: "queued",
-        total_files: 0,
-        processed: 0,
-        failed: 0,
-        errors: [],
-        current_file: "",
-        studies_created: 0,
-        study_ids: [],
-        started_at: Date.now() / 1000,
-        finished_at: null,
-        elapsed_seconds: 0,
-      });
-      poll(data.job_id);
-    } catch (e: unknown) {
-      setUploading(false);
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
-    }
+    const { data } = await api.post<{ job_id: string }>("/studies/import/start-job");
+    currentJobRef.current = data.job_id;
+    setStatus({
+      job_id: data.job_id,
+      status: "queued",
+      total_files: 0, processed: 0, failed: 0,
+      new_instances: 0, duplicate_instances: 0,
+      errors: [], current_file: "",
+      studies_created: 0, study_ids: [], upload_ids: [],
+      started_at: Date.now() / 1000, finished_at: null, elapsed_seconds: 0,
+    });
+    poll(data.job_id);
+    return data.job_id;
   }, [poll, reset]);
+
+  const attach = useCallback((jobId: string) => {
+    reset();
+    currentJobRef.current = jobId;
+    poll(jobId);
+  }, [poll, reset]);
+
+  const retry = useCallback(async (jobId: string) => {
+    await api.post(`/studies/import/${jobId}/retry`);
+    if (currentJobRef.current !== jobId) attach(jobId);
+  }, [attach]);
 
   useEffect(() => () => {
     clearPoll();
-    abortRef.current?.abort();
   }, []);
 
   const progressPct =
@@ -133,5 +108,5 @@ export function useImportJob(): UseImportJobResult {
         ? 5
         : 0;
 
-  return { status, uploading, progressPct, error, submit, reset };
+  return { status, progressPct, error, startJob, attach, retry, reset };
 }
