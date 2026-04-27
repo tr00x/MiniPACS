@@ -12,7 +12,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Download, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Layers, Lock, Shuffle, Mail, FileText, Plus, Trash2 } from "lucide-react";
+import { Download, Disc, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Layers, Lock, Shuffle, Mail, FileText, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { QRCodeSVG } from "qrcode.react";
@@ -104,6 +104,9 @@ export function StudyDetailPage() {
   const [sharePin, setSharePin] = useState("");
   // Download dialog
   const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  // Burn ISO dialog
+  const [burnDialogOpen, setBurnDialogOpen] = useState(false);
+  const [burning, setBurning] = useState(false);
   // reports state moved to studyFullQuery above
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [reportType, setReportType] = useState<"text" | "pdf">("text");
@@ -261,6 +264,28 @@ export function StudyDetailPage() {
     }
   };
 
+  const handleBurnConfirm = async () => {
+    setBurnDialogOpen(false);
+    setBurning(true);
+    try {
+      const res = await api.get(`/studies/${id}/burn-iso`, {
+        responseType: "blob",
+        timeout: 600000, // 10 minutes — large studies can take 60s+ to assemble
+      });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `study-${id}.iso`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("ISO download started");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to build ISO"));
+    } finally {
+      setBurning(false);
+    }
+  };
+
   const copyUid = () => {
     navigator.clipboard.writeText(studyUid);
     setUidCopied(true);
@@ -388,6 +413,10 @@ export function StudyDetailPage() {
           <Button variant="outline" onClick={() => setDownloadDialogOpen(true)} disabled={downloading} className="gap-2">
             <Download className="h-4 w-4" />
             {downloading ? "Downloading..." : "Download"}
+          </Button>
+          <Button variant="outline" onClick={() => setBurnDialogOpen(true)} disabled={burning} className="gap-2">
+            <Disc className="h-4 w-4" />
+            {burning ? "Building ISO..." : "Burn to CD/USB"}
           </Button>
           {viewers.map((v) => (
             <Button
@@ -971,6 +1000,36 @@ Your Clinic`
             <Button onClick={handleDownloadConfirm} className="gap-2">
               <Download className="h-4 w-4" />
               Download ZIP
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Burn Dialog — confirmation before ISO build */}
+      <Dialog open={burnDialogOpen} onOpenChange={setBurnDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Burn to CD/USB</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <p>
+              An ISO image will be generated containing all DICOM images, a
+              DICOMDIR index, and a bundled HTML5 DICOM viewer (DWV) that runs
+              in any modern browser without installation.
+            </p>
+            <p>
+              After download, you can either burn the <code>.iso</code> to a
+              blank CD/DVD via Windows "Burn files to disc", or write it to a
+              USB stick using Rufus or balenaEtcher.
+            </p>
+            <p className="text-xs">
+              Build time: 30 seconds to a few minutes depending on study size.
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setBurnDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleBurnConfirm} className="gap-2">
+              <Disc className="h-4 w-4" />
+              Generate ISO
             </Button>
           </DialogFooter>
         </DialogContent>
