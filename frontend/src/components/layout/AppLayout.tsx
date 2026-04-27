@@ -6,11 +6,17 @@ import { Sidebar, MobileSidebar } from "./Sidebar";
 import { ImportIndicator } from "@/components/ImportIndicator";
 import { ImportDialog } from "@/components/ImportDialog";
 import { useGlobalFileDrop } from "@/hooks/useGlobalFileDrop";
+import { useActiveImports } from "@/hooks/useActiveImports";
 
 export function AppLayout() {
   const { isAuthenticated } = useAuth();
   const drop = useGlobalFileDrop();
   const [dropFiles, setDropFiles] = useState<File[] | null>(null);
+  const [openJobId, setOpenJobId] = useState<string | null>(null);
+  // Single poller for both indicator slots (mobile topbar + desktop main).
+  // Mounting <ImportIndicator/> twice with its own hook would double the
+  // /active polling rate.
+  const activeJobs = useActiveImports();
 
   // When global drop captures files, pop them and open the import dialog.
   useEffect(() => {
@@ -32,12 +38,12 @@ export function AppLayout() {
       <div className="flex h-14 items-center border-b px-4 md:hidden">
         <MobileSidebar />
         <h1 className="ml-2 text-lg font-semibold">MiniPACS</h1>
-        <div className="ml-auto"><ImportIndicator /></div>
+        <div className="ml-auto"><ImportIndicator jobs={activeJobs} onOpen={setOpenJobId} /></div>
       </div>
       <Sidebar />
       <main className="flex-1 overflow-auto p-4 md:p-6">
         <div className="hidden md:flex justify-end mb-2">
-          <ImportIndicator />
+          <ImportIndicator jobs={activeJobs} onOpen={setOpenJobId} />
         </div>
         <Outlet />
       </main>
@@ -57,6 +63,16 @@ export function AppLayout() {
           open={true}
           onOpenChange={(o) => { if (!o) setDropFiles(null); }}
           initialFiles={dropFiles}
+        />
+      )}
+
+      {/* Single dialog instance for the indicator — opening from either
+          mobile or desktop pill routes through the same setOpenJobId. */}
+      {openJobId && (
+        <ImportDialog
+          open={true}
+          onOpenChange={(o) => { if (!o) setOpenJobId(null); }}
+          attachJobId={openJobId}
         />
       )}
     </motion.div>
