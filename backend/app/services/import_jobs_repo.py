@@ -135,8 +135,18 @@ async def increment(
                                               ELSE (array_append(errors, $7))[GREATEST(1, array_length(array_append(errors, $7), 1) - 19):]
                                          END,
                    current_file        = COALESCE($8, current_file),
-                   file_errors         = CASE WHEN $9::jsonb IS NULL
-                                              THEN file_errors
+                   file_errors         = CASE
+                                              WHEN $9::jsonb IS NULL THEN file_errors
+                                              -- Cap at 100 entries: a 10k-DICOM ZIP
+                                              -- where every file fails (PACS down)
+                                              -- would otherwise grow unbounded and
+                                              -- write-amplify on every increment.
+                                              WHEN jsonb_array_length(file_errors) >= 100
+                                                THEN (
+                                                  SELECT jsonb_agg(elem)
+                                                    FROM jsonb_array_elements(file_errors) WITH ORDINALITY AS t(elem, ord)
+                                                   WHERE ord > jsonb_array_length(file_errors) - 99
+                                                ) || $9::jsonb
                                               ELSE file_errors || $9::jsonb
                                          END,
                    last_progress_at    = now()

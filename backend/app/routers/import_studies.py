@@ -49,7 +49,7 @@ from app.models.import_api import (
     StartJobRequest, StartJobResponse, UploadStatusResponse,
 )
 from app.routers.auth import get_current_user
-from app.services import import_hashes_repo, import_jobs_repo, orthanc, upload_staging
+from app.services import import_hashes_repo, import_jobs_repo, import_tasks, orthanc, upload_staging
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +57,13 @@ router = APIRouter(prefix="/api/studies/import", tags=["import"])
 
 _UPLOAD_CONCURRENCY = 8
 _MAX_JOB_SIZE_BYTES = 20 * 1024**3
+# Cap concurrent active jobs per user. A misbehaving client (or just a
+# very click-happy user) could otherwise fill import_jobs with thousands
+# of empty queued rows in seconds — each start-job is one DB write and
+# no upload required to register. 10 covers the realistic "drag 10 CDs
+# at once" workflow with headroom; anything past it is almost certainly
+# unintentional.
+_MAX_ACTIVE_JOBS_PER_USER = 10
 _ARCHIVE_SUFFIXES = {
     ".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2",
     ".tar.xz", ".txz", ".7z", ".iso", ".img",
@@ -119,6 +126,13 @@ async def start_job(
 ):
     # body is optional so old frontends (no JSON payload) still work.
     source_label = (body.source_label.strip() if body else "")[:512]
+    active = await import_jobs_repo.active_for_user(user["id"])
+    if len(active) >= _MAX_ACTIVE_JOBS_PER_USER:
+        raise HTTPException(
+            429,
+            f"too many active imports ({len(active)}/{_MAX_ACTIVE_JOBS_PER_USER}); "
+            "finish or cancel some before starting more",
+        )
     job_id = uuid.uuid4().hex
     await import_jobs_repo.create(job_id, user["id"], source_label=source_label)
     await log_audit(
@@ -156,6 +170,13 @@ async def create_upload(req: CreateUploadRequest, user: dict = Depends(get_curre
     job = await import_jobs_repo.get(req.job_id)
     if not job or job["user_id"] != user["id"]:
         raise HTTPException(404, "job not found")
+    # Cancel-race guard: if the job was cancelled (or otherwise finished)
+    # between start-job and this attach, refuse with 409. Without this,
+    # attach_upload's `finished_at IS NULL` filter silently drops the
+    # array_append and the client gets a confusing 404 from /finalize
+    # later instead of a clear "job is gone" up front.
+    if job["finished_at"] is not None or import_jobs_repo.is_terminal(job["status"]):
+        raise HTTPException(409, f"job is {job['status']}, cannot attach new uploads")
     upload_id = await upload_staging.create(
         req.name, req.size, req.sha256, req.total_chunks, user["id"],
     )
@@ -229,7 +250,10 @@ async def finalize(req: FinalizeRequest, user: dict = Depends(get_current_user))
     if not job_id:
         raise HTTPException(404, "upload not attached to any job for this user")
 
-    asyncio.create_task(_process_one_file(job_id, req.upload_id, assembled, meta))
+    # Track the task so lifespan shutdown can drain it instead of GC
+    # cancelling mid-Orthanc-POST. add_done_callback in import_tasks
+    # auto-removes on completion.
+    import_tasks.track(asyncio.create_task(_process_one_file(job_id, req.upload_id, assembled, meta)))
     return {"queued": True}
 
 
@@ -593,7 +617,7 @@ async def retry(job_id: str, user: dict = Depends(get_current_user)):
                 error=f"retry: upload {uid} has missing chunks, please re-upload",
             )
             continue
-        asyncio.create_task(_process_one_file(job_id, uid, assembled, meta))
+        import_tasks.track(asyncio.create_task(_process_one_file(job_id, uid, assembled, meta)))
     return {"retried": True}
 
 

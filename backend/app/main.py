@@ -12,7 +12,7 @@ from app.db import init_pool, close_pool
 from app.database import init_db
 from app.services.cache import init_cache, close_cache
 from app.services.orthanc import init_client as init_orthanc, close_client as close_orthanc
-from app.services import upload_staging, import_jobs_repo, import_sweeper
+from app.services import upload_staging, import_jobs_repo, import_sweeper, import_tasks
 
 log = logging.getLogger(__name__)
 from app.routers.auth import router as auth_router
@@ -73,6 +73,16 @@ async def lifespan(app: FastAPI):
     # leaves the dialog showing forever-Queued across every device.
     asyncio.create_task(import_sweeper.loop())
     yield
+    # Give in-flight _process_one_file tasks a bounded window to finish
+    # before tearing down the pool. Otherwise a rolling deploy could
+    # cancel a 1-second-from-done Orthanc POST and leave the job in
+    # 'uploading' for the sweeper to fail. mark_interrupted_on_startup
+    # picks up anything that didn't make the deadline on next boot.
+    completed, cancelled = await import_tasks.drain()
+    if cancelled:
+        log.warning("shutdown: %d import tasks cancelled past drain deadline", cancelled)
+    elif completed:
+        log.info("shutdown: drained %d import tasks cleanly", completed)
     await close_orthanc()
     await close_cache()
     await close_pool()

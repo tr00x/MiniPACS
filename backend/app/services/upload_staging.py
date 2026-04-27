@@ -129,6 +129,11 @@ def _read_meta_sync(d: Path) -> dict:
 async def received(upload_id: str) -> dict:
     d = _safe_dir(upload_id)
     if not d.is_dir():
+        # Drop any lingering lock so the dict can't grow unboundedly
+        # across upload-id rotation. The 24h GC also cleans up but
+        # that leaves up to a day of dead Lock objects in memory per
+        # cancelled / finalized upload.
+        _locks.pop(upload_id, None)
         raise FileNotFoundError(upload_id)
     # Off-load the read so /uploads-progress on a job with many staged
     # files doesn't block the event loop on disk I/O.

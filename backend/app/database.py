@@ -227,6 +227,13 @@ CREATE INDEX IF NOT EXISTS idx_import_jobs_user_history
 -- Stale-job sweeper scans non-terminal jobs by last_progress_at.
 CREATE INDEX IF NOT EXISTS idx_import_jobs_stale
     ON import_jobs (last_progress_at) WHERE finished_at IS NULL;
+-- Every chunk PUT calls _find_job_for_upload(upload_id) to heartbeat
+-- the parent. With many concurrent imports and 5 MB chunks landing
+-- every few seconds, the `$2 = ANY(upload_ids)` lookup is the hottest
+-- query in the import path. GIN gives us O(log n) on TEXT[] membership
+-- vs the default linear scan of every row.
+CREATE INDEX IF NOT EXISTS idx_import_jobs_upload_ids
+    ON import_jobs USING gin (upload_ids);
 
 -- File-level dedup: SHA-256 of the raw bytes user uploaded (a .dcm, a
 -- .zip, an .iso). Lets precheck answer "we have this exact file" before
