@@ -290,12 +290,24 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
             )
             return
 
-        # update total_files atomically (additive — multiple files per job)
+        # update total_files atomically (additive — multiple files per job).
+        # `finished_at IS NULL` guard: if the user cancelled while we were
+        # extracting the archive, this fire-and-forget task must not flip
+        # the job back to 'uploading' or grow total_files retroactively.
         async with pool().acquire() as con:
-            await con.execute(
-                "UPDATE import_jobs SET total_files = total_files + $2, status = 'uploading' WHERE job_id = $1",
+            updated = await con.fetchval(
+                """UPDATE import_jobs
+                      SET total_files = total_files + $2,
+                          status = 'uploading',
+                          last_progress_at = now()
+                    WHERE job_id = $1 AND finished_at IS NULL
+                RETURNING 1""",
                 job_id, len(dicom_files),
             )
+        if not updated:
+            log.info("import: job %s already terminal — abandoning %d-file batch",
+                     job_id, len(dicom_files))
+            return
 
         sem = asyncio.Semaphore(_UPLOAD_CONCURRENCY)
         instance_study_ids: list[str] = []
@@ -399,9 +411,12 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
 
 async def _maybe_finish_job(job_id: str) -> None:
     """If every upload_id attached to the job is gone from staging,
-    flip status to 'done' (or 'error' if anything failed)."""
+    flip status to 'done' (or 'error' if anything failed). Skips
+    terminal jobs — important for the cancel path, where a concurrent
+    _process_one_file task hits this finally-block after the user has
+    already flipped the job to 'cancelled'."""
     job = await import_jobs_repo.get(job_id)
-    if not job or job["status"] in ("done", "error"):
+    if not job or import_jobs_repo.is_terminal(job["status"]):
         return
     # Any upload_id still on disk → not done yet.
     for uid in job["upload_ids"]:

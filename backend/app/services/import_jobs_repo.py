@@ -50,7 +50,7 @@ async def attach_upload(job_id: str, upload_id: str) -> None:
             """UPDATE import_jobs
                   SET upload_ids = array_append(upload_ids, $2),
                       last_progress_at = now()
-                WHERE job_id = $1""",
+                WHERE job_id = $1 AND finished_at IS NULL""",
             job_id, upload_id,
         )
 
@@ -58,28 +58,32 @@ async def attach_upload(job_id: str, upload_id: str) -> None:
 async def touch(job_id: str) -> None:
     """Mark the job as having made progress now. Called from chunk-upload
     so the stale-job sweeper doesn't kill an actively-uploading job whose
-    server-side processing hasn't started yet (status still 'queued')."""
+    server-side processing hasn't started yet (status still 'queued').
+    No-op on terminal jobs (cancelled/done/error)."""
     async with pool().acquire() as con:
         await con.execute(
-            "UPDATE import_jobs SET last_progress_at = now() WHERE job_id = $1",
+            """UPDATE import_jobs SET last_progress_at = now()
+                WHERE job_id = $1 AND finished_at IS NULL""",
             job_id,
         )
 
 
 async def set_status(job_id: str, status: str, *, current_file: str | None = None) -> None:
+    """Update non-terminal job status. Concurrent finally-blocks in
+    _process_one_file are no-ops once the user has cancelled."""
     async with pool().acquire() as con:
         if current_file is not None:
             await con.execute(
                 """UPDATE import_jobs
                       SET status = $2, current_file = $3, last_progress_at = now()
-                    WHERE job_id = $1""",
+                    WHERE job_id = $1 AND finished_at IS NULL""",
                 job_id, status, current_file,
             )
         else:
             await con.execute(
                 """UPDATE import_jobs
                       SET status = $2, last_progress_at = now()
-                    WHERE job_id = $1""",
+                    WHERE job_id = $1 AND finished_at IS NULL""",
                 job_id, status,
             )
 
@@ -112,6 +116,10 @@ async def increment(
     Pass both — they serve different consumers."""
     file_error_json = json.dumps(file_error) if file_error else None
     async with pool().acquire() as con:
+        # `finished_at IS NULL` guard: once a job is terminal (done /
+        # error / cancelled), in-flight _process_one_file tasks must
+        # not keep writing counters into it — otherwise a cancelled
+        # job ends up with processed=N, looking like a partial done.
         await con.execute(
             """
             UPDATE import_jobs
@@ -132,7 +140,7 @@ async def increment(
                                               ELSE file_errors || $9::jsonb
                                          END,
                    last_progress_at    = now()
-             WHERE job_id = $1
+             WHERE job_id = $1 AND finished_at IS NULL
             """,
             job_id, processed, failed, new_instances, duplicate_instances,
             study_id, error, current_file, file_error_json,

@@ -7,20 +7,45 @@ import { ImportIndicator } from "@/components/ImportIndicator";
 import { ImportDialog } from "@/components/ImportDialog";
 import { useGlobalFileDrop } from "@/hooks/useGlobalFileDrop";
 import { useActiveImports } from "@/hooks/useActiveImports";
+import { useImports } from "@/providers/ImportsProvider";
 
 export function AppLayout() {
   const { isAuthenticated } = useAuth();
   const drop = useGlobalFileDrop();
-  const [dropFiles, setDropFiles] = useState<File[] | null>(null);
+  const imports = useImports();
   const [openJobId, setOpenJobId] = useState<string | null>(null);
   // Single poller for both indicator slots (mobile topbar + desktop main).
   // Mounting <ImportIndicator/> twice with its own hook would double the
   // /active polling rate.
   const activeJobs = useActiveImports();
 
-  // When global drop captures files, pop them and open the import dialog.
+  // Window drop → start a fresh import via the global manager. Each drop
+  // gets its own job_id, so dragging in a second batch while the first
+  // is still uploading no longer overwrites the in-flight one (the bug
+  // that made multi-disc CD imports lose progress).
   useEffect(() => {
-    if (drop.pending) setDropFiles(drop.take());
+    if (!drop.pending) return;
+    const files = drop.take();
+    if (!files || files.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const jobId = await imports.start(files);
+        if (!cancelled && !openJobId) {
+          // Auto-open the viewer for the *first* concurrent import so
+          // the user gets immediate visual feedback. Subsequent drops
+          // run silently — pill counter shows them.
+          setOpenJobId(jobId);
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // toast already inside provider when start succeeds; surface
+        // the rare start-job failure directly here.
+        // eslint-disable-next-line no-console
+        console.error("import start failed", msg);
+      }
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drop.pending]);
 
@@ -57,17 +82,10 @@ export function AppLayout() {
         </div>
       )}
 
-      {/* Auto-opened dialog from window drop */}
-      {dropFiles && (
-        <ImportDialog
-          open={true}
-          onOpenChange={(o) => { if (!o) setDropFiles(null); }}
-          initialFiles={dropFiles}
-        />
-      )}
-
-      {/* Single dialog instance for the indicator — opening from either
-          mobile or desktop pill routes through the same setOpenJobId. */}
+      {/* Single live-view dialog. The pill (ImportIndicator) lets the
+           user switch between concurrent imports — each click sets
+           openJobId, so the same dialog instance re-attaches to the
+           selected job. Closing keeps every upload running. */}
       {openJobId && (
         <ImportDialog
           open={true}

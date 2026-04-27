@@ -122,11 +122,17 @@ async def write_chunk(upload_id: str, idx: int, data: bytes) -> None:
         await asyncio.to_thread(_write_chunk_sync, d, idx, data)
 
 
+def _read_meta_sync(d: Path) -> dict:
+    return json.loads((d / "meta.json").read_text())
+
+
 async def received(upload_id: str) -> dict:
     d = _safe_dir(upload_id)
     if not d.is_dir():
         raise FileNotFoundError(upload_id)
-    return json.loads((d / "meta.json").read_text())
+    # Off-load the read so /uploads-progress on a job with many staged
+    # files doesn't block the event loop on disk I/O.
+    return await asyncio.to_thread(_read_meta_sync, d)
 
 
 def _finalize_sync(d: Path, expected: str, total: int) -> Path:

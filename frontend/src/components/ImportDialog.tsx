@@ -8,13 +8,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useImportJob, isTerminal, type FileError } from "@/hooks/useImportJob";
-import { useChunkedUpload } from "@/hooks/useChunkedUpload";
+import { useImports } from "@/providers/ImportsProvider";
 import { toast } from "sonner";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  initialFiles?: File[];
   /** When set, dialog opens read-only attached to an existing job (used by ImportIndicator click). */
   attachJobId?: string;
 }
@@ -30,43 +29,42 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
-/** Compact label for the job-source line: "cd2.iso, cd3.iso · 4.7 GB". */
-function buildSourceLabel(files: File[]): string {
-  if (files.length === 0) return "";
-  const totalBytes = files.reduce((a, f) => a + f.size, 0);
-  const names = files.length <= 3
-    ? files.map((f) => f.name).join(", ")
-    : `${files.slice(0, 2).map((f) => f.name).join(", ")} + ${files.length - 2} more`;
-  return `${names} · ${fmtBytes(totalBytes)}`;
-}
-
-export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: Props) {
+export function ImportDialog({ open, onOpenChange, attachJobId }: Props) {
   const job = useImportJob();
-  const upload = useChunkedUpload();
+  const imports = useImports();
+
+  // Local "compose mode" state — only used when this dialog opened
+  // standalone (no attachJobId) to gather files for a fresh import.
   const [queued, setQueued] = useState<File[]>([]);
   const [dragInside, setDragInside] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [starting, setStarting] = useState(false);
+  // Once we kick off an import from this dialog, switch to viewer mode
+  // by remembering the job_id we created. Same effect as if the parent
+  // had passed attachJobId.
+  const [localAttachId, setLocalAttachId] = useState<string | null>(null);
 
-  // Attach mode: pre-existing job from ImportIndicator click.
+  // Effective job id for viewer mode — either parent-supplied or
+  // self-started.
+  const viewerJobId = attachJobId ?? localAttachId;
+  // Local upload progress slice (per-file bytes_sent, status, errors).
+  const localUpload = viewerJobId ? imports.uploads[viewerJobId] : undefined;
+
+  // Server-side polling.
   useEffect(() => {
-    if (open && attachJobId) job.attach(attachJobId);
+    if (open && viewerJobId) job.attach(viewerJobId);
     if (!open) {
       job.reset();
-      upload.reset();
       setQueued([]);
       setDragInside(false);
       setConfirmCancel(false);
       setCancelling(false);
+      setStarting(false);
+      setLocalAttachId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, attachJobId]);
-
-  useEffect(() => {
-    if (open && initialFiles && initialFiles.length > 0 && !attachJobId) {
-      setQueued(initialFiles);
-    }
-  }, [open, initialFiles, attachJobId]);
+  }, [open, viewerJobId]);
 
   // Toast on terminal state.
   useEffect(() => {
@@ -113,60 +111,65 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
 
   const start = async () => {
     if (queued.length === 0) return;
-    const sourceLabel = buildSourceLabel(queued);
-    const jobId = await job.startJob(sourceLabel);
-    await upload.start(queued, jobId);
+    setStarting(true);
+    try {
+      const jobId = await imports.start(queued, { silent: true });
+      setLocalAttachId(jobId);  // re-attaches the dialog to the new job
+      setQueued([]);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Failed to start import: ${msg}`);
+    } finally {
+      setStarting(false);
+    }
   };
 
   const doCancel = async () => {
-    if (!job.status) return;
+    if (!viewerJobId) return;
     setCancelling(true);
     try {
-      // Stop the local upload loop so it doesn't keep PUT-ing chunks
-      // against a job that's about to be cleaned up server-side.
-      upload.cancel();
-      await job.cancel(job.status.job_id);
+      await imports.cancelLocal(viewerJobId);
       setConfirmCancel(false);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Cancel failed: ${msg}`);
     } finally {
       setCancelling(false);
     }
   };
 
-  const totalBytes = queued.reduce((a, f) => a + f.size, 0);
   const inProgress = !!job.status && !isTerminal(job.status.status);
   const terminal = !!job.status && isTerminal(job.status.status);
-  const readOnly = !!attachJobId;
 
-  // Real-time upload-phase totals from the backend.
+  // Real-time chunk-receipt totals (server-side aggregate).
   const up = job.uploads;
   const uploadActive = inProgress && up !== null && up.chunks_total > 0
     && up.chunks_received < up.chunks_total
     && job.status!.total_files === 0;
+
+  // Compose mode: no attached job and nothing started yet.
+  const composeMode = !viewerJobId;
+
+  const totalBytesQueued = queued.reduce((a, f) => a + f.size, 0);
 
   return (
     <>
     <Dialog open={open} onOpenChange={(o) => { if (!cancelling) onOpenChange(o); }}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{readOnly ? "Import in progress" : "Import studies"}</DialogTitle>
+          <DialogTitle>{!composeMode ? "Import in progress" : "Import studies"}</DialogTitle>
           <DialogDescription>
-            {readOnly
-              ? "Tracking an active import. You can close this — progress is preserved."
-              : "Drop DICOM files, archives (ZIP / TAR / 7Z) or ISO images. Whole folders work too. Files are stored directly in the PACS."}
+            {!composeMode
+              ? "Tracking an active import. You can close this — progress is preserved and other imports keep running."
+              : "Drop DICOM files, archives (ZIP / TAR / 7Z) or ISO images. Whole folders work too. Multiple drops run in parallel."}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Source label header — visible whenever we have a job (attach or fresh) */}
+        {/* Source label header — visible whenever we have a job */}
         {job.status?.source_label && (
           <div className="text-xs text-muted-foreground -mt-1 truncate">
             <span className="font-medium text-foreground/70">Source:</span> {job.status.source_label}
           </div>
         )}
 
-        {!job.status && !readOnly && (
+        {composeMode && (
           <div
             onDragEnter={(e) => { e.preventDefault(); setDragInside(true); }}
             onDragOver={(e) => { e.preventDefault(); setDragInside(true); }}
@@ -195,10 +198,10 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
           </div>
         )}
 
-        {queued.length > 0 && !job.status && (
+        {composeMode && queued.length > 0 && (
           <div className="border rounded-md">
             <div className="px-3 py-2 border-b bg-muted/40 text-sm font-medium flex justify-between">
-              <span>Queued: {queued.length} file{queued.length === 1 ? "" : "s"}, {fmtBytes(totalBytes)}</span>
+              <span>Queued: {queued.length} file{queued.length === 1 ? "" : "s"}, {fmtBytes(totalBytesQueued)}</span>
               <button
                 className="text-muted-foreground hover:text-foreground text-xs"
                 onClick={() => setQueued([])}
@@ -222,19 +225,23 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
           </div>
         )}
 
-        {/* Per-file upload progress (during local-driven upload phase) */}
-        {upload.files.length > 0 && !readOnly && (
+        {/* Per-file local upload progress (client-driven phase) */}
+        {localUpload && localUpload.files.length > 0 && (
           <div className="border rounded-md">
             <div className="px-3 py-2 border-b bg-muted/40 text-sm font-medium flex justify-between">
-              <span>Uploading: {fmtBytes(upload.bytesSent)} / {fmtBytes(upload.totalBytes)}</span>
+              <span>
+                Uploading: {fmtBytes(localUpload.files.reduce((a, f) => a + f.bytes_sent, 0))} / {fmtBytes(localUpload.totalBytes)}
+              </span>
               <span className="text-muted-foreground tabular-nums">
-                {upload.totalBytes > 0
-                  ? `${Math.round((upload.bytesSent / upload.totalBytes) * 100)}%`
+                {localUpload.totalBytes > 0
+                  ? `${Math.round(
+                      (localUpload.files.reduce((a, f) => a + f.bytes_sent, 0) / localUpload.totalBytes) * 100,
+                    )}%`
                   : ""}
               </span>
             </div>
             <div className="max-h-40 overflow-auto text-sm">
-              {upload.files.map((f, i) => (
+              {localUpload.files.map((f, i) => (
                 <div key={i} className="px-3 py-1.5 border-b last:border-b-0 flex justify-between">
                   <span className="truncate flex-1">
                     {f.name}
@@ -254,10 +261,10 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
           </div>
         )}
 
-        {/* Upload-phase progress (server-side aggregate of received chunks).
-             Visible when attached to a running job, or while local upload
-             hook hasn't finished but server has chunks staged. */}
-        {uploadActive && (
+        {/* Server-side aggregate chunk-receipt — shown when no local
+             upload state (e.g. attached to a job started in another
+             tab) but server confirms chunks are flowing in. */}
+        {uploadActive && !localUpload && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="font-medium">
@@ -273,23 +280,6 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
                 style={{ width: `${up!.chunks_total > 0 ? Math.round((up!.chunks_received / up!.chunks_total) * 100) : 0}%` }}
               />
             </div>
-            {up!.files.length > 1 && (
-              <details className="text-xs">
-                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                  Per-file ({up!.files.length})
-                </summary>
-                <div className="mt-2 border rounded p-2 max-h-32 overflow-auto">
-                  {up!.files.map((f) => (
-                    <div key={f.upload_id} className="flex justify-between font-mono">
-                      <span className="truncate">{f.name}</span>
-                      <span className="text-muted-foreground tabular-nums ml-2">
-                        {f.received_chunks}/{f.total_chunks}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            )}
           </div>
         )}
 
@@ -298,7 +288,7 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="font-medium capitalize">
-                {job.status.status === "queued" && (uploadActive ? "Receiving uploads…" : "Queued…")}
+                {job.status.status === "queued" && (uploadActive || localUpload?.uploading ? "Receiving uploads…" : "Queued…")}
                 {job.status.status === "extracting" && "Extracting archive…"}
                 {job.status.status === "uploading" && "Storing in PACS…"}
                 {job.status.status === "done" && "Done"}
@@ -382,11 +372,11 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
         )}
 
         <DialogFooter className="gap-2">
-          {!job.status ? (
+          {composeMode ? (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button disabled={queued.length === 0 || upload.uploading} onClick={start}>
-                {upload.uploading ? "Uploading..." : `Import (${queued.length})`}
+              <Button disabled={queued.length === 0 || starting} onClick={start}>
+                {starting ? "Starting..." : `Import (${queued.length})`}
               </Button>
             </>
           ) : (
@@ -400,7 +390,7 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
                   {cancelling ? "Cancelling…" : "Cancel import"}
                 </Button>
               )}
-              {job.status.status === "error" && job.status.upload_ids.length > 0 && (
+              {job.status?.status === "error" && job.status.upload_ids.length > 0 && (
                 <Button variant="default" onClick={() => job.retry(job.status!.job_id)}>
                   Retry
                 </Button>
@@ -424,7 +414,7 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
           <AlertDialogTitle>Cancel this import?</AlertDialogTitle>
           <AlertDialogDescription>
             Files already stored in PACS stay there. Anything still uploading
-            will be discarded. This cannot be undone.
+            will be discarded. Other imports keep running. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

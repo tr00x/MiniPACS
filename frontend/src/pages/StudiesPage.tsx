@@ -8,6 +8,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight, List, LayoutGrid, Upload, Keyboard } from "lucide-react";
 import { ImportDialog } from "@/components/ImportDialog";
+import { SortMenu, readPersistedSort, type SortValue } from "@/components/SortMenu";
 import { useStudies, usePrefetchStudyFull, usePrefetchPatientFull } from "@/hooks/queries";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { formatDicomName, formatDicomDate } from "@/lib/dicom";
@@ -38,6 +39,15 @@ interface Study {
 const PAGE_SIZE = 50;
 
 type DatePreset = "today" | "7d" | "30d" | "all" | "custom";
+
+type StudySortKey = "date" | "patient" | "description";
+const STUDY_SORT_OPTIONS = [
+  { key: "date" as const, label: "Study date" },
+  { key: "patient" as const, label: "Patient name" },
+  { key: "description" as const, label: "Description" },
+];
+const STUDY_SORT_KEYSET = new Set<StudySortKey>(["date", "patient", "description"]);
+const STUDY_SORT_DEFAULT: SortValue<StudySortKey> = { by: "date", dir: "desc" };
 
 const getDateRange = (preset: DatePreset): { from: string; to: string } | null => {
   if (preset === "custom") return null; // handled by custom inputs
@@ -72,60 +82,13 @@ export function StudiesPage() {
     return (localStorage.getItem("studies.viewMode") as "list" | "grid") || "list";
   });
   const [importOpen, setImportOpen] = useState(false);
-  const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
-  const [windowDragActive, setWindowDragActive] = useState(false);
-
-  // Window-level drag overlay. If the radiologist drops files anywhere on
-  // the worklist page (not just the modal), pop the import dialog with
-  // those files already queued. The counter logic (dragDepth) is the
-  // standard way to survive dragenter/dragleave firing on child nodes
-  // as the pointer crosses element boundaries.
-  useEffect(() => {
-    let depth = 0;
-    const isFileDrag = (e: DragEvent) =>
-      Array.from(e.dataTransfer?.types || []).includes("Files");
-    const onEnter = (e: DragEvent) => {
-      if (!isFileDrag(e)) return;
-      e.preventDefault();
-      depth++;
-      if (depth === 1) setWindowDragActive(true);
-    };
-    const onOver = (e: DragEvent) => {
-      if (!isFileDrag(e)) return;
-      e.preventDefault();
-    };
-    const onLeave = (e: DragEvent) => {
-      if (!isFileDrag(e)) return;
-      depth = Math.max(0, depth - 1);
-      if (depth === 0) setWindowDragActive(false);
-    };
-    const onDrop = (e: DragEvent) => {
-      if (!isFileDrag(e)) return;
-      e.preventDefault();
-      depth = 0;
-      setWindowDragActive(false);
-      const files: File[] = [];
-      if (e.dataTransfer) {
-        for (let i = 0; i < e.dataTransfer.files.length; i++) {
-          files.push(e.dataTransfer.files[i]);
-        }
-      }
-      if (files.length) {
-        setDroppedFiles(files);
-        setImportOpen(true);
-      }
-    };
-    window.addEventListener("dragenter", onEnter);
-    window.addEventListener("dragover", onOver);
-    window.addEventListener("dragleave", onLeave);
-    window.addEventListener("drop", onDrop);
-    return () => {
-      window.removeEventListener("dragenter", onEnter);
-      window.removeEventListener("dragover", onOver);
-      window.removeEventListener("dragleave", onLeave);
-      window.removeEventListener("drop", onDrop);
-    };
-  }, []);
+  const [sort, setSort] = useState<SortValue<StudySortKey>>(() =>
+    readPersistedSort("studies.sort", STUDY_SORT_DEFAULT, STUDY_SORT_KEYSET),
+  );
+  // The window-level drop overlay + import-dialog auto-open lives in
+  // AppLayout now (drives the global ImportsProvider), so a drop on
+  // any page — not just the worklist — starts an import. The "Upload"
+  // button below opens an empty dialog for manual file picking.
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -159,6 +122,8 @@ export function StudiesPage() {
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
     include: "thumbs",
+    sort_by: sort.by,
+    sort_dir: sort.dir,
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(modFilter ? { modality: modFilter } : {}),
     ...(fromParam ? { date_from: fromParam } : {}),
@@ -324,7 +289,7 @@ export function StudiesPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => { setDroppedFiles([]); setImportOpen(true); }}
+            onClick={() => setImportOpen(true)}
             title="Import DICOM files, ZIP/TAR/7Z archives or ISO images"
           >
             <Upload className="h-4 w-4 mr-2" />
@@ -362,24 +327,9 @@ export function StudiesPage() {
         </div>
       </div>
 
-      {/* Window-level drag overlay — any drop on the worklist page opens the
-          import dialog with the files already queued. */}
-      {windowDragActive && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-primary/10 backdrop-blur-sm pointer-events-none">
-          <div className="border-4 border-dashed border-primary rounded-xl p-12 bg-background/90 shadow-2xl">
-            <Upload className="h-16 w-16 mx-auto text-primary mb-4" />
-            <div className="text-2xl font-semibold text-center">Drop files to import</div>
-            <div className="text-sm text-muted-foreground text-center mt-2">
-              DICOM · ZIP · TAR · 7Z · ISO · folders
-            </div>
-          </div>
-        </div>
-      )}
-
       <ImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        initialFiles={droppedFiles}
       />
 
       {/* Filter bar */}
@@ -450,6 +400,15 @@ export function StudiesPage() {
                 {m}
               </Button>
             ))}
+          </div>
+
+          <div className="ml-auto">
+            <SortMenu<StudySortKey>
+              options={STUDY_SORT_OPTIONS}
+              value={sort}
+              onChange={(next) => { setSort(next); setPage(1); setFocusedRow(-1); }}
+              persistKey="studies.sort"
+            />
           </div>
         </div>
       </div>

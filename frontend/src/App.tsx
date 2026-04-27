@@ -4,6 +4,7 @@ import { AnimatePresence } from "motion/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/providers/AuthProvider";
+import { ImportsProvider } from "@/providers/ImportsProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageLoader } from "@/components/PageLoader";
@@ -75,10 +76,12 @@ export default function App() {
     <BrowserRouter>
       <ErrorBoundary>
         <AuthProvider>
-          <Toaster position="top-right" richColors />
-          <Suspense fallback={<PageLoader />}>
-            <AnimatedRoutes />
-          </Suspense>
+          <ImportsProvider>
+            <Toaster position="top-right" richColors />
+            <Suspense fallback={<PageLoader />}>
+              <AnimatedRoutes />
+            </Suspense>
+          </ImportsProvider>
         </AuthProvider>
       </ErrorBoundary>
     </BrowserRouter>
