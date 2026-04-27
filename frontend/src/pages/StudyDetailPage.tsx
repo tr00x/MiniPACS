@@ -12,7 +12,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Download, Disc, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Layers, Lock, Shuffle, Mail, FileText, Plus, Trash2 } from "lucide-react";
+import { Download, Disc, Send, ExternalLink, ArrowLeft, Info, Copy, Check, Share2, Maximize, Layers, Lock, Shuffle, Mail, FileText, Plus, Trash2, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { QRCodeSVG } from "qrcode.react";
@@ -89,6 +89,8 @@ export function StudyDetailPage() {
   const [selectedNode, setSelectedNode] = useState<string>("");
   const [sendError, setSendError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<{ loaded: number; total: number | null }>({ loaded: 0, total: null });
+  const [burnProgress, setBurnProgress] = useState<{ loaded: number; total: number | null }>({ loaded: 0, total: null });
   const [sharing, setSharing] = useState(false);
   const [uidCopied, setUidCopied] = useState(false);
   const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
@@ -248,29 +250,41 @@ export function StudyDetailPage() {
   const handleDownloadConfirm = async () => {
     setDownloadDialogOpen(false);
     setDownloading(true);
+    setDownloadProgress({ loaded: 0, total: null });
     try {
-      const res = await api.get(`/studies/${id}/download`, { responseType: "blob" });
+      const res = await api.get(`/studies/${id}/download`, {
+        responseType: "blob",
+        timeout: 600000,
+        onDownloadProgress: (e) => {
+          setDownloadProgress({ loaded: e.loaded, total: e.total ?? null });
+        },
+      });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url;
       a.download = `study-${id}.zip`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast.success("Download started");
     } catch (err: unknown) {
       toast.error(getErrorMessage(err, "Failed to download study"));
     } finally {
       setDownloading(false);
+      setDownloadProgress({ loaded: 0, total: null });
     }
   };
 
   const handleBurnConfirm = async () => {
     setBurnDialogOpen(false);
     setBurning(true);
+    setBurnProgress({ loaded: 0, total: null });
     try {
       const res = await api.get(`/studies/${id}/burn-iso`, {
         responseType: "blob",
         timeout: 600000, // 10 minutes — large studies can take 60s+ to assemble
+        onDownloadProgress: (e) => {
+          setBurnProgress({ loaded: e.loaded, total: e.total ?? null });
+        },
       });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
@@ -289,8 +303,30 @@ export function StudyDetailPage() {
       toast.error(getErrorMessage(err, "Failed to build ISO"));
     } finally {
       setBurning(false);
+      setBurnProgress({ loaded: 0, total: null });
     }
   };
+
+  const fmtMB = (bytes: number): string => {
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  const downloadLabel = (() => {
+    if (!downloading) return "Download";
+    if (downloadProgress.loaded === 0) return "Preparing on server...";
+    return downloadProgress.total
+      ? `Downloading ${fmtMB(downloadProgress.loaded)} / ${fmtMB(downloadProgress.total)}`
+      : `Downloading ${fmtMB(downloadProgress.loaded)}`;
+  })();
+
+  const burnLabel = (() => {
+    if (!burning) return "Burn to CD/USB";
+    if (burnProgress.loaded === 0) return "Building ISO on server...";
+    return burnProgress.total
+      ? `Downloading ${fmtMB(burnProgress.loaded)} / ${fmtMB(burnProgress.total)}`
+      : `Downloading ${fmtMB(burnProgress.loaded)}`;
+  })();
 
   const copyUid = () => {
     navigator.clipboard.writeText(studyUid);
@@ -416,13 +452,17 @@ export function StudyDetailPage() {
               Share
             </Button>
           )}
-          <Button variant="outline" onClick={() => setDownloadDialogOpen(true)} disabled={downloading} className="gap-2">
-            <Download className="h-4 w-4" />
-            {downloading ? "Downloading..." : "Download"}
+          <Button variant="outline" onClick={() => setDownloadDialogOpen(true)} disabled={downloading} className="gap-2 tabular-nums">
+            {downloading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Download className="h-4 w-4" />}
+            {downloadLabel}
           </Button>
-          <Button variant="outline" onClick={() => setBurnDialogOpen(true)} disabled={burning} className="gap-2">
-            <Disc className="h-4 w-4" />
-            {burning ? "Building ISO..." : "Burn to CD/USB"}
+          <Button variant="outline" onClick={() => setBurnDialogOpen(true)} disabled={burning} className="gap-2 tabular-nums">
+            {burning
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Disc className="h-4 w-4" />}
+            {burnLabel}
           </Button>
           {viewers.map((v) => (
             <Button
