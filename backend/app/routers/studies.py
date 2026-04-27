@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import re
+import shutil
 import time
 from datetime import datetime, timezone
 
@@ -13,11 +14,12 @@ from app.db import PgConnection
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from PIL import Image
+from starlette.background import BackgroundTask
 from stream_zip import async_stream_zip, ZIP_64
 
 from app.database import get_db
 from app.routers.auth import get_current_user
-from app.services import orthanc
+from app.services import iso_builder, orthanc
 from app.middleware.audit import log_audit
 
 router = APIRouter(prefix="/api/studies", tags=["studies"])
@@ -497,6 +499,49 @@ async def download_study(
         orthanc.download_study_stream(study_id),
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=study-{study_id}.zip"},
+    )
+
+
+@router.get("/{study_id}/burn-iso")
+async def burn_study_iso(
+    study_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Build and stream a bootable ISO for the study — DICOM files + DICOMDIR
+    + bundled DWV (HTML5 DICOM viewer). Patient or referring physician can
+    either burn this image to a CD/DVD via Windows "Burn files to disc" or
+    write it to USB via Rufus / balenaEtcher / dd."""
+    try:
+        meta = await orthanc.get_study(study_id)
+        accession = (meta.get("MainDicomTags") or {}).get("AccessionNumber") or None
+    except Exception:
+        accession = None
+
+    iso_path, tempdir = await iso_builder.build_study_iso(study_id, accession)
+
+    await log_audit(
+        "export_study_iso", "study", study_id,
+        user_id=user["id"], ip_address=request.client.host,
+    )
+
+    def _iter_iso():
+        with iso_path.open("rb") as fh:
+            while True:
+                chunk = fh.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+    def _cleanup():
+        shutil.rmtree(tempdir, ignore_errors=True)
+
+    safe_label = (accession or study_id[:8]).replace("/", "_")
+    return StreamingResponse(
+        _iter_iso(),
+        media_type="application/x-iso9660-image",
+        headers={"Content-Disposition": f'attachment; filename="study-{safe_label}.iso"'},
+        background=BackgroundTask(_cleanup),
     )
 
 
