@@ -40,7 +40,12 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 STAGING_ROOT = Path(os.environ.get("MINIPACS_STAGING_DIR", "/app/data/import-staging"))
-STAGING_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def init() -> None:
+    """Idempotent: ensure STAGING_ROOT exists. Called from FastAPI lifespan."""
+    STAGING_ROOT.mkdir(parents=True, exist_ok=True)
+
 
 # 24 h is enough for a user to walk away at lunch and come back; longer
 # than that and the chunks are almost certainly orphaned.
@@ -81,20 +86,26 @@ async def create(name: str, size: int, sha256_hex: str, total_chunks: int) -> st
     return upload_id
 
 
+def _write_chunk_sync(d: Path, idx: int, data: bytes) -> None:
+    chunk_path = d / f"chunk-{idx:04d}"
+    chunk_path.write_bytes(data)
+    meta_path = d / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    if idx not in meta["received_chunks"]:
+        meta["received_chunks"].append(idx)
+        meta["received_chunks"].sort()
+        # Atomic meta write — prevents truncated meta.json on crash mid-write.
+        tmp = meta_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(meta))
+        os.replace(tmp, meta_path)
+
+
 async def write_chunk(upload_id: str, idx: int, data: bytes) -> None:
     d = _safe_dir(upload_id)
     if not d.is_dir():
         raise FileNotFoundError(upload_id)
     async with _lock_for(upload_id):
-        # Write data first; only update meta after the bytes are durable.
-        chunk_path = d / f"chunk-{idx:04d}"
-        chunk_path.write_bytes(data)
-        meta_path = d / "meta.json"
-        meta = json.loads(meta_path.read_text())
-        if idx not in meta["received_chunks"]:
-            meta["received_chunks"].append(idx)
-            meta["received_chunks"].sort()
-            meta_path.write_text(json.dumps(meta))
+        await asyncio.to_thread(_write_chunk_sync, d, idx, data)
 
 
 async def received(upload_id: str) -> dict:
@@ -102,6 +113,25 @@ async def received(upload_id: str) -> dict:
     if not d.is_dir():
         raise FileNotFoundError(upload_id)
     return json.loads((d / "meta.json").read_text())
+
+
+def _finalize_sync(d: Path, expected: str, total: int) -> Path:
+    out = d / "assembled.bin"
+    h = _sha256()
+    with out.open("wb") as fout:
+        for i in range(total):
+            with (d / f"chunk-{i:04d}").open("rb") as fin:
+                while True:
+                    buf = fin.read(1024 * 1024)
+                    if not buf:
+                        break
+                    h.update(buf)
+                    fout.write(buf)
+    actual = h.hexdigest()
+    if actual != expected:
+        out.unlink(missing_ok=True)
+        raise ValueError(f"finalize: sha256 mismatch (expected {expected}, got {actual})")
+    return out
 
 
 async def finalize(upload_id: str) -> Path:
@@ -119,38 +149,20 @@ async def finalize(upload_id: str) -> Path:
         missing = [i for i in range(total) if i not in received_set]
         if missing:
             raise ValueError(f"finalize: missing chunks {missing[:10]} (of {total})")
-
-        out = d / "assembled.bin"
-        h = _sha256()
-        with out.open("wb") as fout:
-            for i in range(total):
-                with (d / f"chunk-{i:04d}").open("rb") as fin:
-                    while True:
-                        buf = fin.read(1024 * 1024)
-                        if not buf:
-                            break
-                        h.update(buf)
-                        fout.write(buf)
-        actual = h.hexdigest()
-        if actual != expected:
-            out.unlink(missing_ok=True)
-            raise ValueError(f"finalize: sha256 mismatch (expected {expected}, got {actual})")
-        return out
+        return await asyncio.to_thread(_finalize_sync, d, expected, total)
 
 
 async def cleanup(upload_id: str) -> None:
     d = _safe_dir(upload_id)
-    shutil.rmtree(d, ignore_errors=True)
+    await asyncio.to_thread(shutil.rmtree, d, ignore_errors=True)
     _locks.pop(upload_id, None)
 
 
-async def gc_old() -> int:
-    """Remove staging dirs whose meta.json mtime is older than _GC_AGE_SECONDS.
-    Returns count removed. Safe to call from a background loop."""
+def _gc_old_sync() -> list[str]:
     if not STAGING_ROOT.is_dir():
-        return 0
+        return []
     cutoff = time.time() - _GC_AGE_SECONDS
-    removed = 0
+    removed_ids: list[str] = []
     for child in STAGING_ROOT.iterdir():
         if not child.is_dir():
             continue
@@ -161,10 +173,20 @@ async def gc_old() -> int:
             continue
         if mtime < cutoff:
             shutil.rmtree(child, ignore_errors=True)
-            removed += 1
-    if removed:
-        log.info("import-staging GC removed %d stale uploads", removed)
-    return removed
+            removed_ids.append(child.name)
+    return removed_ids
+
+
+async def gc_old() -> int:
+    """Remove staging dirs whose meta.json mtime is older than _GC_AGE_SECONDS.
+    Returns count removed. Safe to call from a background loop."""
+    removed_ids = await asyncio.to_thread(_gc_old_sync)
+    # Fix I2: drop locks for any upload_id whose dir is gone.
+    for uid in removed_ids:
+        _locks.pop(uid, None)
+    if removed_ids:
+        log.info("import-staging GC removed %d stale uploads", len(removed_ids))
+    return len(removed_ids)
 
 
 async def gc_loop() -> None:
