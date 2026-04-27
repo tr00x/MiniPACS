@@ -9,30 +9,18 @@ WORKDIR /app
 # Joliet + Rock Ridge extensions so Windows, macOS, and Linux all read
 # long filenames correctly off the resulting disc/USB.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends p7zip-full xorriso curl unzip \
+    && apt-get install -y --no-install-recommends p7zip-full xorriso \
     && rm -rf /var/lib/apt/lists/*
 
-# DWV (DICOM Web Viewer) is bundled into the backend image so the burn-ISO
-# export can stage a self-contained HTML5 viewer next to the patient's
-# DICOMs. MIT license — fine to redistribute on patient discs. Pure
-# HTML/JS, no Java/install — patient opens index.html in any browser
-# (Win/Mac/Linux/iPad), picks the DICOM folder, viewer loads.
-# Using the upstream "dwv-simplistic" prebuilt PWA distro: single
-# index.html entry + bundled jpeg2000/jpegbaseline/jpegloss/rle workers
-# so compressed DICOMs render offline. Pinned version for repeatable
-# builds; bump deliberately on major upstream releases. The zip extracts
-# to a versioned subdir which we flatten so iso_builder can stage a
-# stable ${DWV_PATH}/index.html regardless of version bumps.
-ENV DWV_VERSION=0.10.0
-ENV DWV_PATH=/opt/dwv
-RUN mkdir -p ${DWV_PATH} \
-    && curl -fsSL -o /tmp/dwv.zip \
-       "https://github.com/ivmartel/dwv-simplistic/releases/download/v${DWV_VERSION}/dwv-simplistic-${DWV_VERSION}.zip" \
-    && unzip -q /tmp/dwv.zip -d /tmp/dwv-extract \
-    && mv /tmp/dwv-extract/dwv-simplistic-${DWV_VERSION}/* ${DWV_PATH}/ \
-    && mv /tmp/dwv-extract/dwv-simplistic-${DWV_VERSION}/.[!.]* ${DWV_PATH}/ 2>/dev/null || true \
-    && rm -rf /tmp/dwv.zip /tmp/dwv-extract \
-    && test -f ${DWV_PATH}/index.html
+# Burn-ISO export ships DICOMDIR-only (IHE PDI compliant). No embedded
+# viewer — modern browsers block file:// origins from loading ES modules,
+# instantiating Workers, fetching JSON, registering Service Workers, etc.
+# Both `dwv-simplistic` (PWA) and stock `dwv` UMD (needs Workers for J2K
+# / JPEG-Lossless / RLE decoders) failed under file:// in Chrome/Safari.
+# Real-world studies are almost always compressed, so a viewer that
+# silently fails on every compressed series is worse than no viewer at
+# all. README.txt directs patients to free desktop viewers (Weasis,
+# MicroDicom, Horos, RadiAnt) which read DICOMDIR natively.
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

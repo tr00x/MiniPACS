@@ -4,13 +4,20 @@ Pipeline per request:
 
     Orthanc /studies/{id}/media (ZIP with DICOMDIR)
         -> tempdir/staging/DICOM/                  (extracted)
-        -> tempdir/staging/VIEWER/                 (DWV bundle copy)
-        -> tempdir/staging/index.html              (auto-redirect to VIEWER)
-        -> tempdir/staging/autorun.inf             (Win autoplay)
+        -> tempdir/staging/index.html              (instructions + viewer links)
+        -> tempdir/staging/autorun.inf             (Win autoplay -> index.html)
         -> tempdir/staging/README.txt              (cross-platform instructions)
         -> xorriso -as mkisofs ...                 (mints tempdir/study.iso)
     StreamingResponse(study.iso) -> client
     BackgroundTask: rm -rf tempdir
+
+No embedded HTML viewer: modern browsers fence off file:// origins —
+they block ES module imports, Worker construction, fetch(), service
+worker registration. dwv-simplistic (PWA) and stock dwv UMD (needs
+Workers for J2K / JPEG-Lossless / RLE) both fail on real-world
+compressed studies. ISO is IHE PDI compliant (DICOM/DICOMDIR);
+README.txt directs patients to free desktop viewers that read it
+natively.
 
 Concurrency capped at 2 — a single 2 GB study peaks ~6 GB intermediate disk.
 """
@@ -18,7 +25,6 @@ Concurrency capped at 2 — a single 2 GB study peaks ~6 GB intermediate disk.
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import shutil
 import tempfile
@@ -27,12 +33,10 @@ from pathlib import Path
 
 from app.services import orthanc
 
-DWV_PATH = Path(os.environ.get("DWV_PATH", "/opt/dwv"))
 _BUILD_SEM = asyncio.Semaphore(2)
 
 _AUTORUN_INF = b"""[autorun]
 shellexecute=index.html
-icon=VIEWER\\favicon.ico
 label=Patient DICOM Study
 """
 
@@ -41,13 +45,46 @@ _INDEX_HTML = b"""<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <title>Patient DICOM Study</title>
-  <meta http-equiv="refresh" content="0; url=VIEWER/index.html">
-  <style>body{font-family:system-ui,sans-serif;max-width:640px;margin:3em auto;padding:0 1em;color:#222;}</style>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:720px;margin:3em auto;padding:0 1.5em;color:#222;line-height:1.55;}
+    h1{margin-bottom:.2em;}
+    h2{margin-top:1.6em;border-bottom:1px solid #ddd;padding-bottom:.2em;}
+    code{background:#f4f4f4;padding:1px 5px;border-radius:3px;font-size:.95em;}
+    ul{padding-left:1.4em;}
+    li{margin:.35em 0;}
+    a{color:#06c;}
+    .muted{color:#666;font-size:.9em;}
+  </style>
 </head>
 <body>
   <h1>Patient DICOM Study</h1>
-  <p>Loading viewer&hellip; If nothing happens, <a href="VIEWER/index.html">click here</a>.</p>
-  <p>After the viewer opens, drag the <code>DICOM</code> folder onto it (or use the viewer's <em>Open files</em> control to select all files inside <code>DICOM/</code>).</p>
+  <p>This disc contains your medical images in standard <strong>DICOM</strong> format
+  (IHE PDI compliant), in the <code>DICOM/</code> folder, indexed by <code>DICOMDIR</code>.</p>
+
+  <h2>How to view the images</h2>
+  <p>Install one of the free DICOM viewers below, then open this disc / USB drive
+  with it (most viewers have a <em>File &rarr; Open DICOMDIR</em> menu, or accept
+  the disc's drive letter).</p>
+  <ul>
+    <li><strong>Windows:</strong> <a href="https://www.microdicom.com">MicroDICOM</a>
+        or <a href="https://www.radiantviewer.com">RadiAnt</a></li>
+    <li><strong>macOS:</strong> <a href="https://horosproject.org">Horos</a></li>
+    <li><strong>Linux / Cross-platform:</strong> <a href="https://weasis.org">Weasis</a>
+        (also runs on Windows and macOS; requires Java)</li>
+    <li><strong>Tablet / Phone:</strong> any DICOM viewer app from your app store
+        (search for "DICOM viewer"); copy the <code>DICOM</code> folder to the
+        device first.</li>
+  </ul>
+
+  <h2>What's on this disc</h2>
+  <ul>
+    <li><code>DICOM/</code> &mdash; the image files</li>
+    <li><code>DICOMDIR</code> &mdash; index of the study (inside <code>DICOM/</code>)</li>
+    <li><code>README.txt</code> &mdash; this information as plain text</li>
+  </ul>
+
+  <p class="muted">If you received this disc from a clinic, give it (or a copy) to
+  any other doctor &mdash; every modern radiology workstation reads DICOMDIR.</p>
 </body>
 </html>
 """
@@ -55,29 +92,35 @@ _INDEX_HTML = b"""<!DOCTYPE html>
 _README_TXT = b"""Patient DICOM Study
 ====================
 
-Contents of this disc / USB drive:
+This disc / USB drive contains your medical images in standard DICOM
+format (IHE PDI compliant). Any radiology workstation can read it.
 
-  DICOM/      DICOM image files (with DICOMDIR index, IHE PDI compliant)
-  VIEWER/     DWV (DICOM Web Viewer) - HTML5/JS, MIT license
-  index.html  Click this to launch the viewer in your default browser
+Contents
+--------
+
+  DICOM/        DICOM image files
+  DICOM/DICOMDIR  Index of the study (auto-discovered by viewers)
+  index.html    Open in a browser for viewer download links
+  README.txt    This file
 
 How to view the images
 ----------------------
 
-WINDOWS:    Double-click index.html. (Most discs auto-launch on insert.)
-MAC/LINUX:  Open index.html in any modern browser (Safari, Chrome, Firefox).
-TABLET:     Copy the contents to a USB-C drive, then open index.html
-            via your tablet's Files app.
+Install a free DICOM viewer, then open this disc with it. Most viewers
+auto-discover the DICOMDIR file when you point them at the drive.
 
-After the viewer loads, drag the DICOM folder onto the viewer area,
-or click "Open files" and select every file inside the DICOM folder.
-(Browser security prevents the viewer from auto-loading files off disc.)
+  WINDOWS:  MicroDICOM      https://www.microdicom.com
+            RadiAnt         https://www.radiantviewer.com
 
-Alternative viewers (read the DICOMDIR file directly):
-  - Weasis        https://weasis.org
-  - MicroDicom    https://microdicom.com
-  - Horos (Mac)   https://horosproject.org
-  - RadiAnt (Win) https://www.radiantviewer.com
+  MAC:      Horos           https://horosproject.org
+            Weasis          https://weasis.org   (needs Java)
+
+  LINUX:    Weasis          https://weasis.org
+
+  TABLET:   Copy the DICOM folder to your device, then open it
+            with any "DICOM viewer" app from your app store.
+
+For more info, double-click index.html on this disc.
 """
 
 _SAFE_LABEL = re.compile(r"[^A-Za-z0-9_-]")
@@ -97,12 +140,6 @@ async def _stream_to_file(study_id: str, dest: Path) -> None:
 def _extract_zip(zip_path: Path, dest: Path) -> None:
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(dest)
-
-
-def _stage_viewer(dest: Path) -> None:
-    if not DWV_PATH.exists():
-        raise RuntimeError(f"DWV bundle missing at {DWV_PATH} — image not built correctly")
-    shutil.copytree(DWV_PATH, dest, symlinks=False)
 
 
 def _write_top_level(root: Path) -> None:
@@ -145,7 +182,6 @@ async def build_study_iso(study_id: str, accession: str | None = None) -> tuple[
             await asyncio.to_thread(_extract_zip, zip_path, staging / "DICOM")
             zip_path.unlink()  # reclaim space before xorriso
 
-            await asyncio.to_thread(_stage_viewer, staging / "VIEWER")
             _write_top_level(staging)
 
             await _run_xorriso(staging, iso_path, _volume_label(accession, study_id))
