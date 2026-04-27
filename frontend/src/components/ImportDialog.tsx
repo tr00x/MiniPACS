@@ -110,7 +110,7 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
           <DialogDescription>
             {readOnly
               ? "Tracking an active import. You can close this — progress is preserved."
-              : "Drop DICOM files, archives (ZIP / TAR / 7Z) or ISO images. Whole folders work too. Files go straight into the PACS via Orthanc."}
+              : "Drop DICOM files, archives (ZIP / TAR / 7Z) or ISO images. Whole folders work too. Files are stored directly in the PACS."}
           </DialogDescription>
         </DialogHeader>
 
@@ -202,14 +202,14 @@ export function ImportDialog({ open, onOpenChange, initialFiles, attachJobId }: 
           </div>
         )}
 
-        {/* Server-side job state (after upload, during extract+upload-to-Orthanc) */}
+        {/* Server-side job state (after upload, during extract+store-in-PACS) */}
         {job.status && (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="font-medium capitalize">
                 {job.status.status === "queued" && "Queued..."}
                 {job.status.status === "extracting" && "Extracting archive..."}
-                {job.status.status === "uploading" && "Uploading to Orthanc..."}
+                {job.status.status === "uploading" && "Storing in PACS..."}
                 {job.status.status === "done" && "Done"}
                 {job.status.status === "error" && "Error"}
               </span>

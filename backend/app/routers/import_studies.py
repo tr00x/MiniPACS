@@ -298,7 +298,7 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
                             file_failed[0] += 1
                         await import_jobs_repo.increment(
                             job_id, failed=1,
-                            error=f"{p.name}: orthanc {resp.status_code}",
+                            error=f"{p.name}: PACS rejected (HTTP {resp.status_code})",
                             current_file=p.name,
                         )
                         return
