@@ -12,19 +12,27 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends p7zip-full xorriso curl unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Weasis Portable bakes a Java DICOM viewer with a bundled JRE per OS into
-# the backend image so the burn-ISO export can stage it next to the
-# patient's DICOMs without runtime downloads. Apache 2.0 license — fine
-# to redistribute on patient discs. Pinned version for repeatable
-# builds; bump deliberately when upstream releases a new feature LTS.
-ENV WEASIS_VERSION=4.6.2
-ENV WEASIS_PATH=/opt/weasis
-RUN mkdir -p ${WEASIS_PATH} \
-    && curl -fsSL -o /tmp/weasis.zip \
-       "https://github.com/nroduit/Weasis/releases/download/v${WEASIS_VERSION}/weasis-native.zip" \
-    && unzip -q /tmp/weasis.zip -d ${WEASIS_PATH} \
-    && rm /tmp/weasis.zip \
-    && test -d ${WEASIS_PATH}/bin-dist
+# DWV (DICOM Web Viewer) is bundled into the backend image so the burn-ISO
+# export can stage a self-contained HTML5 viewer next to the patient's
+# DICOMs. MIT license — fine to redistribute on patient discs. Pure
+# HTML/JS, no Java/install — patient opens index.html in any browser
+# (Win/Mac/Linux/iPad), picks the DICOM folder, viewer loads.
+# Using the upstream "dwv-simplistic" prebuilt PWA distro: single
+# index.html entry + bundled jpeg2000/jpegbaseline/jpegloss/rle workers
+# so compressed DICOMs render offline. Pinned version for repeatable
+# builds; bump deliberately on major upstream releases. The zip extracts
+# to a versioned subdir which we flatten so iso_builder can stage a
+# stable ${DWV_PATH}/index.html regardless of version bumps.
+ENV DWV_VERSION=0.10.0
+ENV DWV_PATH=/opt/dwv
+RUN mkdir -p ${DWV_PATH} \
+    && curl -fsSL -o /tmp/dwv.zip \
+       "https://github.com/ivmartel/dwv-simplistic/releases/download/v${DWV_VERSION}/dwv-simplistic-${DWV_VERSION}.zip" \
+    && unzip -q /tmp/dwv.zip -d /tmp/dwv-extract \
+    && mv /tmp/dwv-extract/dwv-simplistic-${DWV_VERSION}/* ${DWV_PATH}/ \
+    && mv /tmp/dwv-extract/dwv-simplistic-${DWV_VERSION}/.[!.]* ${DWV_PATH}/ 2>/dev/null || true \
+    && rm -rf /tmp/dwv.zip /tmp/dwv-extract \
+    && test -f ${DWV_PATH}/index.html
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
