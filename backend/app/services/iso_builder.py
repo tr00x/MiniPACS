@@ -142,15 +142,15 @@ async def build_study_iso(study_id: str, accession: str | None = None) -> tuple[
             iso_path = tempdir / f"study-{study_id[:8]}.iso"
 
             await _stream_to_file(study_id, zip_path)
-            _extract_zip(zip_path, staging / "DICOM")
+            await asyncio.to_thread(_extract_zip, zip_path, staging / "DICOM")
             zip_path.unlink()  # reclaim space before xorriso
 
-            _stage_viewer(staging / "VIEWER")
+            await asyncio.to_thread(_stage_viewer, staging / "VIEWER")
             _write_top_level(staging)
 
             await _run_xorriso(staging, iso_path, _volume_label(accession, study_id))
 
-            shutil.rmtree(staging)  # only the ISO needs to survive past return
+            await asyncio.to_thread(shutil.rmtree, staging)  # only the ISO needs to survive past return
             return iso_path, tempdir
         except Exception:
             shutil.rmtree(tempdir, ignore_errors=True)
