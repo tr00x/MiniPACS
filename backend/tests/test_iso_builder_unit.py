@@ -100,51 +100,73 @@ class TestWriteTopLevel:
         content = (tmp_path / "autorun.inf").read_bytes()
         assert content == _AUTORUN_INF
 
-    def test_autorun_inf_uses_single_backslash_before_favicon(self, tmp_path: Path):
-        # Windows autorun.inf needs a backslash, not a forward slash.
-        # And critically — exactly one backslash, not two (a doubled "\\"
-        # would point at a UNC path and Windows would reject the autorun).
-        _write_top_level(tmp_path)
-        content = (tmp_path / "autorun.inf").read_bytes()
-        # Should contain "VIEWER\favicon.ico" — exactly one backslash.
-        assert b"VIEWER\\favicon.ico" in content
-        # And NOT a UNC-style double backslash.
-        assert b"VIEWER\\\\favicon.ico" not in content
-
     def test_autorun_inf_has_shellexecute(self, tmp_path: Path):
         _write_top_level(tmp_path)
         content = (tmp_path / "autorun.inf").read_bytes()
         assert b"shellexecute=index.html" in content
         assert b"[autorun]" in content
 
-    def test_index_html_has_meta_refresh(self, tmp_path: Path):
-        # Disc opens index.html -> meta refresh punts to VIEWER/index.html.
-        # If this regresses, double-clicking the disc shows a static page.
+    def test_autorun_inf_no_viewer_path(self, tmp_path: Path):
+        # ISO no longer ships an embedded viewer (file:// fences it off);
+        # autorun must not reference a VIEWER/ subdir that doesn't exist.
+        _write_top_level(tmp_path)
+        content = (tmp_path / "autorun.inf").read_bytes()
+        assert b"VIEWER" not in content
+
+    def test_index_html_no_viewer_redirect(self, tmp_path: Path):
+        # Old behaviour was a meta-refresh into VIEWER/index.html. Now there
+        # IS no viewer on disc — index.html is a static page with viewer
+        # download links. Regression here means we shipped a redirect to
+        # a missing path.
         _write_top_level(tmp_path)
         content = (tmp_path / "index.html").read_bytes()
-        assert b'meta http-equiv="refresh"' in content
-        assert b"VIEWER/index.html" in content
-        # Refresh delay must be 0 — anything else means a perceptible flash.
-        assert b'content="0;' in content
+        assert b"VIEWER/" not in content
+        assert b'meta http-equiv="refresh"' not in content
 
-    def test_index_html_has_fallback_link(self, tmp_path: Path):
-        # If meta refresh is blocked (locked-down kiosk browser), the
-        # user must still be able to click through manually.
+    def test_index_html_links_external_viewers(self, tmp_path: Path):
+        # The whole point of index.html now is to direct patients to free
+        # desktop viewers. If these links disappear, patients open the
+        # disc and have no idea what to do.
         _write_top_level(tmp_path)
         content = (tmp_path / "index.html").read_bytes()
-        assert b'href="VIEWER/index.html"' in content
+        assert b"weasis.org" in content
+        assert b"microdicom.com" in content
+        assert b"horosproject.org" in content
 
-    def test_readme_mentions_dwv(self, tmp_path: Path):
+    def test_index_html_mentions_dicom_layout(self, tmp_path: Path):
+        # Patients (and other clinics) need to know the disc is plain
+        # DICOM/DICOMDIR — so any radiology workstation can ingest it.
+        _write_top_level(tmp_path)
+        content = (tmp_path / "index.html").read_bytes()
+        assert b"DICOM" in content
+        assert b"DICOMDIR" in content
+
+    def test_readme_no_dwv_references(self, tmp_path: Path):
+        # Old README mentioned DWV / VIEWER folder; both are gone now.
+        # Stale references would mislead the patient about disc contents.
         _write_top_level(tmp_path)
         content = (tmp_path / "README.txt").read_bytes()
-        assert b"DWV" in content
+        assert b"DWV" not in content
+        assert b"VIEWER" not in content
 
     def test_readme_mentions_dicomdir(self, tmp_path: Path):
-        # Patients with non-DWV viewers (Weasis, RadiAnt) need to know
-        # the disc is DICOMDIR-indexed so they can point those tools at it.
+        # Patients with desktop viewers (Weasis, RadiAnt, etc.) need to
+        # know the disc is DICOMDIR-indexed so they can point those
+        # tools at it.
         _write_top_level(tmp_path)
         content = (tmp_path / "README.txt").read_bytes()
         assert b"DICOMDIR" in content
+
+    def test_readme_lists_external_viewers(self, tmp_path: Path):
+        # Patients need at least one actionable viewer per OS family.
+        _write_top_level(tmp_path)
+        content = (tmp_path / "README.txt").read_bytes()
+        # Windows
+        assert b"microdicom.com" in content or b"radiantviewer.com" in content
+        # Mac
+        assert b"horosproject.org" in content or b"weasis.org" in content
+        # Linux / cross-platform
+        assert b"weasis.org" in content
 
     def test_readme_content_exact(self, tmp_path: Path):
         _write_top_level(tmp_path)
