@@ -15,7 +15,7 @@ RUN apt-get update \
 # Weasis Portable bakes a Java DICOM viewer with a bundled JRE per OS into
 # the backend image so the burn-ISO export can stage it next to the
 # patient's DICOMs without runtime downloads. Apache 2.0 license — fine
-# to redistribute on patient discs. Pinned version + sha256 for repeatable
+# to redistribute on patient discs. Pinned version for repeatable
 # builds; bump deliberately when upstream releases a new feature LTS.
 ENV WEASIS_VERSION=4.6.2
 ENV WEASIS_PATH=/opt/weasis
@@ -24,7 +24,7 @@ RUN mkdir -p ${WEASIS_PATH} \
        "https://github.com/nroduit/Weasis/releases/download/v${WEASIS_VERSION}/weasis-native.zip" \
     && unzip -q /tmp/weasis.zip -d ${WEASIS_PATH} \
     && rm /tmp/weasis.zip \
-    && ls ${WEASIS_PATH} | head -5
+    && test -d ${WEASIS_PATH}/bin-dist
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
