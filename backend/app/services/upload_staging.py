@@ -70,7 +70,7 @@ def _safe_dir(upload_id: str) -> Path:
     return d
 
 
-async def create(name: str, size: int, sha256_hex: str, total_chunks: int) -> str:
+async def create(name: str, size: int, sha256_hex: str, total_chunks: int, user_id: int) -> str:
     upload_id = uuid.uuid4().hex
     d = _safe_dir(upload_id)
     d.mkdir(parents=True, exist_ok=False)
@@ -80,10 +80,24 @@ async def create(name: str, size: int, sha256_hex: str, total_chunks: int) -> st
         "sha256": sha256_hex.lower(),
         "total_chunks": total_chunks,
         "received_chunks": [],
+        "user_id": user_id,
         "created_at": time.time(),
     }
     (d / "meta.json").write_text(json.dumps(meta))
     return upload_id
+
+
+async def assert_owner(upload_id: str, user_id: int) -> dict:
+    """Return meta dict if owner matches, raise PermissionError otherwise.
+    Raises FileNotFoundError if upload doesn't exist.
+
+    Multi-tenant guard: every per-upload endpoint (PUT chunk, GET status,
+    POST finalize) must call this before touching the staging dir, so a
+    user who guesses another tenant's uuid4 still gets 404."""
+    meta = await received(upload_id)
+    if meta.get("user_id") != user_id:
+        raise PermissionError(f"upload {upload_id} not owned by user {user_id}")
+    return meta
 
 
 def _write_chunk_sync(d: Path, idx: int, data: bytes) -> None:
