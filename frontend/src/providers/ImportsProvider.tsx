@@ -22,6 +22,7 @@ export interface LocalUploadState {
   sourceLabel: string;
   files: FileProgress[];
   totalBytes: number;
+  bytesSent: number;        // Incremental — avoids O(N) reduce per chunk PUT
   startedAt: number;
   uploading: boolean;       // Phase 1-3 still running
   cancelled: boolean;
@@ -34,6 +35,16 @@ export interface LocalUploadState {
 /** Window kept for rate calc — long enough to smooth out chunk
  *  bursts, short enough to react to real WiFi-handoff stalls. */
 const RATE_WINDOW_MS = 8000;
+/** Hard cap on samples array — defensive against clock skew (NTP
+ *  step / sleep-wake) which would otherwise make the time-window
+ *  filter miss old entries and grow unbounded. */
+const SAMPLE_HARD_CAP = 256;
+/** Stall threshold — if no fresh sample in this long, report rate=0
+ *  instead of decaying smoothly. */
+const STALL_TIMEOUT_MS = 2000;
+/** ETA over this is rendered as "—" (a 50 GB import at 1 KB/s is
+ *  technically 13889h, practically a UX bug). */
+const ETA_MAX_SECONDS = 24 * 3600;
 
 interface ImportsContextValue {
   uploads: Record<string, LocalUploadState>;
@@ -84,14 +95,23 @@ export function ImportsProvider({ children }: { children: React.ReactNode }) {
 
   const patchFile = useCallback((jobId: string, idx: number, p: Partial<FileProgress>) => {
     patch(jobId, (s) => {
+      const prev = s.files[idx];
+      const merged = { ...prev, ...p };
       const next = s.files.slice();
-      next[idx] = { ...next[idx], ...p };
-      // Keep a rolling sample of total bytes-sent for live rate calc.
+      next[idx] = merged;
+      // Incremental total — avoids reducing the whole files[] on every
+      // chunk PUT (O(N²) when N=1900 file imports).
+      const delta = (merged.bytes_sent ?? 0) - (prev.bytes_sent ?? 0);
+      const bytesSent = Math.max(0, s.bytesSent + delta);
       const now = Date.now();
-      const totalBytes = next.reduce((a, f) => a + f.bytes_sent, 0);
-      const samples = [...s.samples, { ts: now, bytes: totalBytes }]
-        .filter((sm) => now - sm.ts <= RATE_WINDOW_MS);
-      return { ...s, files: next, samples };
+      // Append, then drop entries older than RATE_WINDOW_MS, then
+      // hard-cap. The hard cap makes us defensive against backwards
+      // clock motion (NTP step) where the time-window filter alone
+      // would let the array grow unboundedly.
+      const samples = [...s.samples, { ts: now, bytes: bytesSent }]
+        .filter((sm) => now - sm.ts <= RATE_WINDOW_MS && now - sm.ts >= 0)
+        .slice(-SAMPLE_HARD_CAP);
+      return { ...s, files: next, bytesSent, samples };
     });
   }, [patch]);
 
@@ -110,6 +130,7 @@ export function ImportsProvider({ children }: { children: React.ReactNode }) {
       sourceLabel,
       files: buildInitialProgress(files),
       totalBytes,
+      bytesSent: 0,
       startedAt: Date.now() / 1000,
       uploading: true,
       cancelled: false,
@@ -181,25 +202,33 @@ export function useImports(): ImportsContextValue {
 }
 
 /** Bytes-per-second over the rolling sample window. Returns 0 when
- *  there's not enough data yet (under ~1s of samples). */
+ *  there's not enough data yet (under ~1s of samples) or when no
+ *  fresh sample landed in the last STALL_TIMEOUT_MS (the upload has
+ *  paused — show 0, not a stale rate). */
 export function computeRate(state: LocalUploadState | undefined): number {
   if (!state || state.samples.length < 2) return 0;
   const first = state.samples[0];
   const last = state.samples[state.samples.length - 1];
   const dt = (last.ts - first.ts) / 1000;
   if (dt < 1) return 0;
+  // Stall detection — if we haven't seen progress recently, the
+  // rate from old samples is misleading.
+  if (Date.now() - last.ts > STALL_TIMEOUT_MS) return 0;
   return Math.max(0, (last.bytes - first.bytes) / dt);
 }
 
-/** Seconds remaining at the current rate. null when unknown. */
+/** Seconds remaining at the current rate. null when unknown or
+ *  when the estimate would be longer than ETA_MAX_SECONDS (in which
+ *  case the UI shows "—" — better than "13889h"). */
 export function computeEta(state: LocalUploadState | undefined): number | null {
   if (!state) return null;
   const rate = computeRate(state);
   if (rate <= 0) return null;
-  const sent = state.files.reduce((a, f) => a + f.bytes_sent, 0);
-  const remaining = state.totalBytes - sent;
+  const remaining = state.totalBytes - state.bytesSent;
   if (remaining <= 0) return 0;
-  return Math.round(remaining / rate);
+  const eta = Math.round(remaining / rate);
+  if (eta > ETA_MAX_SECONDS) return null;
+  return eta;
 }
 
 /** Aggregate per-file status counters for live tile breakdown. */

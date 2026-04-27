@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -10,6 +10,7 @@ import {
 import { useImportJob, isTerminal, type FileError } from "@/hooks/useImportJob";
 import {
   useImports, computeRate, computeEta, computeFileStats,
+  type LocalUploadState,
 } from "@/providers/ImportsProvider";
 import { ImportPhaseTimeline } from "@/components/ImportPhaseTimeline";
 import { toast } from "sonner";
@@ -253,19 +254,7 @@ export function ImportDialog({ open, onOpenChange, attachJobId }: Props) {
 
         {/* Live throughput tiles — only meaningful while local upload is in flight */}
         {localUpload && localUpload.uploading && (
-          (() => {
-            const stats = computeFileStats(localUpload);
-            const rate = computeRate(localUpload);
-            const eta = computeEta(localUpload);
-            return (
-              <div className="grid grid-cols-4 gap-2 text-center">
-                <Tile label="Speed" value={fmtRate(rate)} />
-                <Tile label="ETA" value={fmtEta(eta)} />
-                <Tile label="Skipped (dup)" value={stats.skipped} />
-                <Tile label="In flight" value={stats.uploading + stats.finalizing} />
-              </div>
-            );
-          })()
+          <LiveTiles state={localUpload} />
         )}
 
         {/* Per-file local upload progress (client-driven phase) */}
@@ -273,13 +262,11 @@ export function ImportDialog({ open, onOpenChange, attachJobId }: Props) {
           <div className="border rounded-md">
             <div className="px-3 py-2 border-b bg-muted/40 text-sm font-medium flex justify-between">
               <span>
-                Uploading: {fmtBytes(localUpload.files.reduce((a, f) => a + f.bytes_sent, 0))} / {fmtBytes(localUpload.totalBytes)}
+                Uploading: {fmtBytes(localUpload.bytesSent)} / {fmtBytes(localUpload.totalBytes)}
               </span>
               <span className="text-muted-foreground tabular-nums">
                 {localUpload.totalBytes > 0
-                  ? `${Math.round(
-                      (localUpload.files.reduce((a, f) => a + f.bytes_sent, 0) / localUpload.totalBytes) * 100,
-                    )}%`
+                  ? `${Math.round((localUpload.bytesSent / localUpload.totalBytes) * 100)}%`
                   : ""}
               </span>
             </div>
@@ -475,6 +462,28 @@ export function ImportDialog({ open, onOpenChange, attachJobId }: Props) {
     </>
   );
 }
+
+/** Memoized live-throughput strip. Re-renders only when relevant
+ *  fields of LocalUploadState change — keeps the heavier per-file
+ *  list above from triggering on every chunk PUT. */
+const LiveTiles = memo(function LiveTiles({ state }: { state: LocalUploadState }) {
+  const stats = useMemo(() => computeFileStats(state), [state.files]);
+  // Rate / ETA depend on samples, not files — separate memo so a
+  // pure samples push doesn't recompute file counters.
+  const rate = useMemo(() => computeRate(state), [state.samples]);
+  const eta = useMemo(
+    () => computeEta(state),
+    [state.samples, state.bytesSent, state.totalBytes],
+  );
+  return (
+    <div className="grid grid-cols-4 gap-2 text-center">
+      <Tile label="Speed" value={fmtRate(rate)} />
+      <Tile label="ETA" value={fmtEta(eta)} />
+      <Tile label="Skipped (dup)" value={stats.skipped} />
+      <Tile label="In flight" value={stats.uploading + stats.finalizing} />
+    </div>
+  );
+});
 
 function Tile({ label, value }: { label: string; value: string | number }) {
   return (

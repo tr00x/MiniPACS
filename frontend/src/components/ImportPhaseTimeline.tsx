@@ -35,9 +35,17 @@ interface Props {
 
 export function ImportPhaseTimeline({ job, local }: Props) {
   const phaseStates = computePhaseStates(job, local);
+  const allPending = (Object.values(phaseStates) as State[]).every((s) => s === "pending");
   return (
     <div className="border rounded-md p-3 space-y-2 bg-muted/20">
-      <div className="text-xs font-medium text-muted-foreground">Pipeline</div>
+      <div className="text-xs font-medium text-muted-foreground flex items-center justify-between">
+        <span>Pipeline</span>
+        {allPending && (
+          <span className="text-[10px] text-muted-foreground/80 italic">
+            Waiting for activity…
+          </span>
+        )}
+      </div>
       <ol className="grid grid-cols-4 gap-2">
         {(Object.keys(PHASE_LABELS) as Phase[]).map((p, idx) => (
           <PhaseStep key={p} phase={p} state={phaseStates[p]} step={idx + 1} />
@@ -80,13 +88,11 @@ function computePhaseStates(
   job: ImportJobStatus,
   local: LocalUploadState | undefined,
 ): Record<Phase, State> {
-  // Terminal-job overrides: paint done/error/cancelled across phases
-  // appropriately so the user reads a coherent end-state.
-  if (job.status === "cancelled") {
-    return phaseFill("cancelled", phaseProgress(job, local));
-  }
-  if (job.status === "error") {
-    return phaseFill("error", phaseProgress(job, local));
+  // Terminal-job overrides: paint done before the failed phase, the
+  // terminal state on the failed phase itself, and pending after — so
+  // a hash-time failure doesn't paint upload+store as error too.
+  if (job.status === "cancelled" || job.status === "error") {
+    return paintTerminal(job.status, phaseProgress(job, local));
   }
   if (job.status === "done") {
     return { hash: "done", dedup: "done", upload: "done", store: "done" };
@@ -123,9 +129,12 @@ function activePhase(job: ImportJobStatus, local: LocalUploadState | undefined):
     if (local.files.every((f) => ["done", "skipped", "error"].includes(f.status))) return "store";
   }
 
-  // Attached to a remote job we didn't start ourselves — best
-  // approximation from server progress.
-  if (job.status === "queued") return "upload"; // chunks flowing in, server hasn't started processing
+  // No local state (attached to a foreign job) and not yet processing:
+  //   - total_files>0 OR processed>0  → upgrade to "store" (server is doing real work)
+  //   - otherwise return null         → render the whole timeline as pending
+  // We can't distinguish "chunks flowing" from "idle" without local
+  // state, so claiming "upload" would lie half the time.
+  if (job.total_files > 0 || job.processed > 0 || job.failed > 0) return "store";
   return null;
 }
 
@@ -135,12 +144,14 @@ function phaseProgress(job: ImportJobStatus, local: LocalUploadState | undefined
   return activePhase(job, local) || "store";
 }
 
-function phaseFill(end: State, upTo: Phase): Record<Phase, State> {
-  const idx = PHASE_ORDER.indexOf(upTo);
-  return {
-    hash: PHASE_ORDER.indexOf("hash") < idx ? "done" : end,
-    dedup: PHASE_ORDER.indexOf("dedup") < idx ? "done" : end,
-    upload: PHASE_ORDER.indexOf("upload") < idx ? "done" : end,
-    store: PHASE_ORDER.indexOf("store") < idx ? "done" : end,
-  };
+function paintTerminal(end: "error" | "cancelled", failedAt: Phase): Record<Phase, State> {
+  // Three-way fill: done before the failure, terminal *at* the failure,
+  // pending after. Critical: an error at hash-time must NOT paint
+  // upload/store as error too — they never ran.
+  const failIdx = PHASE_ORDER.indexOf(failedAt);
+  const out = {} as Record<Phase, State>;
+  PHASE_ORDER.forEach((p, i) => {
+    out[p] = i < failIdx ? "done" : i === failIdx ? end : "pending";
+  });
+  return out;
 }
