@@ -211,30 +211,30 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
     try:
         await import_jobs_repo.set_status(job_id, "extracting", current_file=name)
 
+        dicom_files: list[Path] = []
         if _has_archive_suffix(name):
             ok, err = _extract_archive(assembled, work)
             if not ok:
                 await import_jobs_repo.increment(job_id, failed=1, error=f"{name}: {err}")
                 return
-            roots = [work]
+            seen: set[Path] = set()
+            for p in _walk_dicom(work):
+                rp = p.resolve()
+                if rp not in seen:
+                    seen.add(rp)
+                    dicom_files.append(p)
         elif _is_dicom(assembled):
-            roots = [assembled.parent]
+            # Bare DICOM upload — assembled.bin IS the file. Do NOT walk its
+            # parent: the staging dir still holds chunk-NNNN files at this
+            # point, and chunk-0000 of a bare DICOM has the same DICM magic
+            # so a naive walk would double-count. Cleanup happens in the
+            # outer `finally`, but walk runs first.
+            dicom_files = [assembled]
         else:
             await import_jobs_repo.increment(
                 job_id, failed=1, error=f"{name}: not a DICOM file or recognized archive",
             )
             return
-
-        dicom_files: list[Path] = []
-        seen: set[Path] = set()
-        for root in roots:
-            for p in _walk_dicom(root):
-                rp = p.resolve()
-                if rp not in seen:
-                    seen.add(rp)
-                    dicom_files.append(p)
-        if assembled.is_file() and _is_dicom(assembled) and assembled.resolve() not in seen:
-            dicom_files.append(assembled)
 
         if not dicom_files:
             await import_jobs_repo.increment(
