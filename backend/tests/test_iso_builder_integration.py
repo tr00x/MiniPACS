@@ -1,6 +1,6 @@
 """Integration tests that exercise real xorriso + the full build_study_iso
-pipeline (Orthanc download is mocked, but extraction, viewer staging, and
-ISO mastering all run for real).
+pipeline (Orthanc download is mocked, but extraction and ISO mastering all
+run for real).
 
 Run with:    pytest -m integration
 
@@ -49,15 +49,11 @@ def _make_fake_dicom_zip() -> bytes:
 class TestRunXorriso:
     @pytest.mark.skipif(not _HAS_XORRISO, reason="xorriso not on PATH")
     async def test_builds_iso_from_minimal_staging(self, tmp_path: Path):
-        # Stage what build_study_iso would stage: DICOM/, VIEWER/, and the
-        # three top-level files. We don't need DWV proper here — a marker
-        # file inside VIEWER is enough to prove xorriso preserved the tree.
+        # Stage what build_study_iso would stage: DICOM/ + the three
+        # top-level files (index.html, autorun.inf, README.txt).
         staging = tmp_path / "staging"
         (staging / "DICOM").mkdir(parents=True)
         (staging / "DICOM" / "IM00001").write_bytes(b"\x00" * 256)
-        (staging / "VIEWER").mkdir()
-        (staging / "VIEWER" / "index.html").write_bytes(b"<html><body>fake viewer</body></html>")
-        (staging / "VIEWER" / "favicon.ico").write_bytes(b"\x00" * 32)
         iso_builder._write_top_level(staging)
 
         iso_path = tmp_path / "out.iso"
@@ -70,9 +66,8 @@ class TestRunXorriso:
         assert iso_path.stat().st_size > 100_000, "ISO suspiciously small"
 
         # xorriso -indev <iso> -ls / lists the root dir; verify all four
-        # expected entries (DICOM, VIEWER, index.html, autorun.inf) are
-        # present. README.txt is also there but we keep the assertion list
-        # compact — DICOM/VIEWER are the load-bearing payload directories.
+        # expected entries (DICOM, index.html, autorun.inf, README.txt) are
+        # present.
         result = subprocess.run(
             ["xorriso", "-indev", str(iso_path), "-ls", "/"],
             capture_output=True,
@@ -81,7 +76,6 @@ class TestRunXorriso:
         )
         listing = result.stdout
         assert "DICOM" in listing
-        assert "VIEWER" in listing
         assert "index.html" in listing
         assert "autorun.inf" in listing
         assert "README.txt" in listing
@@ -114,14 +108,6 @@ class TestBuildSemaphoreConcurrency:
         # session may have left it perturbed (it's module-level singleton).
         # A fresh semaphore with the same capacity is the cleanest reset.
         monkeypatch.setattr(iso_builder, "_BUILD_SEM", asyncio.Semaphore(2))
-
-        # DWV bundle is required by _stage_viewer; substitute a tiny stub
-        # so we don't have to ship the real ~3 MB DWV in the test fixture.
-        fake_dwv = tmp_path / "fake-dwv"
-        fake_dwv.mkdir()
-        (fake_dwv / "index.html").write_bytes(b"<html>stub viewer</html>")
-        (fake_dwv / "favicon.ico").write_bytes(b"\x00" * 32)
-        monkeypatch.setattr(iso_builder, "DWV_PATH", fake_dwv)
 
         # Instrumentation: every download attempt bumps `active` and yields.
         # We track peak concurrency observed across the run.
@@ -187,14 +173,9 @@ class TestBuildSemaphoreConcurrency:
 class TestBuildStudyIsoEndToEnd:
     @pytest.mark.skipif(not _HAS_XORRISO, reason="xorriso not on PATH")
     async def test_builds_iso_with_mocked_orthanc(self, tmp_path: Path, monkeypatch):
-        """Full pipeline: mocked Orthanc download -> real unzip -> stub
-        DWV copy -> real xorriso. Verifies the returned ISO is well-formed
-        and the staging directory was cleaned up after mastering."""
-        fake_dwv = tmp_path / "dwv-bundle"
-        fake_dwv.mkdir()
-        (fake_dwv / "index.html").write_bytes(b"<html>viewer</html>")
-        (fake_dwv / "app.js").write_bytes(b"console.log('dwv stub')")
-        monkeypatch.setattr(iso_builder, "DWV_PATH", fake_dwv)
+        """Full pipeline: mocked Orthanc download -> real unzip -> real
+        xorriso. Verifies the returned ISO is well-formed and the staging
+        directory was cleaned up after mastering."""
 
         async def fake_download(study_id: str) -> AsyncIterator[bytes]:
             yield _make_fake_dicom_zip()
@@ -220,7 +201,7 @@ class TestBuildStudyIsoEndToEnd:
                 text=True,
                 check=True,
             )
-            for entry in ("DICOM", "VIEWER", "index.html", "autorun.inf", "README.txt"):
+            for entry in ("DICOM", "index.html", "autorun.inf", "README.txt"):
                 assert entry in result.stdout, f"{entry} missing from ISO root"
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)
