@@ -492,6 +492,20 @@ async def download_study_stream(study_id: str) -> AsyncIterator[bytes]:
         await resp.aclose()
 
 
+async def download_study_media_stream(study_id: str) -> AsyncIterator[bytes]:
+    """Like download_study_stream but uses Orthanc's /media variant — adds a
+    DICOMDIR at the ZIP root, IHE PDI Basic Image and SR Profile. Required
+    by portable viewers (Weasis, OsiriX, RadiAnt) for one-click discovery."""
+    req = _http().build_request("GET", f"/studies/{study_id}/media")
+    resp = await _http().send(req, stream=True)
+    resp.raise_for_status()
+    try:
+        async for chunk in resp.aiter_bytes(chunk_size=65536):
+            yield chunk
+    finally:
+        await resp.aclose()
+
+
 async def send_to_modality(modality_id: str, resource_ids: list[str], synchronous: bool = True):
     resp = await _http().post(
         f"/modalities/{modality_id}/store",
