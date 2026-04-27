@@ -35,6 +35,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.db import pool
 from app.middleware.audit import log_audit
 from app.models.import_api import (
     CreateUploadRequest, CreateUploadResponse,
@@ -134,8 +135,9 @@ async def create_upload(req: CreateUploadRequest, user: dict = Depends(get_curre
     if req.size > _MAX_JOB_SIZE_BYTES:
         raise HTTPException(413, f"file exceeds {_MAX_JOB_SIZE_BYTES // 1024**3} GB cap")
     # Owner check on job_id — only the creator may attach uploads.
+    # Return 404 (not 403) so we don't leak job existence to other tenants.
     job = await import_jobs_repo.get(req.job_id)
-    if not job:
+    if not job or job["user_id"] != user["id"]:
         raise HTTPException(404, "job not found")
     upload_id = await upload_staging.create(req.name, req.size, req.sha256, req.total_chunks)
     await import_jobs_repo.attach_upload(req.job_id, upload_id)
@@ -192,7 +194,6 @@ async def finalize(req: FinalizeRequest, user: dict = Depends(get_current_user))
 
 
 async def _find_job_for_upload(upload_id: str, user_id: int) -> str | None:
-    from app.db import pool
     async with pool().acquire() as con:
         row = await con.fetchrow(
             """SELECT job_id FROM import_jobs
@@ -243,7 +244,6 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
             return
 
         # update total_files atomically (additive — multiple files per job)
-        from app.db import pool
         async with pool().acquire() as con:
             await con.execute(
                 "UPDATE import_jobs SET total_files = total_files + $2, status = 'uploading' WHERE job_id = $1",
@@ -334,7 +334,11 @@ async def _maybe_finish_job(job_id: str) -> None:
             return  # still active
         except FileNotFoundError:
             continue
-    final = "done" if job["failed"] == 0 or job["processed"] > 0 else "error"
+    if job["failed"] > 0 and job["processed"] == 0:
+        final = "error"
+    else:
+        # All-success or partial-success both flip to done; UI distinguishes via failed > 0.
+        final = "done"
     await import_jobs_repo.finish(job_id, final)
 
 
@@ -364,16 +368,16 @@ async def retry(job_id: str, user: dict = Depends(get_current_user)):
     if job["status"] != "error":
         raise HTTPException(409, f"can only retry jobs in error state, got {job['status']}")
     # Atomic flip → uploading; if another tab beat us, 409.
-    from app.db import pool
     async with pool().acquire() as con:
-        result = await con.execute(
+        updated = await con.fetchval(
             """UPDATE import_jobs
                   SET status = 'uploading', finished_at = NULL,
                       errors = array_append(errors, '--- retry ---')
-                WHERE job_id = $1 AND status = 'error'""",
+                WHERE job_id = $1 AND status = 'error'
+            RETURNING 1""",
             job_id,
         )
-    if result == "UPDATE 0":
+    if not updated:
         raise HTTPException(409, "job already running in another tab")
 
     # Re-process every upload_id that still has chunks on disk.
@@ -395,7 +399,6 @@ async def retry(job_id: str, user: dict = Depends(get_current_user)):
 
 
 async def _job_owner(job_id: str) -> int | None:
-    from app.db import pool
     async with pool().acquire() as con:
         row = await con.fetchrow("SELECT user_id FROM import_jobs WHERE job_id = $1", job_id)
     return row["user_id"] if row else None
