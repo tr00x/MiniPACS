@@ -15,6 +15,9 @@ export function useGlobalFileDrop() {
     };
 
     const onOver = (e: DragEvent) => {
+      // If the dialog's own dropzone (or any inner handler) already
+      // called preventDefault, don't overlay the window-wide hint.
+      if (e.defaultPrevented) return;
       if (isEditingTarget(e.target)) return;
       if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return;
       e.preventDefault();
@@ -27,6 +30,8 @@ export function useGlobalFileDrop() {
     };
     const onDrop = (e: DragEvent) => {
       setDragging(false);
+      // Inner dropzone (e.g. ImportDialog) handled this — don't double-open.
+      if (e.defaultPrevented) return;
       if (isEditingTarget(e.target)) return;
       if (!e.dataTransfer || e.dataTransfer.files.length === 0) return;
       e.preventDefault();
