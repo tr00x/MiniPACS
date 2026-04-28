@@ -1,7 +1,10 @@
 """Unit tests for app.services.pdf_encapsulator.encapsulate_pdf."""
+import os
 from io import BytesIO
 
+import httpx
 import pydicom
+import pytest
 
 from app.services.pdf_encapsulator import encapsulate_pdf
 
@@ -45,3 +48,47 @@ def test_encapsulate_pdf_copies_patient_and_study_tags(sample_pdf_bytes, sample_
     # Series and SOP should be NEW
     assert ds_out.SeriesInstanceUID != ds_ctx.SeriesInstanceUID
     assert ds_out.SOPInstanceUID != ds_ctx.SOPInstanceUID
+
+
+@pytest.mark.integration
+def test_orthanc_accepts_encapsulated_pdf(sample_pdf_bytes, sample_ctx_dicom):
+    """Smoke test: encapsulated PDF is accepted by a running Orthanc.
+
+    Requires ORTHANC_URL + ORTHANC_USERNAME + ORTHANC_PASSWORD env vars
+    (the backend container has these set already in docker-compose).
+    """
+    url = os.environ.get("ORTHANC_URL", "http://orthanc:8042")
+    user = os.environ.get("ORTHANC_USERNAME", "orthanc")
+    pwd = os.environ.get("ORTHANC_PASSWORD")
+    if not pwd:
+        pytest.skip("ORTHANC_PASSWORD not set")
+
+    # First push the ctx DICOM so the study exists in Orthanc.
+    ctx_bytes = sample_ctx_dicom.read_bytes()
+    r1 = httpx.post(
+        f"{url}/instances",
+        content=ctx_bytes,
+        headers={"Content-Type": "application/dicom"},
+        auth=(user, pwd),
+        timeout=30.0,
+    )
+    assert r1.status_code in (200, 201), r1.text
+
+    # Now post the encapsulated PDF.
+    pdf_dicom = encapsulate_pdf(sample_pdf_bytes, sample_ctx_dicom)
+    r2 = httpx.post(
+        f"{url}/instances",
+        content=pdf_dicom,
+        headers={"Content-Type": "application/dicom"},
+        auth=(user, pwd),
+        timeout=30.0,
+    )
+    assert r2.status_code in (200, 201), r2.text
+
+    # Verify it landed in the same study as ctx.
+    body = r2.json()
+    parent_study_orthanc_id = body["ParentStudy"]
+    r3 = httpx.get(f"{url}/studies/{parent_study_orthanc_id}", auth=(user, pwd), timeout=10.0)
+    assert r3.status_code == 200
+    study_info = r3.json()
+    assert study_info["MainDicomTags"]["StudyInstanceUID"] == "1.2.3.4.5.999.1"
