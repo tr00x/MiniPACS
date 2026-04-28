@@ -33,6 +33,9 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from typing import Iterator
+
+import pydicom
 
 
 def _now() -> float:
@@ -114,6 +117,56 @@ def _walk_dicom(root: Path):
             p = Path(dirpath) / name
             if _is_dicom(p):
                 yield p
+
+
+def _walk_pdfs(root: Path) -> Iterator[tuple[Path, Path]]:
+    """Yield (pdf_path, ctx_dicom_path) pairs for raw PDF reports inside `root`.
+
+    Pairing rule: for every .pdf file in the tree, find any sibling DICOM
+    file in the SAME archive (root subtree) whose StudyInstanceUID matches
+    every other DICOM in the tree — i.e. only single-study archives are
+    paired. If multiple distinct StudyInstanceUIDs exist in `root`, the PDF
+    is ambiguous and skipped (logged at the call-site).
+
+    Why single-study only: clinic CDs in this archive are 1 CD == 1 study.
+    Multi-study CDs (e.g. test discs) shouldn't auto-attach reports to an
+    arbitrary study without operator review.
+    """
+    pdfs: list[Path] = []
+    dicoms: list[Path] = []
+    for dirpath, _dirs, filenames in os.walk(root):
+        for name in filenames:
+            p = Path(dirpath) / name
+            if name.upper() == "DICOMDIR":
+                continue
+            if name.lower().endswith(".pdf"):
+                pdfs.append(p)
+                continue
+            if _is_dicom(p):
+                dicoms.append(p)
+
+    if not pdfs or not dicoms:
+        return
+
+    # Determine if all DICOMs in this archive share a single StudyInstanceUID.
+    study_uids: set[str] = set()
+    for d in dicoms:
+        try:
+            ds = pydicom.dcmread(d, stop_before_pixels=True, specific_tags=["StudyInstanceUID"])
+            uid = getattr(ds, "StudyInstanceUID", None)
+            if uid:
+                study_uids.add(str(uid))
+                if len(study_uids) > 1:
+                    return  # multi-study — skip all PDFs in this tree
+        except Exception:
+            continue
+
+    if len(study_uids) != 1:
+        return
+
+    ctx = dicoms[0]
+    for pdf in pdfs:
+        yield pdf, ctx
 
 
 # ---- routes ----
