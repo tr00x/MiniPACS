@@ -453,6 +453,58 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
 
         await asyncio.gather(*(_one(p) for p in dicom_files))
 
+        # PDF reports — encapsulate as SOP 1.2.840.10008.5.1.4.1.1.104.1
+        # ("Encapsulated PDF Storage") and post to Orthanc through the same
+        # shared httpx client used for DICOM. Anchored to the study via
+        # Patient/Study tags from a sibling DICOM. Multi-study or no-DICOM
+        # archives are silently skipped by _walk_pdfs.
+        from app.services.pdf_encapsulator import encapsulate_pdf  # local — keep top imports lean
+
+        pdf_pairs = list(_walk_pdfs(work))
+        for pdf_path, ctx_path in pdf_pairs:
+            try:
+                pdf_bytes = pdf_path.read_bytes()
+                dicom_bytes = encapsulate_pdf(pdf_bytes, ctx_path)
+                resp = await orthanc._http().post(
+                    "/instances",
+                    content=dicom_bytes,
+                    headers={"Content-Type": "application/dicom"},
+                )
+                if resp.status_code >= 300:
+                    log.warning(
+                        "pdf encapsulation rejected by orthanc",
+                        extra={"job_id": job_id, "pdf": str(pdf_path),
+                               "status": resp.status_code},
+                    )
+                    continue
+                payload = resp.json()
+                items = payload if isinstance(payload, list) else [payload]
+                pdf_sid = None
+                pdf_new = 0
+                pdf_dup = 0
+                for item in items:
+                    pdf_sid = item.get("ParentStudy")
+                    if item.get("Status") == "AlreadyStored":
+                        pdf_dup += 1
+                    else:
+                        pdf_new += 1
+                # Bump the same counters as DICOM uploads — UI shows total
+                # instances regardless of source. PDFs land as DOC series
+                # in the existing study; user sees one extra "instance" and
+                # a Radiology Report series in the viewer.
+                await import_jobs_repo.increment(
+                    job_id, processed=1,
+                    new_instances=pdf_new,
+                    duplicate_instances=pdf_dup,
+                    study_id=pdf_sid if pdf_sid else None,
+                    current_file=pdf_path.name,
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "pdf encapsulation failed",
+                    extra={"job_id": job_id, "pdf": str(pdf_path), "error": repr(exc)},
+                )
+
         # Record file hash (idempotent) for future precheck — but only if
         # every DICOM in this file landed cleanly. A partial Orthanc 5xx
         # would otherwise teach the dedup table that the file is fully
