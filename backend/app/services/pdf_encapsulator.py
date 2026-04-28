@@ -21,9 +21,15 @@ _ENCAPSULATED_PDF_SOP_CLASS = "1.2.840.10008.5.1.4.1.1.104.1"
 
 
 def _det_uid(*parts: str) -> str:
-    """Deterministic OID-style UID rooted at 2.25 (RFC 4122-derived integer).
+    """Deterministic OID-style UID rooted at 2.25 (sha256-derived 128-bit int).
 
     Same inputs → same UID. Used so retried POSTs hit Orthanc dedup.
+
+    We do NOT use pydicom.uid.generate_uid(entropy_srcs=...) because its
+    internal scheme isn't a documented stable contract; we need the UID to
+    be reproducible across pydicom upgrades. "|" is safe as a separator
+    because UIDs (digits + dot) and hex sha256 (0-9a-f) have disjoint
+    charsets — no escaping needed.
     """
     h = hashlib.sha256("|".join(parts).encode("utf-8")).digest()
     return "2.25." + str(int.from_bytes(h[:16], "big"))
@@ -44,7 +50,15 @@ def encapsulate_pdf(
 
     Returns:
         Serialized DICOM bytes ready for POST to Orthanc /instances.
+
+    Raises:
+        ValueError: If pdf_bytes does not start with the %PDF- magic.
+            Defends the PACS against junk being mislabeled as application/pdf
+            via this function — callers don't have to remember to validate.
     """
+    if not pdf_bytes.startswith(b"%PDF-"):
+        raise ValueError("pdf_bytes does not start with %PDF- magic")
+
     ctx = pydicom.dcmread(ctx_dicom_path, stop_before_pixels=True)
 
     study_uid = str(ctx.StudyInstanceUID)
@@ -66,6 +80,9 @@ def encapsulate_pdf(
 
     ds.SOPClassUID = _ENCAPSULATED_PDF_SOP_CLASS
     ds.SOPInstanceUID = sop_instance_uid
+    # Type 1 in PS3.3 § C.24.2 for Encapsulated Document IOD; viewers
+    # like dciodvfy and some enterprise tools flag its absence.
+    ds.InstanceNumber = "1"
 
     # Patient (copy)
     ds.PatientName = ctx.get("PatientName", "")
