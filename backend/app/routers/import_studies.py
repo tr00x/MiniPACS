@@ -460,9 +460,21 @@ async def _process_one_file(job_id: str, upload_id: str, assembled: Path, meta: 
         # archives are silently skipped by _walk_pdfs.
         from app.services.pdf_encapsulator import encapsulate_pdf  # local — keep top imports lean
 
+        # 50 MB cap on a single PDF — clinical reports are typically under
+        # 1 MB. Anything bigger is almost certainly a misplaced imaging file
+        # (or worst case, a malformed CD trying to OOM the backend via
+        # read_bytes). Skipped with a warning, not a failure.
+        _MAX_PDF_BYTES = 50 * 1024 * 1024
         pdf_pairs = list(_walk_pdfs(work))
         for pdf_path, ctx_path in pdf_pairs:
             try:
+                size = pdf_path.stat().st_size
+                if size > _MAX_PDF_BYTES:
+                    log.warning(
+                        "pdf too large — skipped",
+                        extra={"job_id": job_id, "pdf": str(pdf_path), "size": size},
+                    )
+                    continue
                 pdf_bytes = pdf_path.read_bytes()
                 dicom_bytes = encapsulate_pdf(pdf_bytes, ctx_path)
                 resp = await orthanc._http().post(
