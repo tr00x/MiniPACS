@@ -26,6 +26,8 @@ COPY requirements.txt requirements-test.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-test.txt
 
 COPY app/ app/
+COPY tests/ tests/
+COPY pytest.ini ./
 COPY seed_demo.py .
 
 EXPOSE 8000
