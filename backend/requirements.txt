@@ -12,5 +12,5 @@ pydantic-settings==2.13.1
 redis[hiredis]==5.2.1
 stream-zip==0.0.83
 Pillow==11.0.0
-pydicom>=3.0.2
-pycdlib>=1.14.0
+pydicom==3.0.2
+pycdlib==1.15.0
