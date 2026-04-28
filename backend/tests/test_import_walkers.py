@@ -60,3 +60,72 @@ def test_walk_pdfs_skips_when_no_dicom(tmp_path):
 
     pairs = list(_walk_pdfs(tmp_path))
     assert pairs == []
+
+
+@pytest.mark.integration
+def test_walk_pdfs_to_orthanc_full_pipeline(tmp_path, sample_pdf_bytes):
+    """End-to-end: simulate extracted-archive layout → _walk_pdfs →
+    encapsulate_pdf → POST to running Orthanc → verify DOC series in study.
+
+    Substitutes for the UI drag-drop manual smoke. Uses a real ~40 KB PDF
+    (the same fixture the unit tests use) and a synthesized clinical-style
+    DICOM with a stable StudyInstanceUID so the assertion is deterministic.
+    """
+    import os
+    import httpx
+
+    from app.services.pdf_encapsulator import encapsulate_pdf
+
+    url = os.environ.get("ORTHANC_URL", "http://orthanc:8042")
+    user = os.environ.get("ORTHANC_USERNAME", "orthanc")
+    pwd = os.environ.get("ORTHANC_PASSWORD")
+    if not pwd:
+        pytest.skip("ORTHANC_PASSWORD not set")
+
+    # Build the WL_*-style layout: S0000001/_REPORT.PDF + S0000001/O0000001
+    study_uid = "1.2.3.4.5.999.E2E"
+    work = tmp_path / "extracted"
+    series_dir = work / "S0000001"
+    series_dir.mkdir(parents=True)
+    (series_dir / "_REPORT.PDF").write_bytes(sample_pdf_bytes)
+    _write_dicom(series_dir / "O0000001", study_uid=study_uid)
+
+    # Walker yields exactly 1 pair (single study, one PDF).
+    pairs = list(_walk_pdfs(work))
+    assert len(pairs) == 1
+    pdf_path, ctx_path = pairs[0]
+
+    # First push the ctx DICOM so Orthanc has the study.
+    ctx_bytes = ctx_path.read_bytes()
+    r1 = httpx.post(
+        f"{url}/instances",
+        content=ctx_bytes,
+        headers={"Content-Type": "application/dicom"},
+        auth=(user, pwd),
+        timeout=30.0,
+    )
+    assert r1.status_code in (200, 201), r1.text
+
+    # Now encapsulate + POST the PDF (same code path _process_one_file uses).
+    pdf_bytes = pdf_path.read_bytes()
+    dicom_bytes = encapsulate_pdf(pdf_bytes, ctx_path)
+    r2 = httpx.post(
+        f"{url}/instances",
+        content=dicom_bytes,
+        headers={"Content-Type": "application/dicom"},
+        auth=(user, pwd),
+        timeout=30.0,
+    )
+    assert r2.status_code in (200, 201), r2.text
+    parent_study = r2.json()["ParentStudy"]
+
+    # Find the DOC series in that study.
+    r3 = httpx.get(
+        f"{url}/studies/{parent_study}/series",
+        auth=(user, pwd),
+        timeout=10.0,
+    )
+    assert r3.status_code == 200, r3.text
+    doc_series = [s for s in r3.json() if s["MainDicomTags"].get("Modality") == "DOC"]
+    assert len(doc_series) == 1, "expected exactly one DOC series attached to study"
+    assert doc_series[0]["MainDicomTags"]["SeriesDescription"] == "Radiology Report"
