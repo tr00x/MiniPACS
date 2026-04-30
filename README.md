@@ -188,7 +188,6 @@ Vite on `http://localhost:48925` proxies `/api/*` to the Docker backend.
 | [`docs/prod-hardening.md`](docs/prod-hardening.md) | Secret rotation, admin password, firewall, backups |
 | [`docs/split-horizon-https.md`](docs/split-horizon-https.md) | Real TLS on LAN — CF Origin Cert, UniFi DNS override, portproxy `:443` |
 | [`docs/wsl-autostart.md`](docs/wsl-autostart.md) | Windows Scheduled Tasks + WSL systemd unit for auto-recovery |
-| [`scripts/README.md`](scripts/README.md) | Operational runbooks — bulk PDF inject, prewarm, backup, secret rotation |
 | [`CHANGELOG.md`](CHANGELOG.md) | Deploy-wave history (no semver — `master` is the product) |
 
 ---
