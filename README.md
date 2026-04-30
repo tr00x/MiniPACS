@@ -1,123 +1,83 @@
 <h1 align="center">MiniPACS</h1>
 
 <p align="center">
-  <strong>Full-featured PACS portal for independent medical clinics</strong>
-</p>
-
-<p align="center">
-  <a href="#features">Features</a> ·
-  <a href="#screenshots">Screenshots</a> ·
-  <a href="#architecture">Architecture</a> ·
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="#development">Development</a> ·
-  <a href="#deployment">Production Deployment</a> ·
-  <a href="#license">License</a>
+  <strong>Self-hosted PACS portal for independent medical clinics.</strong><br/>
+  One server. Zero recurring fees. Your data stays in your clinic.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/DICOM-compatible-blue" alt="DICOM" />
-  <img src="https://img.shields.io/badge/HIPAA-compliant-green" alt="HIPAA" />
+  <img src="https://img.shields.io/badge/HIPAA-ready-green" alt="HIPAA" />
   <img src="https://img.shields.io/badge/license-BSL_1.1-orange" alt="License" />
-  <img src="https://img.shields.io/badge/TypeScript-React-blue" alt="React" />
-  <img src="https://img.shields.io/badge/Python-FastAPI-009688" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/stack-React_·_FastAPI_·_Orthanc-009688" alt="Stack" />
+</p>
+
+<p align="center">
+  <a href="#why">Why</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#screenshots">Screenshots</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#docs">Docs</a>
 </p>
 
 ---
 
-## Why MiniPACS?
+## Why
 
-Solo and small clinics pay $150–$2,000/month for cloud PACS solutions that are overengineered for their needs. MiniPACS is a **self-hosted** alternative that gives you:
+Solo and small clinics pay **$150–$2,000/month** for cloud PACS that are
+overengineered for their needs and lock their data in someone else's data
+centre. MiniPACS runs on a single Windows or Linux box you already own,
+sends nothing outbound except optional Cloudflare Tunnel traffic, and
+costs **$0/month** to operate.
 
-- Full DICOM storage and viewing — no cloud dependency, no per-study fees
-- Patient portal with secure sharing — QR codes, PIN protection, email integration
-- Study transfers between facilities — C-STORE with retry and error handling
-- Professional admin interface — dark mode, collapsible sidebar, mobile responsive
-- HIPAA-ready — audit logging, session management, encrypted storage
-
-**One server. Zero recurring fees. Your data stays in your clinic.**
+It is not a toy. The same image you would build for a demo is the image
+clinics use to read MRIs in production — DICOM C-STORE on the LAN, HTTPS
+on WAN, audit log, share links with PIN, encapsulated PDF reports, live
+worklist via WebSocket. Six containers, one `pg_dump` for backup.
 
 ---
 
 ## Features
 
-### DICOM Imaging
-- Receive studies from MRI, CT, X-ray, Ultrasound equipment via **C-STORE**
-- View studies in the built-in **Stone Web Viewer** (default, ~1 MB WASM, cold-open <1 s on a 500-slice MR)
-- **OHIF Viewer** as secondary option — zero-footprint, dicom-json datasource with precomputed metadata
-- Launch in external viewers (OsiriX, RadiAnt, 3D Slicer, MicroDicom, MedDream) via URL schemes
-- Support for all modalities: CT, MR, US, XR, DX, MG, NM, PT, RF, XA
-- Series-level download in DICOM or JPEG format
-
-### Worklist & Study Management
-- **Live worklist** — new studies appear in the browser within seconds of arrival via WebSocket fanout, no refresh needed
-- **Grid view with thumbnails** — PNGs pre-generated on STABLE_STUDY, served from shared cache
-- Server-side search, filtering, and pagination
-- Filter by modality, date range (presets + custom), patient name
-- Keyboard navigation (`/ j k Enter`) and adjacent-study prefetch on study detail
-- Click any study to view details, series breakdown, and launch viewer
-
-### Progressive Web App
-- **Installable** — Add to Home Screen / Dock, runs in its own window
-- **Offline shell** — last-viewed worklist renders without network
-- Workbox service worker: `NetworkFirst` for `/api/*`, `CacheFirst` for Stone WASM
-
-### Patient Portal
-- Secure share links with configurable expiry (7/14/30/90 days)
-- Optional PIN protection with server-side enforcement (httponly cookies)
-- QR code generation for easy sharing
-- Email integration — pre-filled mailto with study details and portal link
-- Mobile-first responsive design
-- Patient-friendly JPEG download option
-
-### PACS Transfers
-- Send studies to other PACS nodes via DICOM C-STORE
-- C-ECHO connectivity testing before sending
-- Real-time transfer status tracking with auto-refresh
-- Retry failed transfers with human-readable error messages
-
-### Security & Compliance
-- JWT authentication with token versioning and instant revocation
-- Session timeout with 60-second warning modal (HIPAA requirement)
-- Immutable audit log with CSV export
-- Rate limiting on login attempts
-- Content Security Policy, HSTS, X-Frame-Options headers
-- DICOMweb access restricted to clinic LAN only
+- **DICOM ingest from any modality** — MRI, CT, X-ray, ultrasound, etc.
+  via C-STORE on the LAN. AE Title `MINIPACS`, port `48924`.
+- **Two viewers** — Stone Web Viewer (default, ~1 MB WASM, cold-open
+  <1 s on a 500-slice MR) and OHIF (zero-footprint, dicom-json
+  datasource with precomputed metadata). Plus URL launchers for OsiriX,
+  RadiAnt, 3D Slicer, MicroDicom, MedDream.
+- **Live worklist** — new studies appear in the browser within seconds
+  of arrival via WebSocket fanout from Orthanc's `STABLE_STUDY` event.
+  No polling, no refresh.
+- **Patient portal** — secure share links with configurable expiry,
+  optional PIN protection, QR codes, JPEG fallback for non-DICOM viewers,
+  mobile-first responsive layout.
+- **Inter-clinic transfers** — C-STORE to other PACS nodes with C-ECHO
+  preflight, retry, and human-readable error reporting.
+- **Encapsulated PDF reports** — radiologist PDFs ride alongside the
+  study as DICOM Encapsulated PDF (SOP `1.2.840.10008.5.1.4.1.1.104.1`),
+  visible in any DICOM viewer.
+- **Progressive Web App** — installable, offline-aware shell, aggressive
+  cache of Stone WASM via Workbox.
+- **Resumable bulk import** — chunked uploads with two-level dedup, work
+  resumes after browser tab drop or network blip; long-running jobs
+  surface as a global UI pill.
+- **Security & compliance** — JWT with token versioning + instant
+  revocation, session timeout with HIPAA-style warning modal, immutable
+  audit log with CSV export, login rate limit, CSP/HSTS/X-Frame-Options.
+  DICOMweb gated to LAN only.
 
 ---
 
 ## Screenshots
 
-### Dashboard & Worklist
-
 | Dashboard | Worklist |
 |-----------|----------|
 | ![Dashboard](docs/assets/screenshots/dashboard.png) | ![Worklist](docs/assets/screenshots/worklist.png) |
 
-### Patients & Study Viewer
-
-| Patients | Study Detail + Share |
-|----------|---------------------|
-| ![Patients](docs/assets/screenshots/patients.png) | ![Study](docs/assets/screenshots/study-share.png) |
-
-### Patient Sharing
-
-| QR Code + Link | Patient Portal |
+| Study + Share | Patient Portal |
 |---------------|----------------|
-| ![QR](docs/assets/screenshots/share-qr.png) | ![Portal](docs/assets/screenshots/patient-portal.png) |
-
-### Transfers & Shares
-
-| Transfers | Patient Shares |
-|-----------|---------------|
-| ![Transfers](docs/assets/screenshots/transfers.png) | ![Shares](docs/assets/screenshots/shares.png) |
-
-### Admin
-
-| PACS Nodes | Settings — External Viewers |
-|------------|---------------------------|
-| ![PACS](docs/assets/screenshots/pacs-nodes.png) | ![Viewers](docs/assets/screenshots/settings-viewers.png) |
-
-### Dark Mode
+| ![Study](docs/assets/screenshots/study-share.png) | ![Portal](docs/assets/screenshots/patient-portal.png) |
 
 | Patients (Dark) | Audit Log |
 |----------------|-----------|
@@ -125,124 +85,58 @@ Solo and small clinics pay $150–$2,000/month for cloud PACS solutions that are
 
 ---
 
-## Zero Cost Infrastructure
-
-MiniPACS is designed to run on hardware you already own. No cloud subscriptions, no per-study fees, no vendor lock-in.
-
-| What you need | What it costs |
-|---------------|---------------|
-| Any Windows PC in your clinic | **$0** — use existing hardware |
-| Docker (runs inside WSL2 Ubuntu) | **Free** |
-| Cloudflare Tunnel for HTTPS access | **Free** (included in free CF plan) |
-| Domain name | **Free subdomain** on your existing domain, or ~$10/yr |
-| SSL/TLS certificates | **Free** — Cloudflare handles it |
-| DICOM storage | **Your own disk** — 2 TB SSD recommended |
-| Backups | **Automated** — built-in cron script |
-
-**Compare:** cloud PACS solutions charge $150–$2,000/month. MiniPACS: **$0/month**.
-
----
-
 ## Architecture
 
 ```
-                    Internet                                   Clinic LAN
-                       │                                           │
-         ┌─────────────┴──────────────┐          ┌────────────────┴─────────┐
-         │                            │          │                          │
-   [Doctors/Patients]          [Other clinics]   │  [MRI / CT / X-ray]      │
-         │                       │               │         │                │
-         │ HTTPS                 │ C-STORE       │         │ C-STORE        │
-         ▼                       │               │         ▼                │
-   [Cloudflare edge]              │               │   LAN :48924             │
-         │ CF Tunnel              │               │         │                │
-         │ (outbound-only)        │               │         │                │
-         ▼                       ▼               │         │                │
-┌─── Docker Compose (on clinic PC) ────────────────────────┤                │
-│                                                          │                │
-│  cloudflared  ──►  nginx :80 / :443 (HTTP/2) ◄───────────┤  (split-horizon│
-│                      │                                    │    DNS via    │
-│                      │   React PWA (Vite + Workbox SW)    │    UniFi)     │
-│                      │   /api/     ──►  FastAPI backend  │                │
-│                      │   /api/ws/  ──►  WebSocket        │                │
-│                      │   /stone-*  ──►  Stone Viewer     │                │
-│                      │   /ohif/    ──►  OHIF plugin      │                │
-│                      │   /dicom-web/                     │                │
-│                      │          │                        │                │
-│       ┌──────────────┴──────────┴───────┐                │                │
-│       ▼                      ▼           ▼                │                │
-│   [backend]            [redis cache]   [orthanc PACS]◄───┼── :48924 ◄─────┘
-│       │                  (QIDO / WS     │   │             │
-│       │ asyncpg           fanout)       │   └── DICOM files on disk (SSD)
-│       ▼                                  ▼             │
-│    [postgres] ◄────── shared DB ───── Orthanc index    │
-│    (Orthanc + MiniPACS tables, disjoint names)         │
-└────────────────────────────────────────────────────────┘
+                Internet                              Clinic LAN
+                    │                                      │
+       ┌────────────┴────────────┐         ┌──────────────┴────────┐
+       │                         │         │                       │
+ [Doctors / Patients]      [Other PACS]    │   [MRI / CT / X-ray]  │
+       │                       │           │           │           │
+       │ HTTPS                 │ C-STORE   │           │ C-STORE   │
+       ▼                       │           │           ▼           │
+ [Cloudflare edge]              │           │     LAN :48924        │
+       │ CF Tunnel              │           │           │           │
+       │ (outbound only)        │           │           │           │
+       ▼                       ▼           │           │           │
+┌── Docker Compose (single host) ──────────────────────┤           │
+│                                                      │           │
+│  cloudflared ──► nginx :80/:443 (HTTP/2) ◄───────────┤           │
+│                    │                                  │           │
+│                    │  React PWA  ──► /api/    ──► FastAPI        │
+│                    │              ──► /api/ws/ ──► WebSocket     │
+│                    │              ──► /stone-* ──► Stone Viewer  │
+│                    │              ──► /ohif/   ──► OHIF plugin   │
+│                    │              ──► /dicom-web/                │
+│                    │                                  │           │
+│       ┌────────────┴───────┐                          │           │
+│       ▼                    ▼                          ▼           │
+│   [backend]          [redis cache]              [orthanc PACS] ◄──┴── :48924
+│       │              (QIDO / WS)                       │
+│       │ asyncpg                                        │
+│       ▼                                                ▼
+│   [postgres] ◄────── shared DB ─────── Orthanc index + DICOM files on disk
+└──────────────────────────────────────────────────────────────────────────
 ```
 
-Six containers, one host, one `pg_dump` for backup. See
-[docs/architecture.md](docs/architecture.md) for the full breakdown —
-request paths, caching hierarchy, auth surfaces, storage layout.
-
-### Stack at a glance
+Six containers, one host, one backup artefact. Full breakdown in
+[`docs/architecture.md`](docs/architecture.md).
 
 | Container | Image | Role |
 |---|---|---|
-| `postgres` | `postgres:16-alpine` | Shared index — **both** Orthanc and MiniPACS backend tables |
-| `orthanc` | `orthancteam/orthanc` | DICOM ingest + DICOMweb + Stone + OHIF + Python plugin (thumbs, live-worklist events) |
-| `redis` | `redis:7-alpine` | QIDO cache (30 s fresh / 600 s stale), graceful memory fallback |
-| `backend` | python:3.12 + FastAPI + asyncpg | Auth, REST, WebSocket fanout, audit log |
-| `frontend` | node build → nginx:alpine | React SPA (PWA), reverse proxy, LAN-HTTPS listener |
+| `postgres` | `postgres:16-alpine` | Shared index — Orthanc + MiniPACS tables, disjoint names |
+| `orthanc` | `orthancteam/orthanc` | DICOM ingest, DICOMweb, Stone, OHIF, Python plugin (thumbs + WS events) |
+| `redis` | `redis:7-alpine` | QIDO cache, 30 s fresh / 600 s stale, memory fallback |
+| `backend` | `python:3.12` + FastAPI + asyncpg | Auth, REST, WebSocket fanout, audit log |
+| `frontend` | node build → `nginx:alpine` | React SPA (PWA), reverse proxy, LAN-HTTPS listener |
 | `cloudflared` | `cloudflare/cloudflared` | Outbound CF Tunnel for WAN access |
-
-### Key operational features
-
-- **Live worklist** — Orthanc STABLE_STUDY event → backend → WebSocket
-  broadcast → browser invalidates query + toasts. No page refresh.
-- **PWA** — installable, offline-aware shell, aggressive cache of
-  Stone WASM.
-- **Split-horizon HTTPS** — LAN clients hit `:443` directly on the
-  clinic box via HTTP/2, saving ~50–100 ms per request. WAN clients
-  go through Cloudflare Tunnel unchanged.
-- **Autostart + watchdog** — Windows Scheduled Tasks + systemd unit
-  in WSL bring the stack back automatically after a host reboot or
-  WSL crash. See [docs/wsl-autostart.md](docs/wsl-autostart.md).
-- **Shared-DB pattern** — Orthanc and MiniPACS backend co-tenant one
-  PG database with disjoint table names. One backup artefact covers
-  both applications.
-
-### Ports
-
-| Port | Bound to | Role |
-|---|---|---|
-| 443 | `0.0.0.0` | LAN HTTPS (HTTP/2, Cloudflare Origin Cert) |
-| 8080 | `127.0.0.1` only | cloudflared → nginx, HTTP (TLS already terminated at CF edge) |
-| 48924 | `0.0.0.0` | DICOM C-STORE / C-ECHO |
-
-> **No web port is directly exposed to the internet.** WAN traffic flows
-> through the outbound-only Cloudflare Tunnel; LAN traffic terminates
-> on the clinic box via the split-horizon DNS override.
-
-### Data persistence (Docker volumes)
-
-| Volume | Purpose |
-|---|---|
-| `orthanc-pg` | PostgreSQL data dir — Orthanc index + MiniPACS tables |
-| `orthanc-data` | DICOM files on disk |
-| `minipacs-thumbs` | PNG thumbnails shared between Orthanc Python plugin and backend |
-| `nginx-cache` | DICOMweb disk cache (2 GB, 7-day TTL) |
-| `minipacs-db` | Legacy SQLite — kept for migrations from pre-PG installs only |
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- **Docker** and **Docker Compose** (Docker Desktop or standalone)
-- **Cloudflare account** (free) with a domain — for production HTTPS access
-
-### Production deploy (one command)
+### Production (one command)
 
 ```bash
 git clone https://github.com/tr00x/MiniPACS.git
@@ -250,306 +144,51 @@ cd MiniPACS
 ./scripts/setup.sh
 ```
 
-The setup script will:
-1. Generate strong passwords and secrets automatically
-2. Ask for your domain and Cloudflare Tunnel token
-3. Build all Docker images
-4. Create your admin account
-5. Install daily backup cron job
-6. Start everything
-
-That's it. Open `https://your-domain.com` and log in.
+The setup script generates strong passwords, asks for your domain and
+Cloudflare Tunnel token, builds images, creates an admin user, installs
+the daily backup cron, and starts the stack. Open `https://your-domain`
+and log in.
 
 ### Local dev (self-signed TLS)
 
 ```bash
 git clone https://github.com/tr00x/MiniPACS.git
 cd MiniPACS
-cp .env.docker .env        # Edit .env with your passwords
-docker compose build
+cp .env.docker .env        # edit passwords
 docker compose up -d
 ```
 
-Open `https://localhost:48921` (accept self-signed cert warning).
+Open `https://localhost:48921` (accept the self-signed cert).
 
-### Load demo data (optional)
-
-```bash
-docker exec minipacs-backend-1 pip install pydicom numpy -q
-docker exec minipacs-backend-1 python3 seed_demo.py
-```
-
-Creates 12 patients, 18 studies, 125 DICOM images.
-
-### Common commands
+### Hot-reload frontend
 
 ```bash
-# Production
-docker compose -f docker-compose.prod.yml up -d      # Start
-docker compose -f docker-compose.prod.yml down        # Stop
-docker compose -f docker-compose.prod.yml logs -f     # Logs
-
-# Development
-docker compose up -d          # Start (dev mode with TLS)
-docker compose down           # Stop
-docker compose build          # Rebuild after code changes
+docker compose up -d              # backend + Orthanc in containers
+cd frontend && npm install && npm run dev
 ```
 
----
+Vite on `http://localhost:48925` proxies `/api/*` to the Docker backend.
 
-## Development
-
-For active frontend or backend development, you may want hot-reload instead of rebuilding Docker images on every change.
-
-### Option A: Full Docker (recommended for testing)
-
-Everything runs in Docker. To see your changes:
-
-```bash
-docker compose build          # Rebuild images
-docker compose up -d          # Restart
-```
-
-### Option B: Hybrid — Docker backend + Vite frontend (for UI development)
-
-Keep Orthanc and backend in Docker, run frontend locally with hot-reload:
-
-```bash
-# 1. Docker services are already running (docker compose up -d)
-
-# 2. Run Vite dev server
-cd frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:48925` — Vite proxies API calls to Docker backend on `:48922`.
-
-> **Note:** Port 48925 is the Vite dev server with hot-reload.
-> Port 48921 is the production nginx with pre-built static files.
-> They serve the same app, but 48925 updates instantly when you edit code.
-
-### Option C: Fully native (no Docker)
-
-```bash
-# 1. Start Orthanc via Docker
-./scripts/start-orthanc.sh
-
-# 2. Backend
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m app.create_user
-uvicorn app.main:app --host 127.0.0.1 --port 48922 --reload
-
-# 3. Frontend
-cd frontend
-npm install && npm run dev
-
-# 4. (Optional) nginx for HTTPS
-./scripts/generate-certs.sh
-./scripts/start-all.sh
-```
-
----
-
-## Configuration
-
-### Environment variables (.env)
-
-All generated automatically by `setup.sh`. Manual reference:
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `SECRET_KEY` | Yes | — | JWT signing key (auto-generated) |
-| `ORTHANC_USERNAME` | No | `orthanc` | Orthanc HTTP basic auth username |
-| `ORTHANC_PASSWORD` | Yes | — | Orthanc HTTP basic auth password (auto-generated) |
-| `ORTHANC_BASIC_AUTH` | Yes | — | Base64 of `username:password` (auto-generated) |
-| `DOMAIN` | Yes | — | Your domain (e.g. `pacs.clinic.com`) |
-| `CF_TUNNEL_TOKEN` | Yes | — | Cloudflare Tunnel token |
-| `AUTO_LOGOUT_MINUTES` | No | `15` | Session inactivity timeout |
-| `DEFAULT_SHARE_EXPIRY_DAYS` | No | `30` | Default patient share link expiry |
-
-### DICOM equipment setup
-
-Configure your imaging equipment to send studies to:
+### DICOM equipment
 
 | Parameter | Value |
 |-----------|-------|
-| **AE Title** | `MINIPACS` |
-| **IP Address** | Your server's IP |
-| **Port** | `48924` |
-| **Protocol** | DICOM C-STORE |
+| AE Title | `MINIPACS` |
+| Host | server LAN IP |
+| Port | `48924` |
+| Protocol | DICOM C-STORE |
 
 ---
 
-## Production Deployment
-
-### What `setup.sh` handles for you
-
-- [x] Strong passwords — auto-generated SECRET_KEY, ORTHANC_PASSWORD
-- [x] TLS certificates — Cloudflare Tunnel provides HTTPS (no certs to manage)
-- [x] No open ports — only DICOM 48924 needs port forward on router
-- [x] Admin user creation — interactive prompt during setup
-- [x] Daily backups — cron job at 2am, 30-day retention
-- [x] CORS origins — auto-configured from your domain
-
-### Cloudflare Tunnel setup
-
-1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels
-2. Create a tunnel, copy the token
-3. Set the tunnel's public hostname to your domain (e.g. `pacs.clinic.com`)
-4. Point it to `http://localhost:8080`
-5. Paste the token when `setup.sh` asks
-
-### Router configuration
-
-Only one port forward needed:
-
-```
-Public IP : 48924  →  Server LAN IP : 48924  (TCP)
-```
-
-This allows imaging equipment and other clinics to send DICOM studies.
-
-### Backups
-
-Built-in `scripts/backup.sh` runs daily via cron:
-- **SQLite** — safe online backup using `sqlite3.backup()`
-- **Orthanc DICOM data** — compressed tar.gz from Docker volume
-- **30-day rotation** — old backups auto-deleted
-- **Logs** — `backups/backup.log`
-
-Manual backup:
-```bash
-./scripts/backup.sh
-```
-
-### Storage planning
-
-| Modality | Size per study | Daily volume (5-20 studies) |
-|----------|---------------|----------------------------|
-| MRI | 50–500 MB | 250 MB – 10 GB |
-| CT | 100–800 MB | 500 MB – 16 GB |
-| X-ray | 10–30 MB | 50 – 600 MB |
-| Ultrasound | 5–50 MB | 25 – 1000 MB |
-
-**Recommendation:** 2 TB SSD minimum, plan for ~500 GB – 1.5 TB per year.
-
----
-
-## Project Structure
-
-```
-minipacs/
-├── docker-compose.yml            # Full stack orchestration
-├── .env.docker                   # Environment template
-├── .env                          # Your configuration (git-ignored)
-│
-├── backend/
-│   ├── Dockerfile                # python:3.12-slim + FastAPI
-│   ├── app/
-│   │   ├── main.py               # FastAPI app, lifespan, routers
-│   │   ├── config.py             # pydantic-settings
-│   │   ├── database.py           # SQLite schema + migrations
-│   │   ├── services/orthanc.py   # Orthanc API client (httpx)
-│   │   ├── routers/              # 12 routers (~50 endpoints)
-│   │   └── middleware/audit.py   # Immutable audit logging
-│   └── seed_demo.py              # Demo data generator
-│
-├── frontend/
-│   ├── Dockerfile                # node build → nginx:alpine
-│   └── src/
-│       ├── pages/                # 13 page components
-│       ├── components/           # shadcn/ui + custom components
-│       └── lib/                  # API client, auth, DICOM utils
-│
-├── orthanc/
-│   ├── orthanc.json              # Native Orthanc config
-│   └── orthanc-docker.json       # Docker Orthanc config
-│
-├── nginx/
-│   ├── nginx.conf                # Native nginx config
-│   ├── nginx-docker.conf         # Docker nginx (dev, with TLS)
-│   └── nginx-prod.conf           # Docker nginx (prod, HTTP for CF Tunnel)
-│
-├── ohif-dist/                    # Pre-built OHIF Viewer
-├── ohif-config/minipacs.js       # OHIF white-label config
-│
-└── scripts/
-    ├── setup.sh                  # One-command production setup
-    ├── backup.sh                 # Automated daily backups
-    ├── start-all.sh              # Native full-stack launcher
-    ├── start-orthanc.sh          # Docker Orthanc launcher
-    └── generate-certs.sh         # Self-signed TLS cert generator
-```
-
----
-
-## API Overview
-
-| Endpoint Group | Routes | Description |
-|---------------|--------|-------------|
-| `/api/auth` | 4 | Login, logout, refresh, me |
-| `/api/patients` | 3 | List (paginated), detail, full-bundle aggregate |
-| `/api/studies` | 6 | List (filtered), detail, full-bundle aggregate, download, series |
-| `/api/transfers` | 3 | Send, retry, history |
-| `/api/shares` | 4 | Create, update, revoke, list |
-| `/api/pacs-nodes` | 5 | CRUD + C-ECHO test |
-| `/api/reports` | 3 | Create, list, delete |
-| `/api/settings` | 3 | Get, update, public (no auth) |
-| `/api/viewers` | 4 | CRUD for external viewers |
-| `/api/users` | 4 | CRUD + token revocation |
-| `/api/audit-log` | 1 | Filtered, paginated log |
-| `/api/stats` | 2 | Dashboard stats + system health |
-| `/api/dashboard` | 1 | Aggregate — stats + system health + recent transfers + active shares in one call |
-| `/api/boot` | 1 | Aggregate — user + settings + viewers + pacs-nodes (seeds React Query on login) |
-| `/api/ws/studies` | 1 | WebSocket — live worklist feed (new-study broadcasts on Orthanc STABLE_STUDY) |
-| `/api/internal/events` | 1 | Shared-secret endpoint for Orthanc Python plugin → backend notifications |
-| `/api/patient-portal` | 5 | Public: view, download, PIN verify |
-
----
-
-## Performance Tuning
-
-Layered caching so slow-disk fallback is the exception, not the rule.
-Full hierarchy with ASCII in [docs/architecture.md](docs/architecture.md).
-
-| Layer | Setting | Why |
-|-------|---------|-----|
-| Browser | Workbox service worker — `NetworkFirst` for `/api/*`, `CacheFirst` for Stone WASM | Offline shell + repeat study opens skip the network |
-| Browser | React Query cache + hover-prefetch + post-login warmup of dashboard/worklist | Click → page paints instantly, login → worklist feels zero-latency |
-| nginx | `proxy_cache` for `/dicom-web/` (2 GB × 7 days) + upstream keepalive 32 | Second viewer open of a study hits nginx, not Orthanc |
-| nginx | CORS preflight cached 24 h (`add_header Access-Control-Max-Age`) + FastAPI `CORSMiddleware max_age=86400` | Browsers stop OPTIONS-ing before every `/api/` call |
-| nginx (LAN path) | `listen 443 ssl; http2 on;` with CF Origin Cert | HTTP/2 multiplex for Stone metadata/frame bursts, ~50–100 ms RTT saved vs WAN path |
-| Backend | **Redis** QIDO cache (30 s fresh / 600 s stale) on `find_studies` / `find_patients` | Stale-while-error preserves worklist when Orthanc stalls; graceful memory fallback if Redis disappears |
-| Backend | In-process aggregate cache on `/api/studies/{id}/full` (15 s TTL) | Back-button / re-open returns from RAM |
-| Backend | `asyncpg.Pool` (2–8) + httpx pool `max_connections=100`, keepalive 50, TCP+auth prewarm at boot | Zero connection setup on the hot path |
-| Backend | **WebSocket fanout** on `/api/ws/studies` — Orthanc STABLE_STUDY triggers query invalidation + toast | Worklist reflects new scans within seconds, no polling |
-| Backend | `orjson` default response class (5–10× faster JSON serialize) | Large worklist responses serialize in microseconds |
-| Frontend | Route-level `lazy()` + Vite `manualChunks` + compressed `.gz` assets served via `gzip_static` | Smaller initial bundle, warm vendors cached, no on-the-fly gzip cost |
-| Orthanc | `ExtraMainDicomTags` with the OHIF-required tag set (`Rows`, `PixelSpacing`, `ImagePositionPatient`, `WindowCenter`, …) | Per-series metadata resolved from the PG index — no disk reads, no 100 s CF Tunnel timeouts |
-| Orthanc | `SeriesMetadata: "MainDicomTags"`, `StudiesMetadata: "Full"`, `SeriesMetadataCacheSize: 30000` | First open caches metadata as an attachment; subsequent opens are index-only |
-| Orthanc | `HttpThreadsCount: 50` (from 10) + `SQLiteCacheSize: 1.5 GB` + `MmapSize: 2 GB` | Wider concurrency, index fully resident in RAM |
-| Orthanc Python plugin | Thumbnail pre-generator — 2/s rate limit + one-shot backfill at boot + atomic writes | Worklist grid paints from disk, viewer never pays preview cost twice |
-
-After adding or changing `ExtraMainDicomTags`, call `/studies/{id}/reconstruct`
-on every study (Orthanc plugin does this asynchronously via the
-`ConcurrentJobs` queue) to backfill the new tags into the PG index.
-
----
-
-## Documentation
-
-Detailed guides in [`docs/`](docs/):
+## Docs
 
 | Doc | For |
 |---|---|
-| [`architecture.md`](docs/architecture.md) | How every piece fits — services, request paths, caching, auth, storage |
-| [`wsl-autostart.md`](docs/wsl-autostart.md) | Windows Scheduled Tasks + WSL systemd unit for auto-recovery |
-| [`split-horizon-https.md`](docs/split-horizon-https.md) | Real TLS on LAN — CF Origin Cert, UniFi DNS override, portproxy :443 |
-| [`prod-hardening.md`](docs/prod-hardening.md) | Secret rotation, admin password, firewall, backups |
-| [`phase4-experimental.md`](docs/phase4-experimental.md) | HTJ2K progressive rendering + multi-tier storage POC procedures |
+| [`docs/architecture.md`](docs/architecture.md) | Request paths, caching layers, auth surfaces, storage, schema boundary |
+| [`docs/prod-hardening.md`](docs/prod-hardening.md) | Secret rotation, admin password, firewall, backups |
+| [`docs/split-horizon-https.md`](docs/split-horizon-https.md) | Real TLS on LAN — CF Origin Cert, UniFi DNS override, portproxy `:443` |
+| [`docs/wsl-autostart.md`](docs/wsl-autostart.md) | Windows Scheduled Tasks + WSL systemd unit for auto-recovery |
+| [`scripts/README.md`](scripts/README.md) | Operational runbooks — bulk PDF inject, prewarm, backup, secret rotation |
 | [`CHANGELOG.md`](CHANGELOG.md) | Deploy-wave history (no semver — `master` is the product) |
 
 ---
@@ -558,12 +197,12 @@ Detailed guides in [`docs/`](docs/):
 
 **Business Source License 1.1** — see [LICENSE](LICENSE).
 
-- You can view, fork, and modify the code
-- Non-commercial and educational use is permitted
+- View, fork, modify
+- Non-commercial and educational use permitted
 - Commercial use requires a separate license
-- Becomes Apache 2.0 on April 12, 2030
+- Converts to Apache 2.0 on April 12, 2030
 
-For commercial licensing inquiries: **tr00x@proton.me**
+Commercial licensing: **tr00x@proton.me**
 
 ---
 

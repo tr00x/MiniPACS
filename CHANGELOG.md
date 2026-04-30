@@ -43,10 +43,6 @@ resilience.
   `python -m app.change_password <user> <pwd>` bumps token_version so
   all sessions invalidate. See
   [docs/prod-hardening.md](docs/prod-hardening.md).
-- **Phase 4 POC runbook.** [docs/phase4-experimental.md](docs/phase4-experimental.md)
-  codifies the procedure for enabling HTJ2K progressive rendering and
-  the orthanc-advanced-storage multi-tier plugin — with explicit
-  success/failure criteria and rollback for each.
 - **Architecture document.** [docs/architecture.md](docs/architecture.md)
   — request paths, services, storage layout, ports, caching hierarchy,
   schema boundary, auth surfaces, durability.
@@ -143,6 +139,3 @@ transfers between PACS nodes, audit log, external viewer launcher,
 admin surfaces. Orthanc + FastAPI + React stack, originally on
 SQLite for the application state. Development done in a flurry,
 migrated to this codebase under BSL 1.1.
-
-See `docs/superpowers/specs/2026-04-22-minipacs-rocket-design.md` for
-the "why" behind the April rocket-design rollout.
