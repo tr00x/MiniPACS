@@ -5,14 +5,13 @@ Usage:
 
 Bumps `token_version` so every outstanding JWT for this user stops being
 accepted on the next request — the user is forced to re-login with the
-new password. Safe to run in production during business hours; only the
-affected user sees a session drop.
+new password.
 """
 import asyncio
 import sys
 
 from app.db import init_pool, pool, close_pool
-from app.services.auth import hash_password
+from app.services.auth import hash_password, validate_password_strength, PasswordPolicyError
 
 
 async def main() -> None:
@@ -21,6 +20,12 @@ async def main() -> None:
         sys.exit(1)
 
     username, new_password = sys.argv[1], sys.argv[2]
+
+    try:
+        validate_password_strength(new_password)
+    except PasswordPolicyError as e:
+        print(f"Refused: {e}", file=sys.stderr)
+        sys.exit(3)
 
     await init_pool()
     try:

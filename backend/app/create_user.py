@@ -6,7 +6,7 @@ import asyncpg
 
 from app.db import init_pool, pool, close_pool
 from app.database import init_db
-from app.services.auth import hash_password
+from app.services.auth import hash_password, validate_password_strength, PasswordPolicyError
 
 
 async def main():
@@ -15,6 +15,12 @@ async def main():
         sys.exit(1)
 
     username, password = sys.argv[1], sys.argv[2]
+
+    try:
+        validate_password_strength(password)
+    except PasswordPolicyError as e:
+        print(f"Refused: {e}", file=sys.stderr)
+        sys.exit(2)
 
     await init_pool()
     try:

@@ -87,4 +87,10 @@ NOTES:
   * INTERNAL_EVENT_TOKEN — no user impact. Backend + Orthanc plugin must
     both restart to pick up the new value; a `restart backend orthanc`
     is enough, full `down` not required.
+  * BACKUP_PASSPHRASE — INTENTIONALLY NOT ROTATED HERE. Rotating it would
+    leave existing encrypted backups undecryptable. To rotate manually:
+      1. Decrypt every retained pg-*.dump.enc and orthanc-*.tar.gz.enc
+         with the OLD passphrase (openssl enc -d ... -in <file>).
+      2. Re-encrypt with the NEW passphrase.
+      3. Update BACKUP_PASSPHRASE in .env (chmod 600).
 MSG

@@ -37,7 +37,24 @@ else
   ORTHANC_PASSWORD=$(gen 24 32)
   POSTGRES_PASSWORD=$(gen 24 32)
   INTERNAL_EVENT_TOKEN=$(openssl rand -hex 32)
+  BACKUP_PASSPHRASE=$(openssl rand -base64 32 | tr -d '/+=\n' | head -c 40)
   ORTHANC_BASIC_AUTH=$(printf 'orthanc:%s' "$ORTHANC_PASSWORD" | base64 | tr -d '\n')
+
+  cat <<'BAA_NOTICE'
+
+  ┌─ HIPAA notice ──────────────────────────────────────────────────────┐
+  │                                                                     │
+  │  If you are deploying for a US covered entity:                      │
+  │                                                                     │
+  │   • Cloudflare Tunnel on the FREE plan is NOT covered by a BAA.     │
+  │     Sign one before routing PHI through it (CF Enterprise, or use   │
+  │     a different tunnel that offers a BAA).                          │
+  │   • Enable full-disk encryption on this host (BitLocker / LUKS).    │
+  │   • See docs/hipaa-notes.md for the full clinic checklist.          │
+  │                                                                     │
+  └─────────────────────────────────────────────────────────────────────┘
+
+BAA_NOTICE
 
   read -rp "Domain (e.g. pacs.your-clinic.example): " DOMAIN
   read -rp "Cloudflare Tunnel token: " CF_TUNNEL_TOKEN
@@ -50,6 +67,9 @@ ORTHANC_PASSWORD=$ORTHANC_PASSWORD
 ORTHANC_BASIC_AUTH=$ORTHANC_BASIC_AUTH
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 INTERNAL_EVENT_TOKEN=$INTERNAL_EVENT_TOKEN
+# AES-256 passphrase for backups. DO NOT rotate without re-encrypting
+# the existing backup pairs — see scripts/restore-backup.sh.
+BACKUP_PASSPHRASE=$BACKUP_PASSPHRASE
 DOMAIN=$DOMAIN
 CF_TUNNEL_TOKEN=$CF_TUNNEL_TOKEN
 AUTO_LOGOUT_MINUTES=15

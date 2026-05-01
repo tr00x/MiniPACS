@@ -8,7 +8,50 @@ kept deliberately thin — we do not cut numbered releases; every commit on
 
 ---
 
-## Unreleased — 2026-04-24 session (7 commits)
+## Unreleased — 2026-05-01 — HIPAA technical safeguards
+
+**Theme:** close the gap between the HIPAA badge and what the code actually
+enforces. Sources: HIPAA Security Rule §164.312 + NIST 800-63B.
+
+### Added
+
+- **Password complexity policy** — `app/services/auth.validate_password_strength()`
+  rejects passwords shorter than 12 characters or using fewer than 3 of
+  4 character classes (lower, upper, digit, special). Wired into
+  `create_user.py`, `change_password.py`, and the `POST /api/users` admin
+  endpoint. Tests in `backend/tests/test_password_policy.py`.
+- **Encrypted backups** — `scripts/backup.sh` now wraps both `pg_dump`
+  and the DICOM tar in `openssl enc -aes-256-cbc -pbkdf2 -iter 100000`
+  using `BACKUP_PASSPHRASE` from `.env`. Refuses to write plaintext PHI
+  if the passphrase is missing.
+- **Restore script** — `scripts/restore-backup.sh <YYYYMMDD_HHMM>`
+  decrypts, calls `pg_restore --clean --if-exists`, and replaces the
+  DICOM volume contents. Interactive YES guard.
+- **`docs/hipaa-notes.md`** — implementation matrix mapping every
+  §164.312 technical safeguard to MiniPACS code, plus the clinic-side
+  checklist (FDE, Cloudflare BAA, off-site backup, MFA roadmap, etc.).
+- **`docs/prod-hardening.md` §6 + §7** — full-disk encryption guidance
+  (BitLocker / LUKS) and the Cloudflare Tunnel + BAA caveat called out
+  in a `[!WARNING]` callout.
+
+### Changed
+
+- **`scripts/setup.sh`** generates `BACKUP_PASSPHRASE` (40 chars,
+  `openssl rand -base64`) and writes it into `.env`. Prints a HIPAA
+  notice block before prompting for domain + CF token, covering the
+  BAA requirement and the FDE requirement.
+- **`scripts/rotate-secrets.sh`** documents that `BACKUP_PASSPHRASE`
+  is intentionally NOT rotated (would orphan existing encrypted
+  backups) and lists the manual rotation procedure.
+- **`.env.docker`** template adds `BACKUP_PASSPHRASE` placeholder with
+  inline guidance.
+- **README HIPAA badge** now links to `docs/hipaa-notes.md` instead of
+  the in-page anchor — honest disclosure of what's implemented vs what
+  remains the clinic's responsibility.
+
+---
+
+## 2026-04-24 session (7 commits)
 
 **Theme:** backend engine swap, live-data pipes, LAN HTTPS, operational
 resilience.

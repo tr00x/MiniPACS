@@ -12,7 +12,7 @@
 [![Issues](https://img.shields.io/github/issues/tr00x/MiniPACS?style=flat-square)](https://github.com/tr00x/MiniPACS/issues)
 
 [![DICOM](https://img.shields.io/badge/DICOM-compatible-0066B3?style=flat-square)](https://www.dicomstandard.org/)
-[![HIPAA](https://img.shields.io/badge/HIPAA-ready-2EA44F?style=flat-square)](#security--compliance)
+[![HIPAA notes](https://img.shields.io/badge/HIPAA-implementation_notes-2EA44F?style=flat-square)](docs/hipaa-notes.md)
 [![React](https://img.shields.io/badge/React-PWA-61DAFB?style=flat-square&logo=react&logoColor=white)](frontend/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-asyncpg-009688?style=flat-square&logo=fastapi&logoColor=white)](backend/)
 [![Orthanc](https://img.shields.io/badge/Orthanc-DICOM-FF6B35?style=flat-square)](https://www.orthanc-server.com/)
@@ -247,14 +247,24 @@ Stone WASM. Add to Home Screen / Dock and run in its own window.
 </details>
 
 <details id="security--compliance">
-<summary><b>Security & compliance</b> — JWT, audit, rate limit, headers</summary>
+<summary><b>Security & compliance</b> — JWT, audit, password policy, encrypted backups</summary>
 
-- JWT with `token_version` for **O(1) instant revocation**
-- Session timeout with 60-second warning modal (HIPAA-style)
-- Immutable audit log with CSV export
+- JWT with `token_version` for **O(1) instant session revocation**
+- bcrypt password hashes; **12+ char policy** with 3-of-4 character classes
+  enforced at every entry point (`create_user`, `change_password`, admin API)
+- Auto-logoff (default 15 min) with 60-second warning modal — HIPAA §164.312(a)(2)(iii)
+- Immutable `audit_log` (every router action, user_id + IP + UTC ts) with CSV export
 - Login rate limit
-- CSP, HSTS, X-Frame-Options, X-Content-Type-Options
+- AES-256-CBC encrypted backups (openssl + PBKDF2, 100k iterations) — HIPAA §164.312(a)(2)(iv)
+- TLS everywhere — Cloudflare Tunnel for WAN, CF Origin Cert + HTTP/2 for LAN
 - DICOMweb gated to LAN only
+- CSP, HSTS, X-Frame-Options, X-Content-Type-Options
+
+> [!IMPORTANT]
+> See [`docs/hipaa-notes.md`](docs/hipaa-notes.md) for the full HIPAA
+> Security Rule (45 CFR §164.312) implementation matrix, the clinic-side
+> checklist (FDE, BAA with Cloudflare, off-site backup), and known
+> roadmap items (MFA, DICOMweb access logging).
 
 </details>
 
@@ -459,6 +469,7 @@ backend on `:48922`. Hot-reload on every save.
 | [`docs/prod-hardening.md`](docs/prod-hardening.md) | Secret rotation, admin password, firewall, backups |
 | [`docs/split-horizon-https.md`](docs/split-horizon-https.md) | Real TLS on LAN — CF Origin Cert, UniFi DNS override, portproxy `:443` |
 | [`docs/wsl-autostart.md`](docs/wsl-autostart.md) | Windows Scheduled Tasks + WSL systemd unit for auto-recovery |
+| [`docs/hipaa-notes.md`](docs/hipaa-notes.md) | HIPAA Security Rule implementation matrix + clinic-side checklist |
 | [`CHANGELOG.md`](CHANGELOG.md) | Deploy-wave history (no semver — `master` is the product) |
 
 ---

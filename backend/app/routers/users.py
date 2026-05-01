@@ -5,7 +5,7 @@ from app.db import PgConnection
 
 from app.database import get_db
 from app.routers.auth import get_current_user
-from app.services.auth import hash_password
+from app.services.auth import hash_password, validate_password_strength, PasswordPolicyError
 from app.models.auth import LoginRequest
 from app.middleware.audit import log_audit
 
@@ -25,6 +25,10 @@ async def create_user(
     db: PgConnection = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    try:
+        validate_password_strength(body.password)
+    except PasswordPolicyError as e:
+        raise HTTPException(400, str(e))
     try:
         cursor = await db.execute(
             "INSERT INTO users (username, password_hash) VALUES (?, ?) RETURNING id",

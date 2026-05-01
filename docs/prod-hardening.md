@@ -83,19 +83,71 @@ inbound (`New-NetFirewallRule -DisplayName "Block MiniPACS dev ports"
 
 ## 5. Backups
 
-`scripts/backup.sh` updated to use `pg_dump` on the shared `orthanc`
-database (covers both Orthanc index and MiniPACS backend tables after
-the PG migration). Cron entry:
+`scripts/backup.sh` runs `pg_dump` on the shared `orthanc` database
+(covers both Orthanc index and MiniPACS backend tables) and tars the
+DICOM volume. **Both artefacts are AES-256-CBC encrypted** with
+`BACKUP_PASSPHRASE` (openssl + PBKDF2, 100k iterations). HIPAA
+§164.312(a)(2)(iv) — encryption of PHI at rest.
 
 ```cron
 0 2 * * * /home/pacs-user/minipacs/scripts/backup.sh \
     >> /home/pacs-user/minipacs/backups/backup.log 2>&1
 ```
 
-Off-site target for HIPAA 3-2-1 compliance still pending — see
-`project_phase2_deployment.md` in memory.
+Restore: `scripts/restore-backup.sh <YYYYMMDD_HHMM>`.
 
-## 6. Post-hardening smoke
+> [!CAUTION]
+> `BACKUP_PASSPHRASE` is **not** rotated by `rotate-secrets.sh` — doing
+> so would orphan every retained backup. To rotate, decrypt every
+> retained pair with the old passphrase, re-encrypt with the new one,
+> then update `.env`.
+
+Off-site target (HIPAA 3-2-1) is the clinic's responsibility. Encrypted
+artefacts can be safely pushed to any "dumb" object store (S3, B2,
+remote NFS) since the encryption key never leaves the host. Suggested:
+`rclone copy ~/minipacs/backups/ remote:bucket/minipacs/` from cron at
+03:00 (an hour after the encryption job).
+
+## 6. Encryption at rest — full-disk
+
+Backups are encrypted; the live volumes are not. Enable host-level
+full-disk encryption so the DICOM data dir, PG data dir, swap, and
+any temp scratch are covered.
+
+- **Windows host**: BitLocker on the volume holding `~\minipacs\` and
+  the WSL VHDX. With WSL2, the VHDX inherits the host's encryption.
+- **Linux host**: LUKS on the data partition. Set up at install time;
+  retrofitting requires a full backup-and-restore cycle.
+
+Verify:
+
+```bash
+# Linux
+lsblk -o NAME,FSTYPE,MOUNTPOINT,UUID  # look for crypto_LUKS on the data part
+# Windows (PowerShell, admin)
+manage-bde -status C:
+```
+
+## 7. Cloudflare Tunnel + BAA caveat
+
+> [!WARNING]
+> If you are deploying for a US covered entity and using Cloudflare
+> Tunnel for WAN access, **you must sign a BAA with Cloudflare**.
+> Free / Pro / Business plans **do not include a BAA** — only
+> Cloudflare Enterprise does. Running PHI through CF without a BAA
+> is a HIPAA violation regardless of what MiniPACS does locally.
+
+Practical options if Enterprise pricing is out of reach:
+
+- Run LAN-only — disable `cloudflared` in `docker-compose.prod.yml`,
+  keep the split-horizon HTTPS path on the LAN VLAN.
+- Replace with a BAA-covered alternative: Tailscale Business + their
+  BAA, your own VPN concentrator, etc.
+
+See [`docs/hipaa-notes.md`](hipaa-notes.md) for the full HIPAA
+implementation matrix and the clinic-side checklist.
+
+## 8. Post-hardening smoke
 
 ```bash
 # Public edge
