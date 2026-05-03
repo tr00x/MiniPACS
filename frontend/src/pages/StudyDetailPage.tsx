@@ -106,6 +106,7 @@ export function StudyDetailPage() {
   const [sharePin, setSharePin] = useState("");
   // Download dialog
   const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  const [downloadingReport, setDownloadingReport] = useState(false);
   // Burn ISO dialog
   const [burnDialogOpen, setBurnDialogOpen] = useState(false);
   const [burning, setBurning] = useState(false);
@@ -271,6 +272,34 @@ export function StudyDetailPage() {
     } finally {
       setDownloading(false);
       setDownloadProgress({ loaded: 0, total: null });
+    }
+  };
+
+  const handleDownloadReport = async () => {
+    setDownloadingReport(true);
+    try {
+      const res = await api.get(`/studies/${id}/reports`, { responseType: "blob", timeout: 60000 });
+      const cd = res.headers?.["content-disposition"] as string | undefined;
+      const m = cd?.match(/filename\s*=\s*"?([^";]+)"?/i);
+      // Default extension matches the response media type — single PDF vs ZIP.
+      const fallbackExt = (res.headers?.["content-type"] as string | undefined)?.includes("zip") ? "zip" : "pdf";
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = m?.[1] ?? `report-${id}.${fallbackExt}`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success("Report download started");
+    } catch (err: unknown) {
+      // 404 = study has no encapsulated PDF report — call it out clearly.
+      const e = err as { response?: { status?: number } };
+      if (e?.response?.status === 404) {
+        toast.error("No report attached to this study");
+      } else {
+        toast.error(getErrorMessage(err, "Failed to download report"));
+      }
+    } finally {
+      setDownloadingReport(false);
     }
   };
 
@@ -463,6 +492,12 @@ export function StudyDetailPage() {
               ? <Loader2 className="h-4 w-4 animate-spin" />
               : <Disc className="h-4 w-4" />}
             {burnLabel}
+          </Button>
+          <Button variant="outline" onClick={handleDownloadReport} disabled={downloadingReport} className="gap-2">
+            {downloadingReport
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <FileText className="h-4 w-4" />}
+            {downloadingReport ? "Fetching report..." : "Download report"}
           </Button>
           {viewers.map((v) => (
             <Button

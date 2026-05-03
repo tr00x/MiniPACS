@@ -19,7 +19,7 @@ from stream_zip import async_stream_zip, ZIP_64
 
 from app.database import get_db
 from app.routers.auth import get_current_user
-from app.services import iso_builder, orthanc
+from app.services import iso_builder, orthanc, study_reports
 from app.middleware.audit import log_audit
 
 router = APIRouter(prefix="/api/studies", tags=["studies"])
@@ -545,6 +545,59 @@ async def burn_study_iso(
         media_type="application/x-iso9660-image",
         headers={"Content-Disposition": f'attachment; filename="study-{safe_label}.iso"'},
         background=BackgroundTask(_cleanup),
+    )
+
+
+@router.get("/{study_id}/reports")
+async def download_study_reports(
+    study_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Return embedded radiologist PDF reports for the study.
+
+    Behaviour:
+      * 404 — study has no encapsulated PDF reports
+      * application/pdf — exactly one report (most common case)
+      * application/zip — two or more reports, named report-N.pdf
+
+    The full DICOM archive (including the encapsulated PDF instances as
+    .dcm files) is still available via /studies/{id}/download. This
+    endpoint is the patient-friendly path: open the report directly in
+    any PDF reader without a DICOM viewer.
+    """
+    pdfs = await study_reports.collect_study_pdf_reports(study_id)
+    if not pdfs:
+        raise HTTPException(status_code=404, detail="no PDF report attached to this study")
+
+    try:
+        meta = await orthanc.get_study(study_id)
+        accession = (meta.get("MainDicomTags") or {}).get("AccessionNumber") if meta else None
+    except Exception:
+        accession = None
+    safe_label = _sanitize_filename(accession or study_id[:8])
+
+    await log_audit(
+        "download_study_reports", "study", study_id,
+        user_id=user["id"], ip_address=request.client.host,
+    )
+
+    if len(pdfs) == 1:
+        return Response(
+            content=pdfs[0],
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="report-{safe_label}.pdf"'},
+        )
+
+    import zipfile as _zipfile  # local — avoid module-load overhead for the 1-PDF path
+    buf = io.BytesIO()
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+        for idx, pdf in enumerate(pdfs, start=1):
+            zf.writestr(f"report-{idx}.pdf", pdf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="reports-{safe_label}.zip"'},
     )
 
 

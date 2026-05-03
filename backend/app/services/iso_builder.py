@@ -29,9 +29,13 @@ import re
 import shutil
 import tempfile
 import zipfile
+from io import BytesIO
 from pathlib import Path
 
+import pydicom
+
 from app.services import orthanc
+from app.services.pdf_extractor import extract_pdf_from_dicom, is_encapsulated_pdf
 
 _BUILD_SEM = asyncio.Semaphore(2)
 
@@ -180,10 +184,93 @@ def _extract_zip(zip_path: Path, dest: Path) -> None:
         zf.extractall(dest)
 
 
-def _write_top_level(root: Path) -> None:
+_REPORT_README_HEADER = b"""\nRadiology report
+----------------
+
+This disc also includes the radiologist's written report as a PDF
+file at the root, alongside the images. You can open it directly
+with any PDF reader (no DICOM viewer required):
+
+"""
+
+
+_REPORT_HTML_BLOCK_TEMPLATE = b"""
+  <h2>Radiologist's report</h2>
+  <p>The written report is on this disc as a PDF, ready to open with any
+  PDF reader (no DICOM viewer required):</p>
+  <ul>%s</ul>
+"""
+
+
+def _build_report_html_block(report_filenames: list[str]) -> bytes:
+    items = b"".join(
+        f'\n    <li><a href="{name}">{name}</a></li>'.encode("ascii")
+        for name in report_filenames
+    )
+    return _REPORT_HTML_BLOCK_TEMPLATE % items
+
+
+def _build_report_readme_block(report_filenames: list[str]) -> bytes:
+    lines = b"".join(f"  {name}\n".encode("ascii") for name in report_filenames)
+    return _REPORT_README_HEADER + lines
+
+
+def _write_top_level(root: Path, report_filenames: list[str] | None = None) -> None:
     (root / "autorun.inf").write_bytes(_AUTORUN_INF)
-    (root / "index.html").write_bytes(_INDEX_HTML)
-    (root / "README.txt").write_bytes(_README_TXT)
+    if report_filenames:
+        # Inject the report block right before </body> so the static
+        # viewer-link content stays intact and at the top.
+        html = _INDEX_HTML.replace(
+            b"</body>", _build_report_html_block(report_filenames) + b"\n</body>"
+        )
+        readme = _README_TXT + _build_report_readme_block(report_filenames)
+    else:
+        html = _INDEX_HTML
+        readme = _README_TXT
+    (root / "index.html").write_bytes(html)
+    (root / "README.txt").write_bytes(readme)
+
+
+def _extract_pdfs_to_root(staging: Path) -> list[str]:
+    """Walk staging/DICOM, find Encapsulated-PDF instances, copy each PDF
+    to staging/ root as report-N.pdf. Returns the filenames written, in
+    the order they were written. Order is deterministic (sorted by
+    SOPInstanceUID) so retries are idempotent.
+
+    Patients can't open encapsulated DICOM PDFs without a viewer. Surfacing
+    them at the disc root means the report is one double-click away.
+    """
+    dicom_root = staging / "DICOM"
+    if not dicom_root.exists():
+        return []
+
+    found: list[tuple[str, bytes]] = []
+    for path in sorted(dicom_root.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        try:
+            ds = pydicom.dcmread(BytesIO(data), stop_before_pixels=False)
+        except Exception:
+            continue  # not a DICOM (e.g. DICOMDIR binary, random sidecar)
+        if not is_encapsulated_pdf(ds):
+            continue
+        pdf = extract_pdf_from_dicom(data)
+        if pdf is None:
+            continue
+        sop_uid = str(getattr(ds, "SOPInstanceUID", "") or path.name)
+        found.append((sop_uid, pdf))
+
+    found.sort(key=lambda t: t[0])
+    written: list[str] = []
+    for idx, (_uid, pdf) in enumerate(found, start=1):
+        name = f"report-{idx}.pdf"
+        (staging / name).write_bytes(pdf)
+        written.append(name)
+    return written
 
 
 async def _run_xorriso(staging: Path, iso_path: Path, label: str) -> None:
@@ -220,7 +307,8 @@ async def build_study_iso(study_id: str, accession: str | None = None) -> tuple[
             await asyncio.to_thread(_extract_zip, zip_path, staging / "DICOM")
             zip_path.unlink()  # reclaim space before xorriso
 
-            _write_top_level(staging)
+            report_filenames = await asyncio.to_thread(_extract_pdfs_to_root, staging)
+            _write_top_level(staging, report_filenames=report_filenames)
 
             await _run_xorriso(staging, iso_path, _volume_label(accession, study_id))
 

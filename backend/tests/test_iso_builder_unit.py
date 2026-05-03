@@ -15,9 +15,11 @@ from app.services.iso_builder import (
     _AUTORUN_INF,
     _INDEX_HTML,
     _README_TXT,
+    _extract_pdfs_to_root,
     _volume_label,
     _write_top_level,
 )
+from app.services.pdf_encapsulator import encapsulate_pdf
 
 
 # ---------- _volume_label ----------------------------------------------------
@@ -181,6 +183,96 @@ class TestWriteTopLevel:
         (tmp_path / "autorun.inf").write_bytes(b"stale")
         _write_top_level(tmp_path)
         assert (tmp_path / "autorun.inf").read_bytes() == _AUTORUN_INF
+
+
+# ---------- _extract_pdfs_to_root --------------------------------------------
+
+
+class TestExtractPdfsToRoot:
+    """The burn-ISO disc must surface encapsulated PDF reports at the disc
+    root as `report-N.pdf`, NOT just leave them as `.dcm` files inside
+    DICOM/. Patients can't open encapsulated DICOM PDFs without a viewer.
+    """
+
+    def _stage_with_dicom_dir(self, tmp_path: Path) -> Path:
+        staging = tmp_path / "staging"
+        (staging / "DICOM").mkdir(parents=True)
+        return staging
+
+    def test_returns_empty_when_no_pdfs(self, tmp_path: Path):
+        staging = self._stage_with_dicom_dir(tmp_path)
+        # Drop a non-PDF file into DICOM/ to confirm the walker doesn't
+        # mis-classify random bytes as a PDF.
+        (staging / "DICOM" / "IM00001").write_bytes(b"\x00\x01\x02\x03" * 64)
+        out = _extract_pdfs_to_root(staging)
+        assert out == []
+        assert not list(staging.glob("report-*.pdf"))
+
+    def test_extracts_single_pdf(
+        self, tmp_path: Path, sample_pdf_bytes, sample_ctx_dicom
+    ):
+        staging = self._stage_with_dicom_dir(tmp_path)
+        encap = encapsulate_pdf(sample_pdf_bytes, sample_ctx_dicom)
+        (staging / "DICOM" / "IM00001.dcm").write_bytes(encap)
+
+        out = _extract_pdfs_to_root(staging)
+
+        assert out == ["report-1.pdf"]
+        assert (staging / "report-1.pdf").read_bytes() == sample_pdf_bytes
+
+    def test_extracts_multiple_pdfs_deterministic_order(
+        self, tmp_path: Path, sample_pdf_bytes, sample_ctx_dicom
+    ):
+        staging = self._stage_with_dicom_dir(tmp_path)
+        encap = encapsulate_pdf(sample_pdf_bytes, sample_ctx_dicom)
+        # Two distinct payloads → two distinct SOPInstanceUIDs.
+        encap2 = encapsulate_pdf(sample_pdf_bytes + b"%%EOF\n", sample_ctx_dicom)
+        # File names intentionally NOT in alpha order — output order is
+        # determined by SOPInstanceUID, not directory listing order.
+        (staging / "DICOM" / "z.dcm").write_bytes(encap)
+        (staging / "DICOM" / "a.dcm").write_bytes(encap2)
+
+        out = _extract_pdfs_to_root(staging)
+
+        assert sorted(out) == ["report-1.pdf", "report-2.pdf"]
+        # Both files exist with the right magic.
+        for name in out:
+            assert (staging / name).read_bytes().startswith(b"%PDF-")
+        # Calling twice must be idempotent — same inputs, same names.
+        out2 = _extract_pdfs_to_root(staging)
+        assert out == out2
+
+    def test_skips_non_dicom_files_silently(self, tmp_path: Path):
+        staging = self._stage_with_dicom_dir(tmp_path)
+        (staging / "DICOM" / "DICOMDIR").write_bytes(b"DICM-like-but-not")
+        (staging / "DICOM" / "subdir").mkdir()
+        (staging / "DICOM" / "subdir" / "blob").write_bytes(b"random")
+        out = _extract_pdfs_to_root(staging)
+        assert out == []
+
+
+class TestWriteTopLevelWithReports:
+    def test_no_reports_default_writes_static_bytes(self, tmp_path: Path):
+        # Backwards-compat: existing exact-content tests assume default.
+        _write_top_level(tmp_path)
+        assert (tmp_path / "README.txt").read_bytes() == _README_TXT
+        assert (tmp_path / "index.html").read_bytes() == _INDEX_HTML
+
+    def test_with_reports_appends_report_section_to_readme(self, tmp_path: Path):
+        _write_top_level(tmp_path, report_filenames=["report-1.pdf"])
+        readme = (tmp_path / "README.txt").read_bytes()
+        # Static base content still present...
+        assert b"DICOMDIR" in readme
+        # ...plus a clear pointer to the PDF report so the patient can
+        # double-click it without any viewer.
+        assert b"report-1.pdf" in readme
+        assert b"REPORT" in readme.upper()
+
+    def test_with_reports_mentions_pdf_in_index_html(self, tmp_path: Path):
+        _write_top_level(tmp_path, report_filenames=["report-1.pdf", "report-2.pdf"])
+        html = (tmp_path / "index.html").read_bytes()
+        assert b"report-1.pdf" in html
+        assert b"report-2.pdf" in html
 
 
 # ---------- module surface ---------------------------------------------------

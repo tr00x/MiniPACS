@@ -675,6 +675,14 @@ async def get_series_instances(series_id: str):
     return resp.json()
 
 
+async def get_instance_file(instance_id: str) -> bytes:
+    """Raw DICOM bytes for a single instance — used by /studies/{id}/reports
+    to extract embedded PDFs without rebuilding the whole study archive."""
+    resp = await _http().get(f"/instances/{instance_id}/file")
+    resp.raise_for_status()
+    return resp.content
+
+
 async def download_study_stream(study_id: str) -> AsyncIterator[bytes]:
     req = _http().build_request("GET", f"/studies/{study_id}/archive")
     resp = await _http().send(req, stream=True)
